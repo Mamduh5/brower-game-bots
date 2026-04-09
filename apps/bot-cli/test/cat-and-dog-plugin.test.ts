@@ -98,19 +98,26 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
       status: "landing",
       routePath: "/play/desktop/",
       hasAppRoot: true,
+      hasModeSelection: true,
+      hasTwoPlayerOption: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
-      hasInteractionStatus: false,
-      interactionStatusText: null,
-      interactionAcknowledged: false,
+      hasGameplayControls: false,
+      aimStatusText: null,
+      aimDirection: "unknown",
+      gameplayInputApplied: false,
       hasStartControl: true,
       gameplayEntered: false,
-      gameplayActionExecuted: false
+      modeSelectionExecuted: false,
+      gameplayInteractionExecuted: false
     },
     metrics: {
+      hasModeSelection: 1,
+      hasTwoPlayerOption: 1,
       hasPlayableSurface: 0,
       hasGameplayHud: 0,
-      interactionAcknowledged: 0
+      hasGameplayControls: 0,
+      gameplayInputApplied: 0
     },
     ...overrides
   };
@@ -118,7 +125,10 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
 
 const LANDING_DOM = `
 <main id="root">
-  <button id="start-game" data-testid="start-game">Start</button>
+  <div id="mode-selection" data-testid="mode-selection">
+    <button data-testid="play-vs-cpu">Play vs CPU</button>
+    <button id="play-2-player" data-testid="play-2-player" data-mode="two-player">2 Player</button>
+  </div>
 </main>
 `;
 
@@ -126,7 +136,8 @@ const GAMEPLAY_DOM = `
 <main id="root">
   <div id="player-hud" data-testid="player-hud">HP: 100</div>
   <canvas data-testid="game-canvas" width="800" height="600"></canvas>
-  <p id="interaction-status" data-testid="interaction-status">Gameplay action received</p>
+  <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+  <p id="aim-status" data-testid="aim-status">Aim: left</p>
 </main>
 `;
 
@@ -175,38 +186,34 @@ describe("cat-and-dog plugin", () => {
       status: "landing",
       routePath: "/play/desktop/",
       hasAppRoot: true,
+      hasModeSelection: true,
+      hasTwoPlayerOption: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
-      hasInteractionStatus: false,
-      interactionStatusText: null,
-      interactionAcknowledged: false,
-      hasStartControl: true,
+      hasGameplayControls: false,
+      aimStatusText: null,
+      aimDirection: "unknown",
+      gameplayInputApplied: false,
       gameplayEntered: false,
-      gameplayActionExecuted: false
+      modeSelectionExecuted: false,
+      gameplayInteractionExecuted: false
     });
 
     const actions = await session.actions(snapshot);
-    expect(actions.map((action) => action.actionId)).toEqual(["enter-gameplay"]);
+    expect(actions.map((action) => action.actionId)).toEqual(["select-two-player-mode"]);
 
-    const resolved = await session.resolveAction({ actionId: "enter-gameplay" }, snapshot);
+    const resolved = await session.resolveAction({ actionId: "select-two-player-mode" }, snapshot);
     expect(resolved).toEqual([
       {
         kind: "click",
         target: {
-          selector: "#start-game, [data-testid='start-game'], .start-game, .start-button, button[data-action='start']"
+          selector:
+            "#play-2-player, [data-testid='play-2-player'], button[data-mode='two-player'], button:has-text('2 Player')"
         }
       },
       {
         kind: "wait",
-        durationMs: 450
-      },
-      {
-        kind: "keypress",
-        key: "Space"
-      },
-      {
-        kind: "wait",
-        durationMs: 300
+        durationMs: 500
       }
     ]);
 
@@ -219,8 +226,38 @@ describe("cat-and-dog plugin", () => {
     const session = await catAndDogWebPlugin.createSession({});
     const snapshot = buildSnapshot();
 
-    const resolved = await session.resolveAction({ actionId: "enter-gameplay" }, snapshot);
-    expect(resolved).toHaveLength(4);
+    const modeSelectionResolved = await session.resolveAction({ actionId: "select-two-player-mode" }, snapshot);
+    expect(modeSelectionResolved).toHaveLength(2);
+
+    const gameplayEntrySnapshot = buildSnapshot({
+      semanticState: {
+        ...buildSnapshot().semanticState,
+        status: "gameplay",
+        hasModeSelection: false,
+        hasTwoPlayerOption: false,
+        hasPlayableSurface: true,
+        hasGameplayHud: true,
+        hasGameplayControls: true,
+        aimStatusText: "Aim: center",
+        aimDirection: "center",
+        gameplayEntered: true,
+        modeSelectionExecuted: true
+      }
+    });
+    const actionsAfterModeSelection = await session.actions(gameplayEntrySnapshot);
+    expect(actionsAfterModeSelection.map((action) => action.actionId)).toEqual(["adjust-aim-left"]);
+
+    const gameplayInteractionResolved = await session.resolveAction({ actionId: "adjust-aim-left" }, gameplayEntrySnapshot);
+    expect(gameplayInteractionResolved).toEqual([
+      {
+        kind: "keypress",
+        key: "A"
+      },
+      {
+        kind: "wait",
+        durationMs: 250
+      }
+    ]);
 
     const closingSnapshot = await session.translate({
       capturedAt: new Date().toISOString(),
@@ -236,9 +273,10 @@ describe("cat-and-dog plugin", () => {
       status: "gameplay",
       hasPlayableSurface: true,
       hasGameplayHud: true,
-      hasInteractionStatus: true,
-      interactionStatusText: "Gameplay action received",
-      interactionAcknowledged: true,
+      hasGameplayControls: true,
+      aimStatusText: "Aim: left",
+      aimDirection: "left",
+      gameplayInputApplied: true,
       gameplayEntered: true
     });
 

@@ -75,13 +75,15 @@ describe("runTester integration (cat-and-dog)", () => {
         const openingObservation = storedEvents.find(
           (event) => event.type === "observation.captured" && event.observationKind === "opening"
         );
-        const closingObservation = storedEvents.find(
+        const postActionObservations = storedEvents.filter(
           (event) => event.type === "observation.captured" && event.observationKind === "post-action"
         );
+        const closingObservation = postActionObservations.at(-1);
 
         expect(openingObservation).toBeDefined();
+        expect(postActionObservations.length).toBeGreaterThanOrEqual(2);
         expect(closingObservation).toBeDefined();
-        expect(storedEvents.some((event) => event.type === "action.executed")).toBe(true);
+        expect(storedEvents.filter((event) => event.type === "action.executed").length).toBeGreaterThanOrEqual(2);
         expect(
           storedEvents.some(
             (event) => event.type === "observation.captured" && event.observationKind === "state-expectation"
@@ -101,8 +103,9 @@ describe("runTester integration (cat-and-dog)", () => {
           status: "gameplay",
           gameplayEntered: true,
           hasGameplayHud: true,
-          interactionAcknowledged: true,
-          interactionStatusText: "Gameplay action received"
+          hasGameplayControls: true,
+          aimDirection: "left",
+          gameplayInputApplied: true
         });
 
         const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");

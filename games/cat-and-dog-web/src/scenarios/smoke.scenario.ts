@@ -2,39 +2,59 @@ import type { TestScenario } from "@game-bots/game-sdk";
 
 export const CAT_AND_DOG_SMOKE_SCENARIO: TestScenario = {
   scenarioId: "smoke",
-  description: "Loads the cat-and-dog desktop route, enters gameplay, and sends one gameplay input.",
+  description: "Loads /play/desktop, selects 2-player mode, and validates one real in-game control input.",
   tags: ["smoke", "real-web"],
   clickProbes: [],
   actionExpectations: [
     {
-      actionId: "enter-gameplay",
-      description: "Smoke action should move from landing/shell to gameplay state.",
+      actionId: "select-two-player-mode",
+      description: "Selecting 2-player from the mode menu should enter gameplay state.",
       effects: [
         {
-          effectId: "gameplay-entered",
-          description: "Gameplay shell markers become visible after smoke action.",
+          effectId: "gameplay-entered-from-menu",
+          description: "Gameplay shell markers become visible after selecting 2-player mode.",
           path: "gameplayEntered",
           operator: "equals",
           expectedValue: true
         },
         {
-          effectId: "gameplay-status",
+          effectId: "gameplay-status-after-mode-selection",
           description: "Semantic status moves to gameplay.",
           path: "status",
           operator: "equals",
           expectedValue: "gameplay"
         },
         {
-          effectId: "gameplay-hud-visible",
+          effectId: "gameplay-hud-visible-after-mode-selection",
           description: "Gameplay HUD should be visible in gameplay mode.",
           path: "hasGameplayHud",
           operator: "equals",
           expectedValue: true
         },
         {
-          effectId: "gameplay-interaction-acknowledged",
-          description: "In-game interaction should acknowledge the Space input.",
-          path: "interactionAcknowledged",
+          effectId: "gameplay-controls-visible",
+          description: "Gameplay controls hint should be visible once gameplay starts.",
+          path: "hasGameplayControls",
+          operator: "equals",
+          expectedValue: true
+        }
+      ]
+    },
+    {
+      actionId: "adjust-aim-left",
+      description: "Pressing A should adjust aim left in gameplay.",
+      effects: [
+        {
+          effectId: "aim-direction-left",
+          description: "Gameplay aim status should move to left after pressing A.",
+          path: "aimDirection",
+          operator: "equals",
+          expectedValue: "left"
+        },
+        {
+          effectId: "gameplay-input-applied",
+          description: "Semantic gameplay input marker should indicate a real control effect.",
+          path: "gameplayInputApplied",
           operator: "equals",
           expectedValue: true
         }

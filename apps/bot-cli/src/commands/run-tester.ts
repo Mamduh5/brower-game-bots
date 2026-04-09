@@ -86,6 +86,8 @@ function byArtifactPath(left: ArtifactRef, right: ArtifactRef): number {
   return left.relativePath.localeCompare(right.relativePath);
 }
 
+const MAX_TESTER_ACTION_CYCLES = 4;
+
 function toJsonValue(value: unknown): JsonObject | string | number | boolean | null | JsonObject[] | (string | number | boolean | null)[] {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -204,8 +206,6 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
     await container.runEngine.appendEvent(openingObservationEvent);
     await collectFindings(openingObservationEvent);
 
-    const openingActions = await gameSession.actions(openingSnapshot);
-
     for (const clickProbe of scenario.clickProbes) {
       const probeResult = await environmentSession.probeClickability({
         probeId: clickProbe.probeId,
@@ -240,47 +240,116 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
       await collectFindings(clickProbeEvent);
     }
 
-    const openingDecision = await brain.decide({
-      run,
-      gameState: {
-        title: openingSnapshot.title,
-        isTerminal: openingSnapshot.isTerminal,
-        ...openingSnapshot.semanticState
-      },
-      availableActions: openingActions,
-      recentEvents: await container.runEngine.listEvents(run.runId)
-    });
+    let previousSnapshot = openingSnapshot;
+    let previousObservationEvent = openingObservationEvent;
+    let actionCycle = 0;
 
-    if (openingDecision.type !== "game-action") {
-      throw new Error(`Expected tester scenario to produce one semantic action, received ${openingDecision.type}.`);
-    }
+    while (true) {
+      const availableActions = await gameSession.actions(previousSnapshot);
+      if (availableActions.length === 0) {
+        break;
+      }
 
-    const environmentActions = await gameSession.resolveAction(
-      {
-        actionId: openingDecision.actionId,
-        params: openingDecision.params
-      },
-      openingSnapshot
-    );
-    const actionEventIds: string[] = [];
+      actionCycle += 1;
+      if (actionCycle > MAX_TESTER_ACTION_CYCLES) {
+        throw new Error(`Tester run exceeded max action cycles (${MAX_TESTER_ACTION_CYCLES}).`);
+      }
 
-    for (const environmentAction of environmentActions) {
-      const actionResult = await environmentSession.execute(environmentAction);
-      const actionEvent: RunEvent = {
+      const decision = await brain.decide({
+        run,
+        gameState: {
+          title: previousSnapshot.title,
+          isTerminal: previousSnapshot.isTerminal,
+          ...previousSnapshot.semanticState
+        },
+        availableActions,
+        recentEvents: await container.runEngine.listEvents(run.runId)
+      });
+
+      if (decision.type !== "game-action") {
+        throw new Error(`Expected tester scenario to produce a semantic action, received ${decision.type}.`);
+      }
+
+      const environmentActions = await gameSession.resolveAction(
+        {
+          actionId: decision.actionId,
+          params: decision.params
+        },
+        previousSnapshot
+      );
+      const actionEventIds: string[] = [];
+
+      for (const environmentAction of environmentActions) {
+        const actionResult = await environmentSession.execute(environmentAction);
+        const actionEvent: RunEvent = {
+          eventId: randomUUID(),
+          runId: run.runId,
+          sequence: await container.runEngine.nextSequence(run.runId),
+          timestamp: actionResult.completedAt,
+          type: "action.executed",
+          actionKind: environmentAction.kind,
+          status: actionResult.status,
+          summary: actionResult.detail,
+          payload: buildActionEventPayload(environmentAction, actionResult.payload)
+        };
+
+        await container.runEngine.appendEvent(actionEvent);
+        await collectFindings(actionEvent);
+        actionEventIds.push(actionEvent.eventId);
+      }
+
+      const postActionFrame = await environmentSession.observe({
+        modes: ["dom", "console", "network"]
+      });
+      const postActionSnapshot = await gameSession.translate(postActionFrame);
+      const postActionObservationEvent: RunEvent = {
         eventId: randomUUID(),
         runId: run.runId,
         sequence: await container.runEngine.nextSequence(run.runId),
-        timestamp: actionResult.completedAt,
-        type: "action.executed",
-        actionKind: environmentAction.kind,
-        status: actionResult.status,
-        summary: actionResult.detail,
-        payload: buildActionEventPayload(environmentAction, actionResult.payload)
+        timestamp: new Date().toISOString(),
+        type: "observation.captured",
+        observationKind: "post-action",
+        summary: postActionFrame.summary,
+        payload: buildObservationPayload(postActionFrame, postActionSnapshot)
       };
+      await container.runEngine.appendEvent(postActionObservationEvent);
+      await collectFindings(postActionObservationEvent);
 
-      await container.runEngine.appendEvent(actionEvent);
-      await collectFindings(actionEvent);
-      actionEventIds.push(actionEvent.eventId);
+      const matchingExpectation = scenario.actionExpectations.find(
+        (expectation) => expectation.actionId === decision.actionId
+      );
+      if (matchingExpectation) {
+        const stateExpectationEvent: RunEvent = {
+          eventId: randomUUID(),
+          runId: run.runId,
+          sequence: await container.runEngine.nextSequence(run.runId),
+          timestamp: new Date().toISOString(),
+          type: "observation.captured",
+          observationKind: "state-expectation",
+          summary: matchingExpectation.description,
+          payload: {
+            actionId: decision.actionId,
+            description: matchingExpectation.description,
+            effects: matchingExpectation.effects.map((effect) => ({
+              effectId: effect.effectId,
+              description: effect.description,
+              path: effect.path,
+              operator: effect.operator,
+              ...(effect.expectedValue !== undefined ? { expectedValue: toJsonValue(effect.expectedValue) } : {})
+            })),
+            preState: previousSnapshot.semanticState,
+            postState: postActionSnapshot.semanticState,
+            preObservationEventId: previousObservationEvent.eventId,
+            postObservationEventId: postActionObservationEvent.eventId,
+            actionEventIds
+          }
+        };
+        await container.runEngine.appendEvent(stateExpectationEvent);
+        await collectFindings(stateExpectationEvent);
+      }
+
+      previousSnapshot = postActionSnapshot;
+      previousObservationEvent = postActionObservationEvent;
     }
 
     const health = await environmentSession.health();
@@ -325,70 +394,20 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
       artifact: domSnapshot
     });
 
-    const closingFrame = await environmentSession.observe({
-      modes: ["dom", "console", "network"]
-    });
-    const closingSnapshot = await gameSession.translate(closingFrame);
-    const closingObservationEvent: RunEvent = {
-      eventId: randomUUID(),
-      runId: run.runId,
-      sequence: await container.runEngine.nextSequence(run.runId),
-      timestamp: new Date().toISOString(),
-      type: "observation.captured",
-      observationKind: "post-action",
-      summary: closingFrame.summary,
-      payload: buildObservationPayload(closingFrame, closingSnapshot)
-    };
-    await container.runEngine.appendEvent(closingObservationEvent);
-    await collectFindings(closingObservationEvent);
-
-    const matchingExpectation = scenario.actionExpectations.find(
-      (expectation) => expectation.actionId === openingDecision.actionId
-    );
-    if (matchingExpectation) {
-      const stateExpectationEvent: RunEvent = {
-        eventId: randomUUID(),
-        runId: run.runId,
-        sequence: await container.runEngine.nextSequence(run.runId),
-        timestamp: new Date().toISOString(),
-        type: "observation.captured",
-        observationKind: "state-expectation",
-        summary: matchingExpectation.description,
-        payload: {
-          actionId: openingDecision.actionId,
-          description: matchingExpectation.description,
-          effects: matchingExpectation.effects.map((effect) => ({
-            effectId: effect.effectId,
-            description: effect.description,
-            path: effect.path,
-            operator: effect.operator,
-            ...(effect.expectedValue !== undefined ? { expectedValue: toJsonValue(effect.expectedValue) } : {})
-          })),
-          preState: openingSnapshot.semanticState,
-          postState: closingSnapshot.semanticState,
-          preObservationEventId: openingObservationEvent.eventId,
-          postObservationEventId: closingObservationEvent.eventId,
-          actionEventIds
-        }
-      };
-      await container.runEngine.appendEvent(stateExpectationEvent);
-      await collectFindings(stateExpectationEvent);
-    }
-
-    const closingActions = await gameSession.actions(closingSnapshot);
+    const closingActions = await gameSession.actions(previousSnapshot);
     const closingDecision = await brain.decide({
       run,
       gameState: {
-        title: closingSnapshot.title,
-        isTerminal: closingSnapshot.isTerminal,
-        ...closingSnapshot.semanticState
+        title: previousSnapshot.title,
+        isTerminal: previousSnapshot.isTerminal,
+        ...previousSnapshot.semanticState
       },
       availableActions: closingActions,
       recentEvents: await container.runEngine.listEvents(run.runId)
     });
 
     if (closingDecision.type !== "complete") {
-      throw new Error(`Expected tester scenario to complete after one cycle, received ${closingDecision.type}.`);
+      throw new Error(`Expected tester scenario to complete after action cycles, received ${closingDecision.type}.`);
     }
 
     run = await container.runEngine.transitionPhase(run, "evaluating");

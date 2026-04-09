@@ -19,7 +19,11 @@
         display: grid;
         gap: 12px;
       }
-      .start-button {
+      .menu-buttons {
+        display: flex;
+        gap: 8px;
+      }
+      .mode-button {
         padding: 10px 16px;
       }
       canvas {
@@ -36,15 +40,18 @@
   <body>
     <main id="root">
       <div class="landing-container" data-testid="app-root" id="landing-shell">
-        <h1>Cat and Dog Fixture Landing</h1>
-        <button id="start-game" class="start-button" data-testid="start-game">Start Game</button>
+        <h1>Cat and Dog Fixture Menu</h1>
+        <div id="mode-selection" data-testid="mode-selection" class="menu-buttons">
+          <button class="mode-button" data-testid="play-vs-cpu" data-mode="cpu">Play vs CPU</button>
+          <button id="play-2-player" class="mode-button" data-testid="play-2-player" data-mode="two-player">2 Player</button>
+        </div>
       </div>
       <div id="runtime-mount"></div>
     </main>
     <script>
       const landingShell = document.getElementById("landing-shell");
       const runtimeMount = document.getElementById("runtime-mount");
-      const startButton = document.getElementById("start-game");
+      const twoPlayerButton = document.getElementById("play-2-player");
       let gameplayShell = null;
 
       function ensureGameplayShell() {
@@ -62,7 +69,8 @@
         container.innerHTML = `
           <div id="player-hud" data-testid="player-hud">HP: 100</div>
           <canvas data-testid="game-canvas"></canvas>
-          <p id="interaction-status" data-testid="interaction-status">Gameplay idle</p>
+          <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+          <p id="aim-status" data-testid="aim-status">Aim: center</p>
         `;
 
         runtimeMount.appendChild(container);
@@ -70,19 +78,19 @@
         return container;
       }
 
-      if (startButton && landingShell) {
-        startButton.addEventListener("click", () => {
+      if (twoPlayerButton && landingShell) {
+        twoPlayerButton.addEventListener("click", () => {
           ensureGameplayShell();
           landingShell.setAttribute("hidden", "true");
         });
       }
 
       window.addEventListener("keydown", (event) => {
-        if (event.code === "Space" || event.key === " ") {
-          const target = document.getElementById("interaction-status");
+        if (event.key === "a" || event.key === "A") {
+          const target = document.getElementById("aim-status");
           const gameplayVisible = Boolean(gameplayShell);
           if (target && gameplayVisible) {
-            target.textContent = "Gameplay action received";
+            target.textContent = "Aim: left";
           }
         }
       });

@@ -15,12 +15,17 @@ import { parseCatAndDogShell } from "./snapshot/parse-shell.js";
 
 const DEFAULT_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/";
 
-const GAMEPLAY_ENTRY_ACTION: GameActionSpec = {
-  actionId: "enter-gameplay",
-  description: "Enter gameplay on desktop route and send one gameplay interaction."
+const SELECT_TWO_PLAYER_MODE_ACTION: GameActionSpec = {
+  actionId: "select-two-player-mode",
+  description: "Select the 2-player mode from the mode-selection menu."
 };
 
-const START_CONTROL_SELECTOR = CAT_AND_DOG_SELECTORS.startControlCandidates.join(", ");
+const ADJUST_AIM_LEFT_ACTION: GameActionSpec = {
+  actionId: "adjust-aim-left",
+  description: "Send one real gameplay control input (A) to adjust aim left."
+};
+
+const TWO_PLAYER_SELECTOR = CAT_AND_DOG_SELECTORS.twoPlayerButtonCandidates.join(", ");
 
 function resolveGameUrl(): string {
   const raw = (process.env.GAME_BOTS_CAT_AND_DOG_URL ?? DEFAULT_CAT_AND_DOG_URL).trim();
@@ -50,7 +55,7 @@ function resolveGameplayEntryUrl(): string {
   }
 
   const normalizedPath = parsed.pathname.replace(/\/+$/, "");
-  if (!normalizedPath.endsWith(CAT_AND_DOG_SELECTORS.gameplayEntryRoute)) {
+  if (!normalizedPath.endsWith(CAT_AND_DOG_SELECTORS.gameplayEntryRoute.replace(/\/+$/, ""))) {
     parsed.pathname = `${normalizedPath}${CAT_AND_DOG_SELECTORS.gameplayEntryRoute}`;
   }
 
@@ -58,7 +63,8 @@ function resolveGameplayEntryUrl(): string {
 }
 
 export class CatAndDogGameSession implements GameSession {
-  private gameplayActionExecuted = false;
+  private modeSelectionExecuted = false;
+  private gameplayInteractionExecuted = false;
 
   async bootstrap(environment: EnvironmentSession): Promise<void> {
     await environment.execute({
@@ -77,71 +83,87 @@ export class CatAndDogGameSession implements GameSession {
 
     return {
       title: "Cat and Dog",
-      isTerminal: this.gameplayActionExecuted,
+      isTerminal: this.modeSelectionExecuted && this.gameplayInteractionExecuted,
       semanticState: {
         status: shell.status,
         routePath: shell.routePath,
         hasAppRoot: shell.hasAppRoot,
+        hasModeSelection: shell.hasModeSelection,
+        hasTwoPlayerOption: shell.hasTwoPlayerOption,
         hasPlayableSurface: shell.hasPlayableSurface,
         hasGameplayHud: shell.hasGameplayHud,
-        hasInteractionStatus: shell.hasInteractionStatus,
-        interactionStatusText: shell.interactionStatusText,
-        interactionAcknowledged: shell.interactionAcknowledged,
+        hasGameplayControls: shell.hasGameplayControls,
+        aimStatusText: shell.aimStatusText,
+        aimDirection: shell.aimDirection,
+        gameplayInputApplied: shell.gameplayInputApplied,
         hasStartControl: shell.hasStartControl,
         gameplayEntered: shell.gameplayEntered,
-        gameplayActionExecuted: this.gameplayActionExecuted
+        modeSelectionExecuted: this.modeSelectionExecuted,
+        gameplayInteractionExecuted: this.gameplayInteractionExecuted
       },
       metrics: {
+        hasModeSelection: shell.hasModeSelection ? 1 : 0,
+        hasTwoPlayerOption: shell.hasTwoPlayerOption ? 1 : 0,
         hasPlayableSurface: shell.hasPlayableSurface ? 1 : 0,
         hasGameplayHud: shell.hasGameplayHud ? 1 : 0,
-        interactionAcknowledged: shell.interactionAcknowledged ? 1 : 0
+        hasGameplayControls: shell.hasGameplayControls ? 1 : 0,
+        gameplayInputApplied: shell.gameplayInputApplied ? 1 : 0
       }
     };
   }
 
   async actions(snapshot: GameSnapshot): Promise<readonly GameActionSpec[]> {
-    if (this.gameplayActionExecuted) {
+    if (!this.modeSelectionExecuted) {
+      return [SELECT_TWO_PLAYER_MODE_ACTION];
+    }
+
+    if (!snapshot.semanticState.gameplayEntered) {
       return [];
     }
 
-    void snapshot;
-    return [GAMEPLAY_ENTRY_ACTION];
+    if (!this.gameplayInteractionExecuted) {
+      return [ADJUST_AIM_LEFT_ACTION];
+    }
+
+    return [];
   }
 
   async resolveAction(action: GameActionRequest, snapshot: GameSnapshot): Promise<readonly EnvironmentAction[]> {
-    if (action.actionId !== GAMEPLAY_ENTRY_ACTION.actionId) {
-      throw new Error(`Unsupported cat-and-dog action: ${action.actionId}`);
-    }
-
-    const gameplayEntered = snapshot.semanticState.gameplayEntered === true;
-    this.gameplayActionExecuted = true;
-
-    const actions: EnvironmentAction[] = [];
-    if (!gameplayEntered && snapshot.semanticState.hasStartControl === true) {
-      actions.push({
-        kind: "click",
-        target: {
-          selector: START_CONTROL_SELECTOR
+    if (action.actionId === SELECT_TWO_PLAYER_MODE_ACTION.actionId) {
+      this.modeSelectionExecuted = true;
+      return [
+        {
+          kind: "click",
+          target: {
+            selector: TWO_PLAYER_SELECTOR
+          }
+        },
+        {
+          kind: "wait",
+          durationMs: 500
         }
-      });
-      actions.push({
-        kind: "wait",
-        durationMs: 450
-      });
+      ];
     }
 
-    actions.push(
-      {
-        kind: "keypress",
-        key: "Space"
-      },
-      {
-        kind: "wait",
-        durationMs: 300
+    if (action.actionId === ADJUST_AIM_LEFT_ACTION.actionId) {
+      if (snapshot.semanticState.gameplayEntered !== true) {
+        throw new Error("Cannot run gameplay interaction before gameplay has started.");
       }
-    );
 
-    return actions;
+      this.gameplayInteractionExecuted = true;
+      return [
+        {
+          kind: "keypress",
+          key: "A"
+        },
+        {
+          kind: "wait",
+          durationMs: 250
+        }
+      ];
+    }
+
+    throw new Error(`Unsupported cat-and-dog action: ${action.actionId}`);
   }
 
   async scenarios(): Promise<readonly TestScenario[]> {
