@@ -1,5 +1,6 @@
 import type { EnvironmentSession, ObservationFrame } from "@game-bots/environment-sdk";
 import type {
+  GameActionRequest,
   GameActionSpec,
   GamePlugin,
   GameSession,
@@ -27,6 +28,10 @@ class FakeGameSession implements GameSession {
 
   async actions(): Promise<readonly GameActionSpec[]> {
     return [{ actionId: "noop", description: "No operation" }];
+  }
+
+  async resolveAction(_action: GameActionRequest): Promise<readonly { kind: "wait"; durationMs: number }[]> {
+    return [{ kind: "wait", durationMs: 1 }];
   }
 
   async scenarios(): Promise<readonly TestScenario[]> {

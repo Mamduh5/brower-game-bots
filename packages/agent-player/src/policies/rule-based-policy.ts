@@ -19,6 +19,14 @@ export class RuleBasedPlayerPolicy implements PlayerPolicy {
       return { type: "complete", reason: "No further semantic actions are available." };
     }
 
-    return { type: "wait", reason: "Phase 1 player policy only establishes the decision boundary." };
+    const [firstAction] = input.availableActions;
+    if (!firstAction) {
+      return { type: "complete", reason: "No action remained after evaluation." };
+    }
+
+    return {
+      type: "game-action",
+      actionId: firstAction.actionId
+    };
   }
 }

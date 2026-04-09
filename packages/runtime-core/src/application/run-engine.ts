@@ -43,16 +43,26 @@ export class RunEngine {
     return run;
   }
 
+  async nextSequence(runId: string): Promise<number> {
+    const events = await this.dependencies.repository.listEvents(runId);
+    return events.length;
+  }
+
+  async listEvents(runId: string): Promise<readonly RunEvent[]> {
+    return this.dependencies.repository.listEvents(runId);
+  }
+
   async transitionPhase(run: RunRecord, nextPhase: RunPhase): Promise<RunRecord> {
     const now = this.clock.now();
     const updated = this.lifecycle.transition(run, nextPhase, now);
+    const sequence = await this.nextSequence(updated.runId);
 
     await this.dependencies.repository.transitionRun(updated.runId, updated.phase, updated.updatedAt);
 
     const event: RunEvent = {
       eventId: randomUUID(),
       runId: updated.runId,
-      sequence: now.getTime(),
+      sequence,
       timestamp: now.toISOString(),
       type: "run.phase_changed",
       phase: updated.phase
@@ -67,6 +77,40 @@ export class RunEngine {
   async appendEvent(event: RunEvent): Promise<void> {
     await this.dependencies.repository.appendEvent(event);
     await this.publisher.publish(event);
+  }
+
+  async completeRun(run: RunRecord): Promise<RunRecord> {
+    const updated = await this.transitionPhase(run, "completed");
+    const event: RunEvent = {
+      eventId: randomUUID(),
+      runId: updated.runId,
+      sequence: await this.nextSequence(updated.runId),
+      timestamp: this.clock.now().toISOString(),
+      type: "run.completed",
+      phase: "completed"
+    };
+
+    await this.appendEvent(event);
+
+    return updated;
+  }
+
+  async failRun(run: RunRecord, errorCode: string, message: string): Promise<RunRecord> {
+    const updated = await this.transitionPhase(run, "failed");
+    const event: RunEvent = {
+      eventId: randomUUID(),
+      runId: updated.runId,
+      sequence: await this.nextSequence(updated.runId),
+      timestamp: this.clock.now().toISOString(),
+      type: "run.failed",
+      phase: "failed",
+      errorCode,
+      message
+    };
+
+    await this.appendEvent(event);
+
+    return updated;
   }
 
   async saveReport(report: RunReport): Promise<void> {

@@ -93,6 +93,7 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
 
     if (request.modes.includes("dom")) {
       payload.domAvailable = true;
+      payload.domHtml = await page.content();
     }
 
     return {

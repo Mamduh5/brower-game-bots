@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wordle Fixture</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 24px;
+      }
+
+      .board-row {
+        border: 1px solid #999;
+        min-height: 32px;
+        margin-bottom: 8px;
+        padding: 8px;
+        width: 240px;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="game-root">
+      <h1>Wordle Fixture</h1>
+      <p id="status">ready</p>
+      <label for="guess-input">Guess</label>
+      <input id="guess-input" autocomplete="off" />
+      <button id="submit-guess" type="button">Submit Guess</button>
+      <section id="board">
+        <div class="board-row" data-row="0"></div>
+      </section>
+    </main>
+
+    <script>
+      const input = document.getElementById("guess-input");
+      const submitButton = document.getElementById("submit-guess");
+      const status = document.getElementById("status");
+      const firstRow = document.querySelector("[data-row='0']");
+
+      submitButton.addEventListener("click", () => {
+        const guess = input.value.trim();
+        if (!guess) {
+          status.textContent = "missing-guess";
+          return;
+        }
+
+        firstRow.textContent = guess.toUpperCase();
+        status.textContent = "guess-submitted";
+        input.disabled = true;
+        submitButton.disabled = true;
+      });
+    </script>
+  </body>
+</html>
