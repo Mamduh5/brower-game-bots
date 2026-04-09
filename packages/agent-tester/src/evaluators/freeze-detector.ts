@@ -28,6 +28,10 @@ export class FreezeDetector implements Evaluator {
   private emitted = false;
 
   async onEvent(event: RunEvent, context: EvaluationContext): Promise<readonly Finding[]> {
+    if (event.type === "observation.captured" && event.observationKind === "state-expectation") {
+      return [];
+    }
+
     if (event.type === "action.executed" && event.status === "succeeded") {
       this.sawSuccessfulAction = true;
       this.lastActionEventId = event.eventId;

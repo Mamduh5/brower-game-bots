@@ -87,6 +87,24 @@ function enrichFindingsWithArtifacts(findings: readonly Finding[], artifacts: re
   }));
 }
 
+function toJsonValue(value: unknown): JsonObject | string | number | boolean | null | JsonObject[] | (string | number | boolean | null)[] {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toJsonValue(item)) as JsonObject[] | (string | number | boolean | null)[];
+  }
+
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, toJsonValue(item)])
+    ) as JsonObject;
+  }
+
+  return String(value);
+}
+
 export async function runTester(container: AppContainer): Promise<TesterRunResult> {
   const plugin = wordleWebPlugin;
   const brain = createTesterBrain();
@@ -245,6 +263,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       },
       openingSnapshot
     );
+    const actionEventIds: string[] = [];
 
     for (const environmentAction of environmentActions) {
       const actionResult = await environmentSession.execute(environmentAction);
@@ -262,6 +281,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
 
       await container.runEngine.appendEvent(actionEvent);
       await collectFindings(actionEvent);
+      actionEventIds.push(actionEvent.eventId);
     }
 
     const health = await environmentSession.health();
@@ -322,6 +342,39 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     };
     await container.runEngine.appendEvent(closingObservationEvent);
     await collectFindings(closingObservationEvent);
+
+    const matchingExpectation = scenario.actionExpectations.find(
+      (expectation) => expectation.actionId === openingDecision.actionId
+    );
+    if (matchingExpectation) {
+      const stateExpectationEvent: RunEvent = {
+        eventId: randomUUID(),
+        runId: run.runId,
+        sequence: await container.runEngine.nextSequence(run.runId),
+        timestamp: new Date().toISOString(),
+        type: "observation.captured",
+        observationKind: "state-expectation",
+        summary: matchingExpectation.description,
+        payload: {
+          actionId: openingDecision.actionId,
+          description: matchingExpectation.description,
+          effects: matchingExpectation.effects.map((effect) => ({
+            effectId: effect.effectId,
+            description: effect.description,
+            path: effect.path,
+            operator: effect.operator,
+            ...(effect.expectedValue !== undefined ? { expectedValue: toJsonValue(effect.expectedValue) } : {})
+          })),
+          preState: openingSnapshot.semanticState,
+          postState: closingSnapshot.semanticState,
+          preObservationEventId: openingObservationEvent.eventId,
+          postObservationEventId: closingObservationEvent.eventId,
+          actionEventIds
+        }
+      };
+      await container.runEngine.appendEvent(stateExpectationEvent);
+      await collectFindings(stateExpectationEvent);
+    }
 
     const closingActions = await gameSession.actions(closingSnapshot);
     const closingDecision = await brain.decide({

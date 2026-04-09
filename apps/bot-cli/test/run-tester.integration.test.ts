@@ -48,6 +48,7 @@ describe("runTester integration", () => {
       const storedEvents = await repository.listEvents(result.run.runId);
       const storedFindings = await repository.getFindings(result.run.runId);
       const clickabilityFinding = result.findings.find((finding) => finding.metadata?.clickProbe);
+      const stateExpectationFinding = result.findings.find((finding) => finding.metadata?.stateExpectation);
       const resetFinding = result.findings.find((finding) => finding.title.includes("Reset control missing"));
 
       expect(storedRun?.phase).toBe("completed");
@@ -61,6 +62,9 @@ describe("runTester integration", () => {
       expect(clickabilityFinding?.metadata?.clickProbe?.successRatio).toBeLessThan(
         clickabilityFinding?.metadata?.clickProbe?.minimumSuccessRatio as number
       );
+      expect(stateExpectationFinding).toBeDefined();
+      expect(stateExpectationFinding?.category).toBe("functional");
+      expect(stateExpectationFinding?.metadata?.stateExpectation?.failedEffects.length).toBeGreaterThanOrEqual(1);
       expect(storedFindings.length).toBe(result.findings.length);
       expect(storedEvents.some((event) => event.type === "evaluation.finding_created")).toBe(true);
       expect(
@@ -70,11 +74,17 @@ describe("runTester integration", () => {
       ).toBe(true);
       expect(
         storedEvents.some(
+          (event) => event.type === "observation.captured" && event.observationKind === "state-expectation"
+        )
+      ).toBe(true);
+      expect(
+        storedEvents.some(
           (event) => event.type === "report.generated" && event.reportId === result.report.reportId
         )
       ).toBe(true);
       expect(result.report.summary.totalFindings).toBe(result.findings.length);
       expect(result.report.summary.categoryCounts.ui).toBeGreaterThanOrEqual(2);
+      expect(result.report.summary.categoryCounts.functional).toBeGreaterThanOrEqual(1);
       expect(result.report.summary.severityCounts.medium).toBeGreaterThanOrEqual(1);
 
       const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
@@ -90,6 +100,11 @@ describe("runTester integration", () => {
       );
       expect(reportClickabilityFinding.evidence.length).toBeGreaterThanOrEqual(3);
       expect(reportClickabilityFinding.reproSteps.length).toBeGreaterThan(0);
+      const reportStateExpectationFinding = reportJson.findings.find(
+        (finding: { metadata?: { stateExpectation?: unknown } }) => Boolean(finding.metadata?.stateExpectation)
+      );
+      expect(reportStateExpectationFinding).toBeDefined();
+      expect(reportStateExpectationFinding.metadata.stateExpectation.failedEffects.length).toBeGreaterThanOrEqual(1);
     },
     30_000
   );

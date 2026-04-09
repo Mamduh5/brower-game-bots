@@ -37,7 +37,9 @@ export class WordleGameSession implements GameSession {
       isTerminal: isSubmitted,
       semanticState: {
         status: board.status,
-        boardRows: [...board.rows]
+        boardRows: [...board.rows],
+        inputDisabled: board.inputDisabled,
+        submitDisabled: board.submitDisabled
       },
       metrics: {
         rowCount: board.rows.length
