@@ -34,3 +34,25 @@ This repository currently implements the Phase 1 / Phase 2 foundation:
 - SQLite-first persistence adapter
 
 Gameplay strategies, advanced tester heuristics, OCR/ML workers, and external issue publishers are intentionally deferred.
+
+## Guard
+
+In addition to the architecture work, follow these non-negotiable refactor guards:
+
+Refactor guard:
+- inspect current structure first
+- preserve existing working behavior unless a change is explicitly necessary
+- do not rename/move files casually
+- do not rewrite large working modules just to match style preferences
+- do not introduce breaking changes to public contracts without a migration note
+- if a module can be wrapped by an adapter, do that instead of rewriting internals
+- prefer incremental extraction over big-bang refactor
+- any core contract change must be accompanied by tests and a migration explanation
+- if uncertain, keep stable code and add seams around it
+
+Implementation strategy:
+- identify what can remain
+- identify what must move
+- identify what must be wrapped
+- identify what must be redesigned from scratch
+- propose smallest high-quality path to the target architecture
