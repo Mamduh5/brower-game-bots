@@ -14,9 +14,13 @@
         place-items: center;
         min-height: 100vh;
       }
-      .game-container {
+      .landing-container,
+      .gameplay-container {
         display: grid;
         gap: 12px;
+      }
+      .start-button {
+        padding: 10px 16px;
       }
       canvas {
         width: 640px;
@@ -24,22 +28,61 @@
         border: 1px solid #333;
         background: #111;
       }
+      [hidden] {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
     <main id="root">
-      <div class="game-container" data-testid="app-root">
-        <h1>Cat and Dog Fixture</h1>
-        <canvas data-testid="game-canvas"></canvas>
-        <p id="interaction-status">Waiting for interaction</p>
+      <div class="landing-container" data-testid="app-root" id="landing-shell">
+        <h1>Cat and Dog Fixture Landing</h1>
+        <button id="start-game" class="start-button" data-testid="start-game">Start Game</button>
       </div>
+      <div id="runtime-mount"></div>
     </main>
     <script>
+      const landingShell = document.getElementById("landing-shell");
+      const runtimeMount = document.getElementById("runtime-mount");
+      const startButton = document.getElementById("start-game");
+      let gameplayShell = null;
+
+      function ensureGameplayShell() {
+        if (gameplayShell) {
+          return gameplayShell;
+        }
+
+        if (!runtimeMount) {
+          return null;
+        }
+
+        const container = document.createElement("div");
+        container.id = "gameplay-shell";
+        container.className = "gameplay-container";
+        container.innerHTML = `
+          <div id="player-hud" data-testid="player-hud">HP: 100</div>
+          <canvas data-testid="game-canvas"></canvas>
+          <p id="interaction-status">Gameplay idle</p>
+        `;
+
+        runtimeMount.appendChild(container);
+        gameplayShell = container;
+        return container;
+      }
+
+      if (startButton && landingShell) {
+        startButton.addEventListener("click", () => {
+          ensureGameplayShell();
+          landingShell.setAttribute("hidden", "true");
+        });
+      }
+
       window.addEventListener("keydown", (event) => {
         if (event.code === "Space" || event.key === " ") {
           const target = document.getElementById("interaction-status");
-          if (target) {
-            target.textContent = "Interaction received";
+          const gameplayVisible = Boolean(gameplayShell);
+          if (target && gameplayVisible) {
+            target.textContent = "Gameplay action received";
           }
         }
       });

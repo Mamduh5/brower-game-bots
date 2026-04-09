@@ -10,14 +10,17 @@ import type { Evaluator } from "@game-bots/runtime-core";
 
 import { MissingShellEvaluator } from "./evaluators/missing-shell-evaluator.js";
 import { CAT_AND_DOG_SMOKE_SCENARIO } from "./scenarios/smoke.scenario.js";
+import { CAT_AND_DOG_SELECTORS } from "./selectors.js";
 import { parseCatAndDogShell } from "./snapshot/parse-shell.js";
 
 const DEFAULT_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/";
 
-const INTERACTION_PULSE_ACTION: GameActionSpec = {
-  actionId: "interaction-pulse",
-  description: "Send one keyboard pulse to validate baseline game interaction."
+const GAMEPLAY_ENTRY_ACTION: GameActionSpec = {
+  actionId: "enter-gameplay",
+  description: "Enter gameplay on desktop route and send one gameplay interaction."
 };
+
+const START_CONTROL_SELECTOR = CAT_AND_DOG_SELECTORS.startControlCandidates.join(", ");
 
 function resolveGameUrl(): string {
   const raw = (process.env.GAME_BOTS_CAT_AND_DOG_URL ?? DEFAULT_CAT_AND_DOG_URL).trim();
@@ -40,13 +43,27 @@ function resolveGameUrl(): string {
   return parsed.toString();
 }
 
+function resolveGameplayEntryUrl(): string {
+  const parsed = new URL(resolveGameUrl());
+  if (process.env.GAME_BOTS_CAT_AND_DOG_URL) {
+    return parsed.toString();
+  }
+
+  const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+  if (!normalizedPath.endsWith(CAT_AND_DOG_SELECTORS.gameplayEntryRoute)) {
+    parsed.pathname = `${normalizedPath}${CAT_AND_DOG_SELECTORS.gameplayEntryRoute}`;
+  }
+
+  return parsed.toString();
+}
+
 export class CatAndDogGameSession implements GameSession {
-  private interactionExecuted = false;
+  private gameplayActionExecuted = false;
 
   async bootstrap(environment: EnvironmentSession): Promise<void> {
     await environment.execute({
       kind: "navigate",
-      url: resolveGameUrl()
+      url: resolveGameplayEntryUrl()
     });
 
     await environment.execute({
@@ -60,36 +77,56 @@ export class CatAndDogGameSession implements GameSession {
 
     return {
       title: "Cat and Dog",
-      isTerminal: this.interactionExecuted,
+      isTerminal: this.gameplayActionExecuted,
       semanticState: {
         status: shell.status,
         routePath: shell.routePath,
         hasAppRoot: shell.hasAppRoot,
         hasPlayableSurface: shell.hasPlayableSurface,
-        interactionExecuted: this.interactionExecuted
+        hasGameplayHud: shell.hasGameplayHud,
+        hasStartControl: shell.hasStartControl,
+        gameplayEntered: shell.gameplayEntered,
+        gameplayActionExecuted: this.gameplayActionExecuted
       },
       metrics: {
-        hasPlayableSurface: shell.hasPlayableSurface ? 1 : 0
+        hasPlayableSurface: shell.hasPlayableSurface ? 1 : 0,
+        hasGameplayHud: shell.hasGameplayHud ? 1 : 0
       }
     };
   }
 
-  async actions(_snapshot: GameSnapshot): Promise<readonly GameActionSpec[]> {
-    if (this.interactionExecuted) {
+  async actions(snapshot: GameSnapshot): Promise<readonly GameActionSpec[]> {
+    if (this.gameplayActionExecuted) {
       return [];
     }
 
-    return [INTERACTION_PULSE_ACTION];
+    void snapshot;
+    return [GAMEPLAY_ENTRY_ACTION];
   }
 
-  async resolveAction(action: GameActionRequest, _snapshot: GameSnapshot): Promise<readonly EnvironmentAction[]> {
-    if (action.actionId !== INTERACTION_PULSE_ACTION.actionId) {
+  async resolveAction(action: GameActionRequest, snapshot: GameSnapshot): Promise<readonly EnvironmentAction[]> {
+    if (action.actionId !== GAMEPLAY_ENTRY_ACTION.actionId) {
       throw new Error(`Unsupported cat-and-dog action: ${action.actionId}`);
     }
 
-    this.interactionExecuted = true;
+    const gameplayEntered = snapshot.semanticState.gameplayEntered === true;
+    this.gameplayActionExecuted = true;
 
-    return [
+    const actions: EnvironmentAction[] = [];
+    if (!gameplayEntered && snapshot.semanticState.hasStartControl === true) {
+      actions.push({
+        kind: "click",
+        target: {
+          selector: START_CONTROL_SELECTOR
+        }
+      });
+      actions.push({
+        kind: "wait",
+        durationMs: 450
+      });
+    }
+
+    actions.push(
       {
         kind: "keypress",
         key: "Space"
@@ -98,7 +135,9 @@ export class CatAndDogGameSession implements GameSession {
         kind: "wait",
         durationMs: 300
       }
-    ];
+    );
+
+    return actions;
   }
 
   async scenarios(): Promise<readonly TestScenario[]> {

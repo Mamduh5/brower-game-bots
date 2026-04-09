@@ -95,29 +95,40 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
     title: "Cat and Dog",
     isTerminal: false,
     semanticState: {
-      status: "ready",
-      routePath: "/",
+      status: "landing",
+      routePath: "/desktop",
       hasAppRoot: true,
-      hasPlayableSurface: true,
-      interactionExecuted: false
+      hasPlayableSurface: false,
+      hasGameplayHud: false,
+      hasStartControl: true,
+      gameplayEntered: false,
+      gameplayActionExecuted: false
     },
     metrics: {
-      hasPlayableSurface: 1
+      hasPlayableSurface: 0,
+      hasGameplayHud: 0
     },
     ...overrides
   };
 }
 
-const SAMPLE_DOM = `
+const LANDING_DOM = `
 <main id="root">
-  <canvas width="800" height="600"></canvas>
+  <button id="start-game" data-testid="start-game">Start</button>
+</main>
+`;
+
+const GAMEPLAY_DOM = `
+<main id="root">
+  <div id="player-hud" data-testid="player-hud">HP: 100</div>
+  <canvas data-testid="game-canvas" width="800" height="600"></canvas>
 </main>
 `;
 
 describe("cat-and-dog plugin", () => {
   it("bootstraps by navigating to the configured real-game URL and waiting for settle", async () => {
     const previousUrl = process.env.GAME_BOTS_CAT_AND_DOG_URL;
-    process.env.GAME_BOTS_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/";
+    process.env.GAME_BOTS_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/desktop";
 
     try {
       const session = await catAndDogWebPlugin.createSession({});
@@ -127,7 +138,7 @@ describe("cat-and-dog plugin", () => {
       expect(environment.executedActions).toEqual([
         {
           kind: "navigate",
-          url: "https://cat-and-dog-p6qd.onrender.com/"
+          url: "https://cat-and-dog-p6qd.onrender.com/desktop"
         },
         {
           kind: "wait",
@@ -149,25 +160,38 @@ describe("cat-and-dog plugin", () => {
       capturedAt: new Date().toISOString(),
       modes: ["dom"],
       payload: {
-        url: "https://cat-and-dog-p6qd.onrender.com/",
-        domHtml: SAMPLE_DOM
+        url: "https://cat-and-dog-p6qd.onrender.com/desktop",
+        domHtml: LANDING_DOM
       },
       summary: "sample"
     });
 
     expect(snapshot.semanticState).toMatchObject({
-      status: "ready",
-      routePath: "/",
+      status: "landing",
+      routePath: "/desktop",
       hasAppRoot: true,
-      hasPlayableSurface: true,
-      interactionExecuted: false
+      hasPlayableSurface: false,
+      hasGameplayHud: false,
+      hasStartControl: true,
+      gameplayEntered: false,
+      gameplayActionExecuted: false
     });
 
     const actions = await session.actions(snapshot);
-    expect(actions.map((action) => action.actionId)).toEqual(["interaction-pulse"]);
+    expect(actions.map((action) => action.actionId)).toEqual(["enter-gameplay"]);
 
-    const resolved = await session.resolveAction({ actionId: "interaction-pulse" }, snapshot);
+    const resolved = await session.resolveAction({ actionId: "enter-gameplay" }, snapshot);
     expect(resolved).toEqual([
+      {
+        kind: "click",
+        target: {
+          selector: "#start-game, [data-testid='start-game'], .start-game, .start-button, button[data-action='start']"
+        }
+      },
+      {
+        kind: "wait",
+        durationMs: 450
+      },
       {
         kind: "keypress",
         key: "Space"
@@ -187,18 +211,26 @@ describe("cat-and-dog plugin", () => {
     const session = await catAndDogWebPlugin.createSession({});
     const snapshot = buildSnapshot();
 
-    const resolved = await session.resolveAction({ actionId: "interaction-pulse" }, snapshot);
-    expect(resolved).toHaveLength(2);
+    const resolved = await session.resolveAction({ actionId: "enter-gameplay" }, snapshot);
+    expect(resolved).toHaveLength(4);
 
     const closingSnapshot = await session.translate({
       capturedAt: new Date().toISOString(),
       modes: ["dom"],
       payload: {
-        url: "https://cat-and-dog-p6qd.onrender.com/",
-        domHtml: SAMPLE_DOM
+        url: "https://cat-and-dog-p6qd.onrender.com/desktop",
+        domHtml: GAMEPLAY_DOM
       },
       summary: "post-action"
     });
+
+    expect(closingSnapshot.semanticState).toMatchObject({
+      status: "gameplay",
+      hasPlayableSurface: true,
+      hasGameplayHud: true,
+      gameplayEntered: true
+    });
+
     const actions = await session.actions(closingSnapshot);
     expect(actions).toHaveLength(0);
   });

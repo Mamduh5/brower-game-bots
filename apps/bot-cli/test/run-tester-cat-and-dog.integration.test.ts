@@ -51,7 +51,7 @@ describe("runTester integration (cat-and-dog)", () => {
         throw new Error("Failed to bind local fixture server.");
       }
 
-      process.env.GAME_BOTS_CAT_AND_DOG_URL = `http://127.0.0.1:${address.port}/`;
+      process.env.GAME_BOTS_CAT_AND_DOG_URL = `http://127.0.0.1:${address.port}/desktop`;
 
       try {
         const container = await createContainer({
@@ -72,17 +72,36 @@ describe("runTester integration (cat-and-dog)", () => {
 
         expect(storedRun?.phase).toBe("completed");
         expect(storedRun?.gameId).toBe("cat-and-dog-web");
+        const openingObservation = storedEvents.find(
+          (event) => event.type === "observation.captured" && event.observationKind === "opening"
+        );
+        const closingObservation = storedEvents.find(
+          (event) => event.type === "observation.captured" && event.observationKind === "post-action"
+        );
+
+        expect(openingObservation).toBeDefined();
+        expect(closingObservation).toBeDefined();
+        expect(storedEvents.some((event) => event.type === "action.executed")).toBe(true);
         expect(
           storedEvents.some(
-            (event) => event.type === "observation.captured" && event.observationKind === "opening"
+            (event) => event.type === "observation.captured" && event.observationKind === "state-expectation"
           )
         ).toBe(true);
-        expect(storedEvents.some((event) => event.type === "action.executed")).toBe(true);
         expect(
           storedEvents.some(
             (event) => event.type === "report.generated" && event.reportId === result.report.reportId
           )
         ).toBe(true);
+
+        expect(openingObservation?.payload.gameSemanticState).toMatchObject({
+          status: "landing",
+          gameplayEntered: false
+        });
+        expect(closingObservation?.payload.gameSemanticState).toMatchObject({
+          status: "gameplay",
+          gameplayEntered: true,
+          hasGameplayHud: true
+        });
 
         const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
         expect(reportArtifact).toBeDefined();

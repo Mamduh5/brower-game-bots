@@ -5,8 +5,11 @@ import { CAT_AND_DOG_SELECTORS } from "../selectors.js";
 export interface CatAndDogShellState {
   hasAppRoot: boolean;
   hasPlayableSurface: boolean;
+  hasGameplayHud: boolean;
+  hasStartControl: boolean;
+  gameplayEntered: boolean;
   routePath: string;
-  status: "loading" | "ready";
+  status: "loading" | "landing" | "gameplay";
 }
 
 function parseUrlPath(rawUrl: string): string {
@@ -57,17 +60,42 @@ function hasAnySelector(domHtml: string, selectors: readonly string[]): boolean 
   return selectors.some((selector) => domIncludesSelectorHint(domHtml, selector));
 }
 
+function stripNonVisibleSourceBlocks(domHtml: string): string {
+  return domHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+}
+
 export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellState {
-  const domHtml = typeof frame.payload.domHtml === "string" ? frame.payload.domHtml : "";
+  const domHtmlRaw = typeof frame.payload.domHtml === "string" ? frame.payload.domHtml : "";
+  const domHtml = stripNonVisibleSourceBlocks(domHtmlRaw);
   const url = typeof frame.payload.url === "string" ? frame.payload.url : "";
 
   const hasAppRoot = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.appRootCandidates);
   const hasPlayableSurface = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playableSurfaceCandidates);
+  const hasGameplayHud = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.gameplayHudCandidates);
+  const hasStartControl = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startControlCandidates);
+  const routePath = parseUrlPath(url);
+
+  const gameplayRouteHint =
+    routePath.includes("/desktop") || routePath.includes("/tablet") || routePath.includes("/mobile") || routePath.includes("/game");
+  const gameplayEntered = hasPlayableSurface && (hasGameplayHud || gameplayRouteHint);
+
+  const status: CatAndDogShellState["status"] = gameplayEntered
+    ? "gameplay"
+    : hasStartControl
+      ? "landing"
+      : hasAppRoot || hasPlayableSurface
+        ? "landing"
+        : "loading";
 
   return {
     hasAppRoot,
     hasPlayableSurface,
-    routePath: parseUrlPath(url),
-    status: hasAppRoot || hasPlayableSurface ? "ready" : "loading"
+    hasGameplayHud,
+    hasStartControl,
+    gameplayEntered,
+    routePath,
+    status
   };
 }
