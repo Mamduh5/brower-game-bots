@@ -1,5 +1,6 @@
 import type { AgentBrain, AgentContext, AgentDecision, DecisionInput, Evaluator } from "@game-bots/runtime-core";
 
+import { ClickabilityEvaluator } from "../evaluators/clickability-evaluator.js";
 import { CrashDetector } from "../evaluators/crash-detector.js";
 import { FreezeDetector } from "../evaluators/freeze-detector.js";
 import { UiHeuristicsEvaluator } from "../evaluators/ui-heuristics.js";
@@ -38,5 +39,5 @@ export function createTesterBrain(): AgentBrain {
 }
 
 export function createDefaultTesterEvaluators(): readonly Evaluator[] {
-  return [new CrashDetector(), new FreezeDetector(), new UiHeuristicsEvaluator()];
+  return [new ClickabilityEvaluator(), new CrashDetector(), new FreezeDetector(), new UiHeuristicsEvaluator()];
 }

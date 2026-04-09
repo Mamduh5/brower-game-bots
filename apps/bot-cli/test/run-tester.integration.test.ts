@@ -47,34 +47,49 @@ describe("runTester integration", () => {
       const storedRun = await repository.getRun(result.run.runId);
       const storedEvents = await repository.listEvents(result.run.runId);
       const storedFindings = await repository.getFindings(result.run.runId);
+      const clickabilityFinding = result.findings.find((finding) => finding.metadata?.clickProbe);
+      const resetFinding = result.findings.find((finding) => finding.title.includes("Reset control missing"));
 
       expect(storedRun?.phase).toBe("completed");
-      expect(result.findings).toHaveLength(1);
-      expect(result.findings[0]?.title).toContain("Reset control missing");
-      expect(result.findings[0]?.category).toBe("ui");
-      expect(result.findings[0]?.severity).toBe("medium");
-      expect(result.findings[0]?.evidence.length).toBeGreaterThanOrEqual(3);
-      expect(storedFindings).toHaveLength(1);
-      expect(storedFindings[0]?.findingId).toBe(result.findings[0]?.findingId);
+      expect(result.findings.length).toBeGreaterThanOrEqual(2);
+      expect(resetFinding).toBeDefined();
+      expect(resetFinding?.category).toBe("ui");
+      expect(resetFinding?.severity).toBe("medium");
+      expect(resetFinding?.evidence.length).toBeGreaterThanOrEqual(3);
+      expect(clickabilityFinding).toBeDefined();
+      expect(clickabilityFinding?.title).toContain("smaller clickable region");
+      expect(clickabilityFinding?.metadata?.clickProbe?.successRatio).toBeLessThan(
+        clickabilityFinding?.metadata?.clickProbe?.minimumSuccessRatio as number
+      );
+      expect(storedFindings.length).toBe(result.findings.length);
       expect(storedEvents.some((event) => event.type === "evaluation.finding_created")).toBe(true);
+      expect(
+        storedEvents.some(
+          (event) => event.type === "observation.captured" && event.observationKind === "click-probe"
+        )
+      ).toBe(true);
       expect(
         storedEvents.some(
           (event) => event.type === "report.generated" && event.reportId === result.report.reportId
         )
       ).toBe(true);
-      expect(result.report.summary.totalFindings).toBe(1);
-      expect(result.report.summary.categoryCounts.ui).toBe(1);
-      expect(result.report.summary.severityCounts.medium).toBe(1);
+      expect(result.report.summary.totalFindings).toBe(result.findings.length);
+      expect(result.report.summary.categoryCounts.ui).toBeGreaterThanOrEqual(2);
+      expect(result.report.summary.severityCounts.medium).toBeGreaterThanOrEqual(1);
 
       const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
       expect(reportArtifact).toBeDefined();
       await expect(access(path.join(artifactsPath, reportArtifact!.relativePath))).resolves.toBeUndefined();
       const reportJson = JSON.parse(await readFile(path.join(artifactsPath, reportArtifact!.relativePath), "utf8"));
-      expect(reportJson.findings[0].category).toBe("ui");
-      expect(reportJson.findings[0].severity).toBe("medium");
-      expect(reportJson.findings[0].summary).toContain("reset control");
-      expect(reportJson.findings[0].evidence.length).toBeGreaterThanOrEqual(3);
-      expect(reportJson.findings[0].reproSteps.length).toBeGreaterThan(0);
+      const reportClickabilityFinding = reportJson.findings.find(
+        (finding: { metadata?: { clickProbe?: unknown } }) => Boolean(finding.metadata?.clickProbe)
+      );
+      expect(reportClickabilityFinding).toBeDefined();
+      expect(reportClickabilityFinding.metadata.clickProbe.successRatio).toBeLessThan(
+        reportClickabilityFinding.metadata.clickProbe.minimumSuccessRatio
+      );
+      expect(reportClickabilityFinding.evidence.length).toBeGreaterThanOrEqual(3);
+      expect(reportClickabilityFinding.reproSteps.length).toBeGreaterThan(0);
     },
     30_000
   );

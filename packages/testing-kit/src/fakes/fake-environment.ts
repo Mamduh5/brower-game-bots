@@ -1,6 +1,8 @@
 import type {
   ActionResult,
   CaptureRequest,
+  ClickProbeRequest,
+  ClickProbeResult,
   EnvironmentAction,
   EnvironmentHealth,
   EnvironmentPort,
@@ -32,6 +34,36 @@ export class FakeEnvironmentSession implements EnvironmentSession {
       status: "succeeded",
       completedAt: new Date().toISOString(),
       payload: {}
+    };
+  }
+
+  async probeClickability(request: ClickProbeRequest): Promise<ClickProbeResult> {
+    const sampleResults = request.samplePoints.map((point) => ({
+      label: point.label,
+      xRatio: point.xRatio,
+      yRatio: point.yRatio,
+      absoluteX: point.xRatio * 100,
+      absoluteY: point.yRatio * 40,
+      matched: true,
+      clickStatus: "succeeded" as const
+    }));
+
+    return {
+      probeId: request.probeId,
+      surfaceSelector: request.surfaceSelector,
+      ...(request.activationSelector ? { activationSelector: request.activationSelector } : {}),
+      measuredAt: new Date().toISOString(),
+      visibleBounds: {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 40
+      },
+      totalSamples: sampleResults.length,
+      successfulSamples: sampleResults.length,
+      successRatio: 1,
+      sampleResults,
+      summary: "Fake environment reported a fully clickable control."
     };
   }
 

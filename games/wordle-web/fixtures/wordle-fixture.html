@@ -17,12 +17,51 @@
         padding: 8px;
         width: 240px;
       }
+
+      #help-probe-shell {
+        align-items: center;
+        background: linear-gradient(135deg, #f7d67a, #f2b94b);
+        border: 1px solid #946200;
+        border-radius: 14px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        color: #422b00;
+        display: flex;
+        height: 68px;
+        justify-content: center;
+        margin: 16px 0;
+        position: relative;
+        width: 260px;
+      }
+
+      #help-probe-shell span {
+        font-weight: 600;
+        left: 16px;
+        position: absolute;
+        top: 12px;
+      }
+
+      #help-probe-trigger {
+        background: #3a2800;
+        border: 0;
+        border-radius: 999px;
+        color: #fff7df;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        height: 28px;
+        width: 92px;
+      }
     </style>
   </head>
   <body>
     <main id="game-root">
       <h1>Wordle Fixture</h1>
       <p id="status">ready</p>
+      <div id="help-probe-shell" aria-label="Help CTA shell">
+        <span>Need help?</span>
+        <button id="help-probe-trigger" type="button">Open Help</button>
+      </div>
+      <p id="help-probe-status">idle</p>
       <label for="guess-input">Guess</label>
       <input id="guess-input" autocomplete="off" />
       <button id="submit-guess" type="button">Submit Guess</button>
@@ -34,8 +73,17 @@
     <script>
       const input = document.getElementById("guess-input");
       const submitButton = document.getElementById("submit-guess");
+      const helpProbeTrigger = document.getElementById("help-probe-trigger");
+      const helpProbeStatus = document.getElementById("help-probe-status");
       const status = document.getElementById("status");
       const firstRow = document.querySelector("[data-row='0']");
+      let helpProbeHits = 0;
+
+      helpProbeTrigger.addEventListener("click", (event) => {
+        event.stopPropagation();
+        helpProbeHits += 1;
+        helpProbeStatus.textContent = `activated-${helpProbeHits}`;
+      });
 
       submitButton.addEventListener("click", () => {
         const guess = input.value.trim();

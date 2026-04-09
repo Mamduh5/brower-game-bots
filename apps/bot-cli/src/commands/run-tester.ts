@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 
 import type { ArtifactRef, Finding, JsonObject, RunEvent, RunRecord, RunReport, RunRequest } from "@game-bots/contracts";
 import { createDefaultTesterEvaluators, createTesterBrain, ScenarioExecutor } from "@game-bots/agent-tester";
-import type { EnvironmentHealth, ObservationFrame } from "@game-bots/environment-sdk";
+import {
+  DEFAULT_CLICK_PROBE_SAMPLE_POINTS,
+  type ClickProbeSampleResult,
+  type EnvironmentHealth,
+  type ObservationFrame
+} from "@game-bots/environment-sdk";
 import { PlaywrightEnvironmentPort } from "@game-bots/environment-playwright";
 import { toJsonReport } from "@game-bots/reporting";
 import { SystemClock } from "@game-bots/runtime-core";
@@ -28,6 +33,21 @@ function buildObservationPayload(frame: ObservationFrame, snapshot: GameSnapshot
     gameSemanticState: snapshot.semanticState,
     gameMetrics: snapshot.metrics
   };
+}
+
+function toJsonSampleResults(
+  sampleResults: readonly ClickProbeSampleResult[]
+): JsonObject["sampleResults"] {
+  return sampleResults.map((sample) => ({
+    label: sample.label,
+    xRatio: sample.xRatio,
+    yRatio: sample.yRatio,
+    absoluteX: sample.absoluteX,
+    absoluteY: sample.absoluteY,
+    matched: sample.matched,
+    clickStatus: sample.clickStatus,
+    ...(sample.detail ? { detail: sample.detail } : {})
+  }));
 }
 
 function buildHealthObservationPayload(health: EnvironmentHealth): JsonObject {
@@ -168,6 +188,41 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     await collectFindings(openingObservationEvent);
 
     const openingActions = await gameSession.actions(openingSnapshot);
+
+    for (const clickProbe of scenario.clickProbes) {
+      const probeResult = await environmentSession.probeClickability({
+        probeId: clickProbe.probeId,
+        surfaceSelector: clickProbe.surfaceSelector,
+        ...(clickProbe.activationSelector ? { activationSelector: clickProbe.activationSelector } : {}),
+        samplePoints: clickProbe.samplePoints ? [...clickProbe.samplePoints] : [...DEFAULT_CLICK_PROBE_SAMPLE_POINTS]
+      });
+
+      const clickProbeEvent: RunEvent = {
+        eventId: randomUUID(),
+        runId: run.runId,
+        sequence: await container.runEngine.nextSequence(run.runId),
+        timestamp: probeResult.measuredAt,
+        type: "observation.captured",
+        observationKind: "click-probe",
+        summary: probeResult.summary,
+        payload: {
+          probeId: clickProbe.probeId,
+          description: clickProbe.description,
+          surfaceSelector: clickProbe.surfaceSelector,
+          ...(clickProbe.activationSelector ? { activationSelector: clickProbe.activationSelector } : {}),
+          minimumSuccessRatio: clickProbe.minimumSuccessRatio,
+          successRatio: probeResult.successRatio,
+          totalSamples: probeResult.totalSamples,
+          successfulSamples: probeResult.successfulSamples,
+          sampleResults: toJsonSampleResults(probeResult.sampleResults),
+          ...(probeResult.visibleBounds ? { visibleBounds: probeResult.visibleBounds } : {})
+        }
+      };
+
+      await container.runEngine.appendEvent(clickProbeEvent);
+      await collectFindings(clickProbeEvent);
+    }
+
     const openingDecision = await brain.decide({
       run,
       gameState: {

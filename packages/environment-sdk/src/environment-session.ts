@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ArtifactRefSchema, RunIdSchema } from "@game-bots/contracts";
 
 import type { ActionResult, EnvironmentAction } from "./action.js";
+import type { ClickProbeRequest, ClickProbeResult } from "./click-probe.js";
 import type { EnvironmentHealth } from "./health.js";
 import type { ObservationFrame, ObservationRequest } from "./observation.js";
 
@@ -29,6 +30,7 @@ export interface EnvironmentSession {
   stop(reason?: string): Promise<void>;
   observe(request: ObservationRequest): Promise<ObservationFrame>;
   execute(action: EnvironmentAction): Promise<ActionResult>;
+  probeClickability(request: ClickProbeRequest): Promise<ClickProbeResult>;
   capture(request: CaptureRequest): Promise<z.infer<typeof ArtifactRefSchema>>;
   health(): Promise<EnvironmentHealth>;
 }

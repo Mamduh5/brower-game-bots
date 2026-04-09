@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { EvidenceRefSchema } from "./artifacts.js";
 import { FindingIdSchema, RunIdSchema, ScenarioIdSchema } from "./ids.js";
+import { JsonObjectSchema } from "./json.js";
 
 export const FindingSeveritySchema = z.enum(["critical", "high", "medium", "low", "info"]);
 export type FindingSeverity = z.infer<typeof FindingSeveritySchema>;
@@ -36,6 +37,7 @@ export const FindingSchema = z.object({
   confidence: z.number().min(0).max(1),
   evidence: z.array(EvidenceRefSchema).min(1),
   reproSteps: z.array(ReproStepSchema),
+  metadata: JsonObjectSchema.optional(),
   createdAt: z.string().datetime()
 });
 export type Finding = z.infer<typeof FindingSchema>;

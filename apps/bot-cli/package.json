@@ -21,6 +21,7 @@
     "@game-bots/artifact-store-fs": "workspace:*",
     "@game-bots/config": "workspace:*",
     "@game-bots/contracts": "workspace:*",
+    "@game-bots/environment-sdk": "workspace:*",
     "@game-bots/environment-playwright": "workspace:*",
     "@game-bots/logging": "workspace:*",
     "@game-bots/persistence-sqlite": "workspace:*",

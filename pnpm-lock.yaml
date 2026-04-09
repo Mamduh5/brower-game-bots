@@ -44,6 +44,9 @@ importers:
       '@game-bots/environment-playwright':
         specifier: workspace:*
         version: link:../../packages/environment-playwright
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../../packages/environment-sdk
       '@game-bots/logging':
         specifier: workspace:*
         version: link:../../packages/logging
@@ -93,6 +96,9 @@ importers:
       '@game-bots/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../game-sdk
       '@game-bots/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core

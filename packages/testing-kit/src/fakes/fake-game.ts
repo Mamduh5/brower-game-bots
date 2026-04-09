@@ -35,7 +35,7 @@ class FakeGameSession implements GameSession {
   }
 
   async scenarios(): Promise<readonly TestScenario[]> {
-    return [{ scenarioId: "smoke", description: "Basic smoke scenario", tags: ["smoke"] }];
+    return [{ scenarioId: "smoke", description: "Basic smoke scenario", tags: ["smoke"], clickProbes: [] }];
   }
 
   async evaluators(): Promise<readonly Evaluator[]> {

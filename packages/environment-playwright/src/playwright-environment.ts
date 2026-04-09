@@ -4,6 +4,8 @@ import type { JsonObject } from "@game-bots/contracts";
 import type {
   ActionResult,
   CaptureRequest,
+  ClickProbeRequest,
+  ClickProbeResult,
   EnvironmentAction,
   EnvironmentHealth,
   EnvironmentPort,
@@ -132,6 +134,113 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
       status: "succeeded",
       completedAt: new Date().toISOString(),
       payload: {}
+    };
+  }
+
+  async probeClickability(request: ClickProbeRequest): Promise<ClickProbeResult> {
+    const page = this.browser.getPage();
+    const surfaceLocator = page.locator(request.surfaceSelector);
+    const bounds = await surfaceLocator.boundingBox();
+
+    if (!bounds) {
+      return {
+        probeId: request.probeId,
+        surfaceSelector: request.surfaceSelector,
+        ...(request.activationSelector ? { activationSelector: request.activationSelector } : {}),
+        measuredAt: new Date().toISOString(),
+        totalSamples: request.samplePoints.length,
+        successfulSamples: 0,
+        successRatio: 0,
+        sampleResults: request.samplePoints.map((point) => ({
+          label: point.label,
+          xRatio: point.xRatio,
+          yRatio: point.yRatio,
+          absoluteX: 0,
+          absoluteY: 0,
+          matched: false,
+          clickStatus: "failed",
+          detail: `Surface selector '${request.surfaceSelector}' was not visible.`
+        })),
+        summary: `Surface selector '${request.surfaceSelector}' was not visible for click probing.`
+      };
+    }
+
+    const sampleResults = [];
+    let successfulSamples = 0;
+
+    for (const point of request.samplePoints) {
+      const absoluteX = bounds.x + bounds.width * point.xRatio;
+      const absoluteY = bounds.y + bounds.height * point.yRatio;
+      const hitTarget = await page.evaluate(
+        ({ x, y, surfaceSelector, activationSelector }) => {
+          const node = document.elementFromPoint(x, y);
+          if (!(node instanceof Element)) {
+            return false;
+          }
+
+          const selector = activationSelector ?? surfaceSelector;
+          return Boolean(node.matches(selector) || node.closest(selector));
+        },
+        {
+          x: absoluteX,
+          y: absoluteY,
+          surfaceSelector: request.surfaceSelector,
+          activationSelector: request.activationSelector
+        }
+      );
+
+      if (!hitTarget) {
+        sampleResults.push({
+          label: point.label,
+          xRatio: point.xRatio,
+          yRatio: point.yRatio,
+          absoluteX,
+          absoluteY,
+          matched: false,
+          clickStatus: "missed" as const,
+          detail: "Sample point did not resolve to the clickable target."
+        });
+        continue;
+      }
+
+      try {
+        await page.mouse.click(absoluteX, absoluteY);
+        successfulSamples += 1;
+        sampleResults.push({
+          label: point.label,
+          xRatio: point.xRatio,
+          yRatio: point.yRatio,
+          absoluteX,
+          absoluteY,
+          matched: true,
+          clickStatus: "succeeded" as const,
+          detail: "Sample point resolved to the clickable target and the click completed."
+        });
+      } catch (error) {
+        sampleResults.push({
+          label: point.label,
+          xRatio: point.xRatio,
+          yRatio: point.yRatio,
+          absoluteX,
+          absoluteY,
+          matched: true,
+          clickStatus: "failed" as const,
+          detail: error instanceof Error ? error.message : "Click attempt failed."
+        });
+      }
+    }
+
+    return {
+      probeId: request.probeId,
+      surfaceSelector: request.surfaceSelector,
+      ...(request.activationSelector ? { activationSelector: request.activationSelector } : {}),
+      measuredAt: new Date().toISOString(),
+      visibleBounds: bounds,
+      totalSamples: request.samplePoints.length,
+      successfulSamples,
+      successRatio: request.samplePoints.length === 0 ? 0 : successfulSamples / request.samplePoints.length,
+      sampleResults,
+      summary: `Clickable samples: ${successfulSamples}/${request.samplePoints.length} within the visible control bounds.`
     };
   }
 
