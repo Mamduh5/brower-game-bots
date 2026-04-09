@@ -6,6 +6,9 @@ export interface CatAndDogShellState {
   hasAppRoot: boolean;
   hasPlayableSurface: boolean;
   hasGameplayHud: boolean;
+  hasInteractionStatus: boolean;
+  interactionStatusText: string | null;
+  interactionAcknowledged: boolean;
   hasStartControl: boolean;
   gameplayEntered: boolean;
   routePath: string;
@@ -60,6 +63,68 @@ function hasAnySelector(domHtml: string, selectors: readonly string[]): boolean 
   return selectors.some((selector) => domIncludesSelectorHint(domHtml, selector));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripInnerTags(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTextBySelectorHint(domHtml: string, selector: string): string | null {
+  if (!domHtml) {
+    return null;
+  }
+
+  if (selector.startsWith("#")) {
+    const id = escapeRegExp(selector.slice(1));
+    const match = domHtml.match(
+      new RegExp(`<([a-zA-Z0-9:-]+)[^>]*\\bid=(["'])${id}\\2[^>]*>([\\s\\S]*?)<\\/\\1>`, "i")
+    );
+    return match?.[3] ? stripInnerTags(match[3]) : null;
+  }
+
+  if (selector.startsWith(".")) {
+    const className = escapeRegExp(selector.slice(1));
+    const match = domHtml.match(
+      new RegExp(
+        `<([a-zA-Z0-9:-]+)[^>]*\\bclass=(["'])[^"']*\\b${className}\\b[^"']*\\2[^>]*>([\\s\\S]*?)<\\/\\1>`,
+        "i"
+      )
+    );
+    return match?.[3] ? stripInnerTags(match[3]) : null;
+  }
+
+  if (selector.includes("[data-testid='")) {
+    const token = selector.match(/data-testid='([^']+)'/)?.[1] ?? "";
+    if (!token) {
+      return null;
+    }
+
+    const escapedToken = escapeRegExp(token);
+    const match = domHtml.match(
+      new RegExp(`<([a-zA-Z0-9:-]+)[^>]*\\bdata-testid=(["'])${escapedToken}\\2[^>]*>([\\s\\S]*?)<\\/\\1>`, "i")
+    );
+    return match?.[3] ? stripInnerTags(match[3]) : null;
+  }
+
+  return null;
+}
+
+function extractTextFromAnySelector(domHtml: string, selectors: readonly string[]): string | null {
+  for (const selector of selectors) {
+    const text = extractTextBySelectorHint(domHtml, selector);
+    if (text && text.length > 0) {
+      return text;
+    }
+  }
+
+  return null;
+}
+
 function stripNonVisibleSourceBlocks(domHtml: string): string {
   return domHtml
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -74,6 +139,10 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const hasAppRoot = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.appRootCandidates);
   const hasPlayableSurface = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playableSurfaceCandidates);
   const hasGameplayHud = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.gameplayHudCandidates);
+  const interactionStatusText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.interactionStatusCandidates);
+  const hasInteractionStatus = interactionStatusText !== null;
+  const interactionAcknowledged =
+    interactionStatusText !== null && /\b(action|interaction|input)\s+received\b/i.test(interactionStatusText);
   const hasStartControl = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startControlCandidates);
   const routePath = parseUrlPath(url);
 
@@ -93,6 +162,9 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     hasAppRoot,
     hasPlayableSurface,
     hasGameplayHud,
+    hasInteractionStatus,
+    interactionStatusText,
+    interactionAcknowledged,
     hasStartControl,
     gameplayEntered,
     routePath,

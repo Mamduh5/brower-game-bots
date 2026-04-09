@@ -23,6 +23,20 @@ export const CAT_AND_DOG_SMOKE_SCENARIO: TestScenario = {
           path: "status",
           operator: "equals",
           expectedValue: "gameplay"
+        },
+        {
+          effectId: "gameplay-hud-visible",
+          description: "Gameplay HUD should be visible in gameplay mode.",
+          path: "hasGameplayHud",
+          operator: "equals",
+          expectedValue: true
+        },
+        {
+          effectId: "gameplay-interaction-acknowledged",
+          description: "In-game interaction should acknowledge the Space input.",
+          path: "interactionAcknowledged",
+          operator: "equals",
+          expectedValue: true
         }
       ]
     }

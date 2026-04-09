@@ -100,7 +100,9 @@ describe("runTester integration (cat-and-dog)", () => {
         expect(closingObservation?.payload.gameSemanticState).toMatchObject({
           status: "gameplay",
           gameplayEntered: true,
-          hasGameplayHud: true
+          hasGameplayHud: true,
+          interactionAcknowledged: true,
+          interactionStatusText: "Gameplay action received"
         });
 
         const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");

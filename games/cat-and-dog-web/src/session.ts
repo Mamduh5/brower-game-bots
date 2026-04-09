@@ -84,13 +84,17 @@ export class CatAndDogGameSession implements GameSession {
         hasAppRoot: shell.hasAppRoot,
         hasPlayableSurface: shell.hasPlayableSurface,
         hasGameplayHud: shell.hasGameplayHud,
+        hasInteractionStatus: shell.hasInteractionStatus,
+        interactionStatusText: shell.interactionStatusText,
+        interactionAcknowledged: shell.interactionAcknowledged,
         hasStartControl: shell.hasStartControl,
         gameplayEntered: shell.gameplayEntered,
         gameplayActionExecuted: this.gameplayActionExecuted
       },
       metrics: {
         hasPlayableSurface: shell.hasPlayableSurface ? 1 : 0,
-        hasGameplayHud: shell.hasGameplayHud ? 1 : 0
+        hasGameplayHud: shell.hasGameplayHud ? 1 : 0,
+        interactionAcknowledged: shell.interactionAcknowledged ? 1 : 0
       }
     };
   }

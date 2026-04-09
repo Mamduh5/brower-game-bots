@@ -100,13 +100,17 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
       hasAppRoot: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
+      hasInteractionStatus: false,
+      interactionStatusText: null,
+      interactionAcknowledged: false,
       hasStartControl: true,
       gameplayEntered: false,
       gameplayActionExecuted: false
     },
     metrics: {
       hasPlayableSurface: 0,
-      hasGameplayHud: 0
+      hasGameplayHud: 0,
+      interactionAcknowledged: 0
     },
     ...overrides
   };
@@ -122,6 +126,7 @@ const GAMEPLAY_DOM = `
 <main id="root">
   <div id="player-hud" data-testid="player-hud">HP: 100</div>
   <canvas data-testid="game-canvas" width="800" height="600"></canvas>
+  <p id="interaction-status" data-testid="interaction-status">Gameplay action received</p>
 </main>
 `;
 
@@ -172,6 +177,9 @@ describe("cat-and-dog plugin", () => {
       hasAppRoot: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
+      hasInteractionStatus: false,
+      interactionStatusText: null,
+      interactionAcknowledged: false,
       hasStartControl: true,
       gameplayEntered: false,
       gameplayActionExecuted: false
@@ -228,6 +236,9 @@ describe("cat-and-dog plugin", () => {
       status: "gameplay",
       hasPlayableSurface: true,
       hasGameplayHud: true,
+      hasInteractionStatus: true,
+      interactionStatusText: "Gameplay action received",
+      interactionAcknowledged: true,
       gameplayEntered: true
     });
 
