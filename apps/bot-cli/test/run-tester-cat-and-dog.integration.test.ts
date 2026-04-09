@@ -51,7 +51,7 @@ describe("runTester integration (cat-and-dog)", () => {
         throw new Error("Failed to bind local fixture server.");
       }
 
-      process.env.GAME_BOTS_CAT_AND_DOG_URL = `http://127.0.0.1:${address.port}/desktop`;
+      process.env.GAME_BOTS_CAT_AND_DOG_URL = `http://127.0.0.1:${address.port}/play/desktop/`;
 
       try {
         const container = await createContainer({

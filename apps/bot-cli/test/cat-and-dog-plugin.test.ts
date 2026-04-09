@@ -96,7 +96,7 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
     isTerminal: false,
     semanticState: {
       status: "landing",
-      routePath: "/desktop",
+      routePath: "/play/desktop/",
       hasAppRoot: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
@@ -128,7 +128,7 @@ const GAMEPLAY_DOM = `
 describe("cat-and-dog plugin", () => {
   it("bootstraps by navigating to the configured real-game URL and waiting for settle", async () => {
     const previousUrl = process.env.GAME_BOTS_CAT_AND_DOG_URL;
-    process.env.GAME_BOTS_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/desktop";
+    process.env.GAME_BOTS_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/play/desktop/";
 
     try {
       const session = await catAndDogWebPlugin.createSession({});
@@ -138,7 +138,7 @@ describe("cat-and-dog plugin", () => {
       expect(environment.executedActions).toEqual([
         {
           kind: "navigate",
-          url: "https://cat-and-dog-p6qd.onrender.com/desktop"
+          url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/"
         },
         {
           kind: "wait",
@@ -160,7 +160,7 @@ describe("cat-and-dog plugin", () => {
       capturedAt: new Date().toISOString(),
       modes: ["dom"],
       payload: {
-        url: "https://cat-and-dog-p6qd.onrender.com/desktop",
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
         domHtml: LANDING_DOM
       },
       summary: "sample"
@@ -168,7 +168,7 @@ describe("cat-and-dog plugin", () => {
 
     expect(snapshot.semanticState).toMatchObject({
       status: "landing",
-      routePath: "/desktop",
+      routePath: "/play/desktop/",
       hasAppRoot: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
@@ -218,7 +218,7 @@ describe("cat-and-dog plugin", () => {
       capturedAt: new Date().toISOString(),
       modes: ["dom"],
       payload: {
-        url: "https://cat-and-dog-p6qd.onrender.com/desktop",
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
         domHtml: GAMEPLAY_DOM
       },
       summary: "post-action"

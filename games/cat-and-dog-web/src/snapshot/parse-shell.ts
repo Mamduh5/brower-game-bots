@@ -78,7 +78,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const routePath = parseUrlPath(url);
 
   const gameplayRouteHint =
-    routePath.includes("/desktop") || routePath.includes("/tablet") || routePath.includes("/mobile") || routePath.includes("/game");
+    routePath.includes("/play/desktop/") || routePath.includes("/play/tablet") || routePath.includes("/play/mobile") || routePath.includes("/game");
   const gameplayEntered = hasPlayableSurface && (hasGameplayHud || gameplayRouteHint);
 
   const status: CatAndDogShellState["status"] = gameplayEntered

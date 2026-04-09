@@ -59,7 +59,7 @@ export class MissingShellEvaluator implements Evaluator {
           reproSteps: [
             {
               order: 1,
-              instruction: "Open https://cat-and-dog-p6qd.onrender.com/desktop."
+              instruction: "Open https://cat-and-dog-p6qd.onrender.com/play/desktop/."
             },
             {
               order: 2,
