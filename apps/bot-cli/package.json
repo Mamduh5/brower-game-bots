@@ -1,0 +1,34 @@
+{
+  "name": "@game-bots/bot-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "bin": {
+    "game-bots": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue",
+    "dev": "tsx src/main.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@game-bots/agent-player": "workspace:*",
+    "@game-bots/agent-tester": "workspace:*",
+    "@game-bots/artifact-store-fs": "workspace:*",
+    "@game-bots/config": "workspace:*",
+    "@game-bots/contracts": "workspace:*",
+    "@game-bots/environment-playwright": "workspace:*",
+    "@game-bots/logging": "workspace:*",
+    "@game-bots/persistence-sqlite": "workspace:*",
+    "@game-bots/reporting": "workspace:*",
+    "@game-bots/runtime-core": "workspace:*",
+    "@game-bots/wordle-web": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

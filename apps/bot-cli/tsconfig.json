@@ -1,0 +1,44 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "./src",
+    "outDir": "./dist"
+  },
+  "references": [
+    {
+      "path": "../../packages/agent-player"
+    },
+    {
+      "path": "../../packages/agent-tester"
+    },
+    {
+      "path": "../../packages/artifact-store-fs"
+    },
+    {
+      "path": "../../packages/config"
+    },
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/environment-playwright"
+    },
+    {
+      "path": "../../packages/logging"
+    },
+    {
+      "path": "../../packages/persistence-sqlite"
+    },
+    {
+      "path": "../../packages/reporting"
+    },
+    {
+      "path": "../../packages/runtime-core"
+    },
+    {
+      "path": "../../games/wordle-web"
+    }
+  ],
+  "include": ["src/**/*.ts"]
+}
