@@ -1,0 +1,5 @@
+agentKind: player
+gameId: wordle-web
+environmentId: playwright-browser
+goal:
+  mode: win-fast

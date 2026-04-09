@@ -1,0 +1,4 @@
+agentKind: tester
+gameId: wordle-web
+environmentId: playwright-browser
+scenarioId: smoke
