@@ -70,3 +70,15 @@ Implementation strategy:
 - identify what must be wrapped
 - identify what must be redesigned from scratch
 - propose smallest high-quality path to the target architecture
+
+## Run command
+
+pnpm install
+pnpm typecheck
+pnpm build
+pnpm test
+pnpm test:e2e
+
+pnpm run dev
+pnpm run dev -- run-player
+pnpm run dev -- run-tester
