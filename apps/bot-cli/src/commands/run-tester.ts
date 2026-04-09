@@ -16,6 +16,7 @@ import { wordleWebPlugin } from "@game-bots/wordle-web";
 import type { GameSnapshot } from "@game-bots/game-sdk";
 
 import type { AppContainer } from "../bootstrap/container.js";
+import { finalizeFindingsQuality, withEvaluatorMetadata } from "./finding-quality.js";
 
 export interface TesterRunResult {
   run: RunRecord;
@@ -72,19 +73,6 @@ function buildActionEventPayload(
 
 function isTerminalPhase(phase: RunRecord["phase"]): boolean {
   return phase === "completed" || phase === "failed" || phase === "cancelled";
-}
-
-function enrichFindingsWithArtifacts(findings: readonly Finding[], artifacts: readonly ArtifactRef[]): Finding[] {
-  const artifactEvidence = artifacts.map((artifact) => ({
-    artifactId: artifact.artifactId,
-    label: artifact.kind,
-    detail: artifact.relativePath
-  }));
-
-  return findings.map((finding) => ({
-    ...finding,
-    evidence: [...finding.evidence, ...artifactEvidence]
-  }));
 }
 
 function toJsonValue(value: unknown): JsonObject | string | number | boolean | null | JsonObject[] | (string | number | boolean | null)[] {
@@ -157,16 +145,14 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
   logger.info({ selectedScenario: scenario.scenarioId }, "Starting tester run.");
 
   const collectFindings = async (event: RunEvent): Promise<void> => {
-    const emitted = await Promise.all(
-      evaluators.map((evaluator) =>
-        evaluator.onEvent(event, {
-          run,
-          clock
-        })
-      )
-    );
+    for (const evaluator of evaluators) {
+      const emitted = await evaluator.onEvent(event, {
+        run,
+        clock
+      });
 
-    findings.push(...emitted.flat());
+      findings.push(...emitted.map((finding) => withEvaluatorMetadata(finding, evaluator.id)));
+    }
   };
 
   try {
@@ -401,10 +387,13 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
         })
       )
     );
-    findings.push(...finalizedFindings.flat());
+    for (const [evaluatorIndex, evaluator] of evaluators.entries()) {
+      const emitted = finalizedFindings[evaluatorIndex] ?? [];
+      findings.push(...emitted.map((finding) => withEvaluatorMetadata(finding, evaluator.id)));
+    }
 
-    const enrichedFindings = enrichFindingsWithArtifacts(findings, capturedArtifacts);
-    for (const finding of enrichedFindings) {
+    const qualityFindings = finalizeFindingsQuality(findings, capturedArtifacts);
+    for (const finding of qualityFindings) {
       await container.runEngine.appendEvent({
         eventId: randomUUID(),
         runId: run.runId,
@@ -418,7 +407,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     run = await container.runEngine.transitionPhase(run, "reporting");
     report = container.reportBuilder.build({
       run,
-      findings: enrichedFindings,
+      findings: qualityFindings,
       evidence: capturedArtifacts,
       completedAt: clock.now()
     });
@@ -461,20 +450,20 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     logger.info(
       {
         finalPhase: run.phase,
-        findingCount: enrichedFindings.length,
+        findingCount: qualityFindings.length,
         artifactCount: capturedArtifacts.length
       },
       "Completed tester run."
     );
 
     process.stdout.write(
-      `Completed tester run ${run.runId} with ${enrichedFindings.length} findings and ${capturedArtifacts.length} artifacts.\n`
+      `Completed tester run ${run.runId} with ${qualityFindings.length} findings and ${capturedArtifacts.length} artifacts.\n`
     );
 
     return {
       run,
       events: await container.runEngine.listEvents(run.runId),
-      findings: enrichedFindings,
+      findings: qualityFindings,
       report,
       artifacts: capturedArtifacts
     };

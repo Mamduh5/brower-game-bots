@@ -56,15 +56,22 @@ describe("runTester integration", () => {
       expect(resetFinding).toBeDefined();
       expect(resetFinding?.category).toBe("ui");
       expect(resetFinding?.severity).toBe("medium");
-      expect(resetFinding?.evidence.length).toBeGreaterThanOrEqual(3);
+      expect(resetFinding?.evidence.length).toBeGreaterThanOrEqual(2);
+      expect(resetFinding?.metadata?.sources).toBeDefined();
       expect(clickabilityFinding).toBeDefined();
       expect(clickabilityFinding?.title).toContain("smaller clickable region");
       expect(clickabilityFinding?.metadata?.clickProbe?.successRatio).toBeLessThan(
         clickabilityFinding?.metadata?.clickProbe?.minimumSuccessRatio as number
       );
+      expect(clickabilityFinding?.evidence.length).toBeGreaterThanOrEqual(2);
+      expect(clickabilityFinding?.metadata?.sources).toBeDefined();
       expect(stateExpectationFinding).toBeDefined();
       expect(stateExpectationFinding?.category).toBe("functional");
       expect(stateExpectationFinding?.metadata?.stateExpectation?.failedEffects.length).toBeGreaterThanOrEqual(1);
+      expect(
+        stateExpectationFinding?.evidence.some((entry) => entry.label === "state-expectation")
+      ).toBe(true);
+      expect(stateExpectationFinding?.metadata?.sources).toBeDefined();
       expect(storedFindings.length).toBe(result.findings.length);
       expect(storedEvents.some((event) => event.type === "evaluation.finding_created")).toBe(true);
       expect(
@@ -86,6 +93,9 @@ describe("runTester integration", () => {
       expect(result.report.summary.categoryCounts.ui).toBeGreaterThanOrEqual(2);
       expect(result.report.summary.categoryCounts.functional).toBeGreaterThanOrEqual(1);
       expect(result.report.summary.severityCounts.medium).toBeGreaterThanOrEqual(1);
+      expect(result.report.summary.highFindings).toBeGreaterThanOrEqual(1);
+      expect(result.report.summary.topFindings.length).toBeGreaterThan(0);
+      expect(result.report.summary.artifactCounts.screenshot).toBeGreaterThanOrEqual(1);
 
       const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
       expect(reportArtifact).toBeDefined();
@@ -98,13 +108,14 @@ describe("runTester integration", () => {
       expect(reportClickabilityFinding.metadata.clickProbe.successRatio).toBeLessThan(
         reportClickabilityFinding.metadata.clickProbe.minimumSuccessRatio
       );
-      expect(reportClickabilityFinding.evidence.length).toBeGreaterThanOrEqual(3);
+      expect(reportClickabilityFinding.evidence.length).toBeGreaterThanOrEqual(2);
       expect(reportClickabilityFinding.reproSteps.length).toBeGreaterThan(0);
       const reportStateExpectationFinding = reportJson.findings.find(
         (finding: { metadata?: { stateExpectation?: unknown } }) => Boolean(finding.metadata?.stateExpectation)
       );
       expect(reportStateExpectationFinding).toBeDefined();
       expect(reportStateExpectationFinding.metadata.stateExpectation.failedEffects.length).toBeGreaterThanOrEqual(1);
+      expect(reportJson.summary.topFindings.length).toBeGreaterThan(0);
     },
     30_000
   );
