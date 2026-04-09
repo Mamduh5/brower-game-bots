@@ -1,0 +1,18 @@
+logging:
+  level: info
+  baseFields:
+    service: browser-game-bots
+
+persistence:
+  sqlite:
+    filename: ./data/local-dev.sqlite
+
+artifacts:
+  rootDir: ./artifacts
+
+runtime:
+  defaultEnvironmentId: playwright-browser
+  defaultArtifactCapture:
+    screenshots: true
+    traces: true
+    videos: false

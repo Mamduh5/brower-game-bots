@@ -1,0 +1,8 @@
+logging:
+  level: info
+
+runtime:
+  defaultArtifactCapture:
+    screenshots: true
+    traces: true
+    videos: true
