@@ -137,6 +137,21 @@ export class SqliteRunRepository implements RunRepository {
     });
   }
 
+  async getReport(runId: string): Promise<RunReport | null> {
+    const db = await this.databasePromise;
+    const row = this.selectOne(
+      db,
+      "SELECT payload_json FROM reports WHERE run_id = ?",
+      [runId]
+    );
+
+    if (!row) {
+      return null;
+    }
+
+    return RunReportSchema.parse(JSON.parse(String(row.payload_json)));
+  }
+
   private async initialize(): Promise<Database> {
     const wasmPath = fileURLToPath(new URL("../node_modules/sql.js/dist/sql-wasm.wasm", import.meta.url));
     const SQL = await initSqlJs({

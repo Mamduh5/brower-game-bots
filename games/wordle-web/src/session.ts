@@ -12,6 +12,7 @@ import type {
 import type { Evaluator } from "@game-bots/runtime-core";
 
 import { buildSubmitGuessAction } from "./actions/submit-guess.js";
+import { MissingResetButtonEvaluator } from "./evaluators/missing-reset-button.js";
 import { WORDLE_SMOKE_SCENARIO } from "./scenarios/smoke.scenario.js";
 import { WORDLE_SELECTORS } from "./selectors.js";
 import { parseBoard } from "./snapshot/parse-board.js";
@@ -81,6 +82,6 @@ export class WordleGameSession implements GameSession {
   }
 
   async evaluators(): Promise<readonly Evaluator[]> {
-    return [];
+    return [new MissingResetButtonEvaluator()];
   }
 }

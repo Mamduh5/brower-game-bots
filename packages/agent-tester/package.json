@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@game-bots/contracts": "workspace:*",
+    "@game-bots/game-sdk": "workspace:*",
     "@game-bots/runtime-core": "workspace:*"
   }
 }
