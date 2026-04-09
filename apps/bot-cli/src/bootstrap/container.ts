@@ -8,6 +8,7 @@ import { ReportBuilder } from "@game-bots/reporting";
 import { RunEngine } from "@game-bots/runtime-core";
 
 import { LoggerEventPublisher } from "./logger-event-publisher.js";
+import { resolveConfigPaths, resolveWorkspaceRoot } from "./path-resolution.js";
 
 export interface AppContainer {
   config: AppConfig;
@@ -23,29 +24,11 @@ export interface CreateContainerOptions {
   configPaths?: readonly string[];
 }
 
-function resolveConfigPaths(workspaceRoot: string, options?: CreateContainerOptions): readonly string[] {
-  if (options?.configPaths?.length) {
-    return options.configPaths;
-  }
-
-  const envPaths = process.env.GAME_BOTS_CONFIG_PATHS
-    ?.split(path.delimiter)
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
-
-  if (envPaths?.length) {
-    return envPaths;
-  }
-
-  return [
-    path.resolve(workspaceRoot, "config/default.yaml"),
-    path.resolve(workspaceRoot, "config/local.yaml")
-  ];
-}
-
 export async function createContainer(options: CreateContainerOptions = {}): Promise<AppContainer> {
-  const workspaceRoot = options.cwd ?? process.cwd();
-  const config = await loadConfig(resolveConfigPaths(workspaceRoot, options));
+  const startDir = options.cwd ?? process.cwd();
+  const workspaceRoot = resolveWorkspaceRoot(startDir);
+  const configPaths = resolveConfigPaths(workspaceRoot, options);
+  const config = await loadConfig(configPaths);
 
   const logger = createLogger({
     level: config.logging.level,
@@ -60,7 +43,14 @@ export async function createContainer(options: CreateContainerOptions = {}): Pro
     filename: path.resolve(workspaceRoot, config.persistence.sqlite.filename)
   });
 
-  logger.debug({ sqlite: config.persistence.sqlite.filename }, "Container initialized.");
+  logger.debug(
+    {
+      workspaceRoot,
+      configPaths,
+      sqlite: config.persistence.sqlite.filename
+    },
+    "Container initialized."
+  );
 
   return {
     config,
