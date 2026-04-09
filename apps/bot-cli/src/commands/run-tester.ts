@@ -12,10 +12,10 @@ import {
 import { PlaywrightEnvironmentPort } from "@game-bots/environment-playwright";
 import { toJsonReport } from "@game-bots/reporting";
 import { SystemClock } from "@game-bots/runtime-core";
-import { wordleWebPlugin } from "@game-bots/wordle-web";
 import type { GameSnapshot } from "@game-bots/game-sdk";
 
 import type { AppContainer } from "../bootstrap/container.js";
+import { resolveGamePlugin, resolveTesterDefaults } from "../bootstrap/game-plugins.js";
 import { finalizeFindingsQuality, withEvaluatorMetadata } from "./finding-quality.js";
 import { buildArtifactCaptureName, buildArtifactIndex } from "./run-artifact-index.js";
 
@@ -25,6 +25,12 @@ export interface TesterRunResult {
   findings: readonly Finding[];
   report: RunReport;
   artifacts: readonly ArtifactRef[];
+}
+
+export interface TesterRunOptions {
+  gameId?: string;
+  profileId?: string;
+  scenarioId?: string;
 }
 
 function buildObservationPayload(frame: ObservationFrame, snapshot: GameSnapshot) {
@@ -98,8 +104,10 @@ function toJsonValue(value: unknown): JsonObject | string | number | boolean | n
   return String(value);
 }
 
-export async function runTester(container: AppContainer): Promise<TesterRunResult> {
-  const plugin = wordleWebPlugin;
+export async function runTester(container: AppContainer, options: TesterRunOptions = {}): Promise<TesterRunResult> {
+  const gameId = options.gameId ?? "wordle-web";
+  const plugin = resolveGamePlugin(gameId);
+  const testerDefaults = resolveTesterDefaults(plugin.manifest.gameId);
   const brain = createTesterBrain();
   const scenarioExecutor = new ScenarioExecutor();
   const environmentPort = new PlaywrightEnvironmentPort({
@@ -110,8 +118,8 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     agentKind: "tester",
     gameId: plugin.manifest.gameId,
     environmentId: environmentPort.environmentId,
-    profileId: "wordle-web.tester.smoke",
-    scenarioId: "smoke",
+    profileId: options.profileId ?? testerDefaults.profileId,
+    scenarioId: options.scenarioId ?? testerDefaults.scenarioId,
     config: {}
   };
 

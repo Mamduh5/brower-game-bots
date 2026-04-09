@@ -14,11 +14,18 @@ async function main(): Promise<void> {
     case "run-tester":
       await runTester(container);
       break;
+    case "run-tester-2048":
+      await runTester(container, {
+        gameId: "play2048-web",
+        profileId: "play2048-web.tester.smoke",
+        scenarioId: "smoke"
+      });
+      break;
     case "rebuild-report":
       await rebuildReport();
       break;
     default:
-      process.stdout.write("Usage: game-bots <run-player|run-tester|rebuild-report>\n");
+      process.stdout.write("Usage: game-bots <run-player|run-tester|run-tester-2048|rebuild-report>\n");
   }
 }
 

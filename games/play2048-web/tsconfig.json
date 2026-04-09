@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "./src",
+    "outDir": "./dist"
+  },
+  "references": [
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/environment-sdk"
+    },
+    {
+      "path": "../../packages/game-sdk"
+    },
+    {
+      "path": "../../packages/runtime-core"
+    }
+  ],
+  "include": ["src/**/*.ts"]
+}

@@ -38,6 +38,9 @@
     },
     {
       "path": "../../games/wordle-web"
+    },
+    {
+      "path": "../../games/play2048-web"
     }
   ],
   "include": ["src/**/*.ts"]

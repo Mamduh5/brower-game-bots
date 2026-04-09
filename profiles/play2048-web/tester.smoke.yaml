@@ -1,0 +1,4 @@
+agentKind: tester
+gameId: play2048-web
+environmentId: playwright-browser
+scenarioId: smoke

@@ -47,12 +47,18 @@ importers:
       '@game-bots/environment-sdk':
         specifier: workspace:*
         version: link:../../packages/environment-sdk
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../../packages/game-sdk
       '@game-bots/logging':
         specifier: workspace:*
         version: link:../../packages/logging
       '@game-bots/persistence-sqlite':
         specifier: workspace:*
         version: link:../../packages/persistence-sqlite
+      '@game-bots/play2048-web':
+        specifier: workspace:*
+        version: link:../../games/play2048-web
       '@game-bots/reporting':
         specifier: workspace:*
         version: link:../../packages/reporting
@@ -66,6 +72,21 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
+
+  games/play2048-web:
+    dependencies:
+      '@game-bots/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../../packages/environment-sdk
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../../packages/game-sdk
+      '@game-bots/runtime-core':
+        specifier: workspace:*
+        version: link:../../packages/runtime-core
 
   games/wordle-web:
     dependencies:

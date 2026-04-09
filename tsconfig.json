@@ -44,6 +44,9 @@
       "path": "./games/wordle-web"
     },
     {
+      "path": "./games/play2048-web"
+    },
+    {
       "path": "./apps/bot-cli"
     }
   ]

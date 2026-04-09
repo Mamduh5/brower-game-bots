@@ -35,6 +35,20 @@ This repository currently implements the Phase 1 / Phase 2 foundation:
 
 Gameplay strategies, advanced tester heuristics, OCR/ML workers, and external issue publishers are intentionally deferred.
 
+## Real-Game Smoke Path
+
+An additional real-game plugin is available at `games/play2048-web`:
+
+- `gameId`: `play2048-web`
+- tester profile: `profiles/play2048-web/tester.smoke.yaml`
+- default target URL: `https://play2048.co/` (override via `GAME_BOTS_PLAY2048_URL`)
+
+CLI command:
+
+- `game-bots run-tester-2048`
+
+The existing Wordle fixture path remains the default for `run-player` and `run-tester`.
+
 ## Guard
 
 In addition to the architecture work, follow these non-negotiable refactor guards:

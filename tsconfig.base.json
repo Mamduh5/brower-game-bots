@@ -32,7 +32,8 @@
       "@game-bots/artifact-store-fs": ["./packages/artifact-store-fs/src/index.ts"],
       "@game-bots/persistence-sqlite": ["./packages/persistence-sqlite/src/index.ts"],
       "@game-bots/testing-kit": ["./packages/testing-kit/src/index.ts"],
-      "@game-bots/wordle-web": ["./games/wordle-web/src/index.ts"]
+      "@game-bots/wordle-web": ["./games/wordle-web/src/index.ts"],
+      "@game-bots/play2048-web": ["./games/play2048-web/src/index.ts"]
     },
     "types": [
       "node"
