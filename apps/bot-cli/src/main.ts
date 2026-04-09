@@ -21,11 +21,20 @@ async function main(): Promise<void> {
         scenarioId: "smoke"
       });
       break;
+    case "run-tester-cat-and-dog":
+      await runTester(container, {
+        gameId: "cat-and-dog-web",
+        profileId: "cat-and-dog-web.tester.smoke",
+        scenarioId: "smoke"
+      });
+      break;
     case "rebuild-report":
       await rebuildReport();
       break;
     default:
-      process.stdout.write("Usage: game-bots <run-player|run-tester|run-tester-2048|rebuild-report>\n");
+      process.stdout.write(
+        "Usage: game-bots <run-player|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n"
+      );
   }
 }
 

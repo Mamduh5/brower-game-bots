@@ -35,6 +35,9 @@ importers:
       '@game-bots/artifact-store-fs':
         specifier: workspace:*
         version: link:../../packages/artifact-store-fs
+      '@game-bots/cat-and-dog-web':
+        specifier: workspace:*
+        version: link:../../games/cat-and-dog-web
       '@game-bots/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -72,6 +75,21 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
+
+  games/cat-and-dog-web:
+    dependencies:
+      '@game-bots/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../../packages/environment-sdk
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../../packages/game-sdk
+      '@game-bots/runtime-core':
+        specifier: workspace:*
+        version: link:../../packages/runtime-core
 
   games/play2048-web:
     dependencies:

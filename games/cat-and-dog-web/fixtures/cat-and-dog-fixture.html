@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cat and Dog Fixture</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: sans-serif;
+      }
+      #root {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+      }
+      .game-container {
+        display: grid;
+        gap: 12px;
+      }
+      canvas {
+        width: 640px;
+        height: 360px;
+        border: 1px solid #333;
+        background: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="root">
+      <div class="game-container" data-testid="app-root">
+        <h1>Cat and Dog Fixture</h1>
+        <canvas data-testid="game-canvas"></canvas>
+        <p id="interaction-status">Waiting for interaction</p>
+      </div>
+    </main>
+    <script>
+      window.addEventListener("keydown", (event) => {
+        if (event.code === "Space" || event.key === " ") {
+          const target = document.getElementById("interaction-status");
+          if (target) {
+            target.textContent = "Interaction received";
+          }
+        }
+      });
+    </script>
+  </body>
+</html>

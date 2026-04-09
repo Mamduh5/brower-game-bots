@@ -1,0 +1,4 @@
+agentKind: tester
+gameId: cat-and-dog-web
+environmentId: playwright-browser
+scenarioId: smoke

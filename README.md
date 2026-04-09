@@ -35,17 +35,23 @@ This repository currently implements the Phase 1 / Phase 2 foundation:
 
 Gameplay strategies, advanced tester heuristics, OCR/ML workers, and external issue publishers are intentionally deferred.
 
-## Real-Game Smoke Path
+## Real-Game Smoke Paths
 
-An additional real-game plugin is available at `games/play2048-web`:
+Primary real target plugin:
 
+- package: `games/cat-and-dog-web`
+- `gameId`: `cat-and-dog-web`
+- tester profile: `profiles/cat-and-dog-web/tester.smoke.yaml`
+- default target URL: `https://cat-and-dog-p6qd.onrender.com/` (override via `GAME_BOTS_CAT_AND_DOG_URL`)
+- CLI command: `game-bots run-tester-cat-and-dog`
+
+Example real target plugin:
+
+- package: `games/play2048-web`
 - `gameId`: `play2048-web`
 - tester profile: `profiles/play2048-web/tester.smoke.yaml`
 - default target URL: `https://play2048.co/` (override via `GAME_BOTS_PLAY2048_URL`)
-
-CLI command:
-
-- `game-bots run-tester-2048`
+- CLI command: `game-bots run-tester-2048`
 
 The existing Wordle fixture path remains the default for `run-player` and `run-tester`.
 
@@ -82,3 +88,4 @@ pnpm test:e2e
 pnpm run dev
 pnpm run dev -- run-player
 pnpm run dev -- run-tester
+pnpm run dev -- run-tester-cat-and-dog

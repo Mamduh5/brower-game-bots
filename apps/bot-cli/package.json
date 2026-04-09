@@ -19,6 +19,7 @@
     "@game-bots/agent-player": "workspace:*",
     "@game-bots/agent-tester": "workspace:*",
     "@game-bots/artifact-store-fs": "workspace:*",
+    "@game-bots/cat-and-dog-web": "workspace:*",
     "@game-bots/config": "workspace:*",
     "@game-bots/contracts": "workspace:*",
     "@game-bots/environment-sdk": "workspace:*",

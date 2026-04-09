@@ -47,6 +47,9 @@
       "path": "./games/play2048-web"
     },
     {
+      "path": "./games/cat-and-dog-web"
+    },
+    {
       "path": "./apps/bot-cli"
     }
   ]
