@@ -96,6 +96,22 @@ describe("runTester integration", () => {
       expect(result.report.summary.highFindings).toBeGreaterThanOrEqual(1);
       expect(result.report.summary.topFindings.length).toBeGreaterThan(0);
       expect(result.report.summary.artifactCounts.screenshot).toBeGreaterThanOrEqual(1);
+      const screenshotPaths = result.artifacts
+        .filter((artifact) => artifact.kind === "screenshot")
+        .map((artifact) => artifact.relativePath);
+      expect(screenshotPaths.some((relativePath) => relativePath.includes("10-pre-action-screen"))).toBe(true);
+      expect(screenshotPaths.some((relativePath) => relativePath.includes("20-post-entry-screen"))).toBe(true);
+      expect(screenshotPaths.some((relativePath) => relativePath.includes("81-finding-1-screen"))).toBe(true);
+      expect(
+        result.findings.some((finding) =>
+          finding.evidence.some(
+            (entry) =>
+              Boolean(entry.artifactId) &&
+              typeof entry.detail === "string" &&
+              (entry.detail.includes("20-post-entry-screen") || entry.detail.includes("81-finding-1-screen"))
+          )
+        )
+      ).toBe(true);
 
       const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
       const artifactIndex = result.artifacts.find((artifact) => artifact.kind === "json");

@@ -108,6 +108,13 @@ describe("runTester integration (cat-and-dog)", () => {
           gameplayInputApplied: true
         });
 
+        const screenshotPaths = result.artifacts
+          .filter((artifact) => artifact.kind === "screenshot")
+          .map((artifact) => artifact.relativePath);
+        expect(screenshotPaths.some((relativePath) => relativePath.includes("10-pre-action-screen"))).toBe(true);
+        expect(screenshotPaths.some((relativePath) => relativePath.includes("20-post-entry-screen"))).toBe(true);
+        expect(screenshotPaths.some((relativePath) => relativePath.includes("30-post-gameplay-action-screen"))).toBe(true);
+
         const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
         expect(reportArtifact).toBeDefined();
         await expect(access(path.join(artifactsPath, reportArtifact!.relativePath))).resolves.toBeUndefined();

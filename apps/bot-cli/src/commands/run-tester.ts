@@ -87,6 +87,52 @@ function byArtifactPath(left: ArtifactRef, right: ArtifactRef): number {
 }
 
 const MAX_TESTER_ACTION_CYCLES = 4;
+const MAX_FINDING_CONTEXT_SCREENSHOTS = 1;
+
+function withArtifactEvidence(
+  finding: Finding,
+  artifact: ArtifactRef,
+  label: string,
+  detail?: string
+): Finding {
+  const alreadyLinked = finding.evidence.some(
+    (entry) => entry.artifactId === artifact.artifactId && entry.label === label
+  );
+
+  if (alreadyLinked) {
+    return finding;
+  }
+
+  return {
+    ...finding,
+    evidence: [
+      ...finding.evidence,
+      {
+        artifactId: artifact.artifactId,
+        label,
+        ...(detail ? { detail } : { detail: artifact.relativePath })
+      }
+    ]
+  };
+}
+
+function selectPolicyScreenshotNameForCycle(cycle: number): { step: number; label: string } | null {
+  if (cycle === 1) {
+    return {
+      step: 20,
+      label: "post-entry-screen"
+    };
+  }
+
+  if (cycle === 2) {
+    return {
+      step: 30,
+      label: "post-gameplay-action-screen"
+    };
+  }
+
+  return null;
+}
 
 function toJsonValue(value: unknown): JsonObject | string | number | boolean | null | JsonObject[] | (string | number | boolean | null)[] {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -154,19 +200,139 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
   const evaluators = [...createDefaultTesterEvaluators(), ...(await gameSession.evaluators())];
   const clock = new SystemClock();
   const capturedArtifacts: ArtifactRef[] = [];
+  const observationScreenshotsByEventId = new Map<string, ArtifactRef>();
+  const findingScreenshotsByEventId = new Map<string, ArtifactRef>();
   const findings: Finding[] = [];
+  let findingContextScreenshotCount = 0;
   let report: RunReport | null = null;
 
   logger.info({ selectedScenario: scenario.scenarioId }, "Starting tester run.");
 
+  const storeArtifactEvent = async (artifact: ArtifactRef): Promise<void> => {
+    capturedArtifacts.push(artifact);
+    await container.runEngine.appendEvent({
+      eventId: randomUUID(),
+      runId: run.runId,
+      sequence: await container.runEngine.nextSequence(run.runId),
+      timestamp: artifact.createdAt,
+      type: "artifact.stored",
+      artifact
+    });
+  };
+
+  const captureScreenshotArtifact = async (
+    step: number,
+    label: string
+  ): Promise<ArtifactRef | null> => {
+    try {
+      const screenshot = await environmentSession.capture({
+        kind: "screenshot",
+        name: buildArtifactCaptureName(step, label)
+      });
+      await storeArtifactEvent(screenshot);
+      return screenshot;
+    } catch (error) {
+      logger.warn(
+        { err: error, screenshotStep: step, screenshotLabel: label },
+        "Unable to capture screenshot artifact."
+      );
+      return null;
+    }
+  };
+
+  const findLinkedObservationScreenshot = (finding: Finding, fallbackEventId: string): ArtifactRef | null => {
+    const postActionEventId = finding.evidence.find((entry) => entry.label === "post-action-state")?.eventId;
+    if (postActionEventId && observationScreenshotsByEventId.has(postActionEventId)) {
+      return observationScreenshotsByEventId.get(postActionEventId) ?? null;
+    }
+
+    const preActionEventId =
+      finding.evidence.find((entry) => entry.label === "pre-action-state")?.eventId ??
+      finding.evidence.find((entry) => entry.label === "opening-observation")?.eventId;
+    if (preActionEventId && observationScreenshotsByEventId.has(preActionEventId)) {
+      return observationScreenshotsByEventId.get(preActionEventId) ?? null;
+    }
+
+    if (observationScreenshotsByEventId.has(fallbackEventId)) {
+      return observationScreenshotsByEventId.get(fallbackEventId) ?? null;
+    }
+
+    return null;
+  };
+
+  const ensureFindingContextScreenshot = async (eventId: string): Promise<ArtifactRef | null> => {
+    if (findingScreenshotsByEventId.has(eventId)) {
+      return findingScreenshotsByEventId.get(eventId) ?? null;
+    }
+
+    if (findingContextScreenshotCount >= MAX_FINDING_CONTEXT_SCREENSHOTS) {
+      return null;
+    }
+
+    findingContextScreenshotCount += 1;
+    const screenshot = await captureScreenshotArtifact(
+      80 + findingContextScreenshotCount,
+      `finding-${findingContextScreenshotCount}-screen`
+    );
+    if (screenshot) {
+      findingScreenshotsByEventId.set(eventId, screenshot);
+    }
+
+    return screenshot;
+  };
+
   const collectFindings = async (event: RunEvent): Promise<void> => {
+    const emittedByEvent: Finding[] = [];
+
     for (const evaluator of evaluators) {
       const emitted = await evaluator.onEvent(event, {
         run,
         clock
       });
 
-      findings.push(...emitted.map((finding) => withEvaluatorMetadata(finding, evaluator.id)));
+      emittedByEvent.push(...emitted.map((finding) => withEvaluatorMetadata(finding, evaluator.id)));
+    }
+
+    if (emittedByEvent.length === 0) {
+      return;
+    }
+
+    const findingContextScreenshot = await ensureFindingContextScreenshot(event.eventId);
+    const finalized = emittedByEvent.map((finding) => {
+      let linkedFinding = finding;
+
+      const observationScreenshot = findLinkedObservationScreenshot(finding, event.eventId);
+      if (observationScreenshot) {
+        linkedFinding = withArtifactEvidence(
+          linkedFinding,
+          observationScreenshot,
+          "artifact-primary-screenshot",
+          observationScreenshot.relativePath
+        );
+      }
+
+      if (findingContextScreenshot) {
+        linkedFinding = withArtifactEvidence(
+          linkedFinding,
+          findingContextScreenshot,
+          "artifact-finding-screenshot",
+          findingContextScreenshot.relativePath
+        );
+      }
+
+      return linkedFinding;
+    });
+
+    findings.push(...finalized);
+  };
+
+  const captureStageObservationScreenshot = async (
+    event: RunEvent,
+    capture: { step: number; label: string }
+  ): Promise<void> => {
+    const artifact = await captureScreenshotArtifact(capture.step, capture.label);
+    if (artifact) {
+      observationScreenshotsByEventId.set(event.eventId, artifact);
     }
   };
 
@@ -204,6 +370,10 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
       payload: buildObservationPayload(openingFrame, openingSnapshot)
     };
     await container.runEngine.appendEvent(openingObservationEvent);
+    await captureStageObservationScreenshot(openingObservationEvent, {
+      step: 10,
+      label: "pre-action-screen"
+    });
     await collectFindings(openingObservationEvent);
 
     for (const clickProbe of scenario.clickProbes) {
@@ -313,6 +483,10 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
         payload: buildObservationPayload(postActionFrame, postActionSnapshot)
       };
       await container.runEngine.appendEvent(postActionObservationEvent);
+      const policyScreenshot = selectPolicyScreenshotNameForCycle(actionCycle);
+      if (policyScreenshot) {
+        await captureStageObservationScreenshot(postActionObservationEvent, policyScreenshot);
+      }
       await collectFindings(postActionObservationEvent);
 
       const matchingExpectation = scenario.actionExpectations.find(
@@ -366,33 +540,11 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
     await container.runEngine.appendEvent(healthObservationEvent);
     await collectFindings(healthObservationEvent);
 
-    const screenshot = await environmentSession.capture({
-      kind: "screenshot",
-      name: buildArtifactCaptureName(40, "post-action-screen")
-    });
-    capturedArtifacts.push(screenshot);
-    await container.runEngine.appendEvent({
-      eventId: randomUUID(),
-      runId: run.runId,
-      sequence: await container.runEngine.nextSequence(run.runId),
-      timestamp: screenshot.createdAt,
-      type: "artifact.stored",
-      artifact: screenshot
-    });
-
     const domSnapshot = await environmentSession.capture({
       kind: "dom-snapshot",
-      name: buildArtifactCaptureName(41, "post-action-dom")
+      name: buildArtifactCaptureName(41, "post-final-state-dom")
     });
-    capturedArtifacts.push(domSnapshot);
-    await container.runEngine.appendEvent({
-      eventId: randomUUID(),
-      runId: run.runId,
-      sequence: await container.runEngine.nextSequence(run.runId),
-      timestamp: domSnapshot.createdAt,
-      type: "artifact.stored",
-      artifact: domSnapshot
-    });
+    await storeArtifactEvent(domSnapshot);
 
     const closingActions = await gameSession.actions(previousSnapshot);
     const closingDecision = await brain.decide({
@@ -421,7 +573,24 @@ export async function runTester(container: AppContainer, options: TesterRunOptio
     );
     for (const [evaluatorIndex, evaluator] of evaluators.entries()) {
       const emitted = finalizedFindings[evaluatorIndex] ?? [];
-      findings.push(...emitted.map((finding) => withEvaluatorMetadata(finding, evaluator.id)));
+      if (emitted.length === 0) {
+        continue;
+      }
+
+      const tagged = emitted.map((finding) => withEvaluatorMetadata(finding, evaluator.id));
+      const finalizeScreenshot = await ensureFindingContextScreenshot(`finalize-${evaluator.id}`);
+      findings.push(
+        ...tagged.map((finding) =>
+          finalizeScreenshot
+            ? withArtifactEvidence(
+                finding,
+                finalizeScreenshot,
+                "artifact-finding-screenshot",
+                finalizeScreenshot.relativePath
+              )
+            : finding
+        )
+      );
     }
 
     const qualityFindings = finalizeFindingsQuality(findings, capturedArtifacts);
