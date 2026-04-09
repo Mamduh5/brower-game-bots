@@ -1,12 +1,14 @@
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
-import type { ArtifactRef, Finding, RunEvent, RunRecord, RunReport, RunRequest } from "@game-bots/contracts";
-import { createTesterBrain, ScenarioExecutor } from "@game-bots/agent-tester";
+import type { ArtifactRef, Finding, JsonObject, RunEvent, RunRecord, RunReport, RunRequest } from "@game-bots/contracts";
+import { createDefaultTesterEvaluators, createTesterBrain, ScenarioExecutor } from "@game-bots/agent-tester";
+import type { EnvironmentHealth, ObservationFrame } from "@game-bots/environment-sdk";
 import { PlaywrightEnvironmentPort } from "@game-bots/environment-playwright";
 import { toJsonReport } from "@game-bots/reporting";
 import { SystemClock } from "@game-bots/runtime-core";
 import { wordleWebPlugin } from "@game-bots/wordle-web";
+import type { GameSnapshot } from "@game-bots/game-sdk";
 
 import type { AppContainer } from "../bootstrap/container.js";
 
@@ -16,6 +18,36 @@ export interface TesterRunResult {
   findings: readonly Finding[];
   report: RunReport;
   artifacts: readonly ArtifactRef[];
+}
+
+function buildObservationPayload(frame: ObservationFrame, snapshot: GameSnapshot) {
+  return {
+    ...frame.payload,
+    gameSnapshotTitle: snapshot.title,
+    gameSnapshotTerminal: snapshot.isTerminal,
+    gameSemanticState: snapshot.semanticState,
+    gameMetrics: snapshot.metrics
+  };
+}
+
+function buildHealthObservationPayload(health: EnvironmentHealth): JsonObject {
+  return {
+    healthStatus: health.status,
+    healthCheckedAt: health.checkedAt,
+    healthDetail: health.detail ?? "",
+    healthSignals: health.signals
+  };
+}
+
+function buildActionEventPayload(
+  action: { kind: string; target?: { selector: string } },
+  payload: JsonObject
+): JsonObject {
+  return {
+    action: action.kind,
+    ...(action.target ? { targetSelector: action.target.selector } : {}),
+    ...payload
+  };
 }
 
 function isTerminalPhase(phase: RunRecord["phase"]): boolean {
@@ -78,7 +110,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
         },
     await gameSession.scenarios()
   );
-  const evaluators = await gameSession.evaluators();
+  const evaluators = [...createDefaultTesterEvaluators(), ...(await gameSession.evaluators())];
   const clock = new SystemClock();
   const capturedArtifacts: ArtifactRef[] = [];
   const findings: Finding[] = [];
@@ -121,6 +153,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     const openingFrame = await environmentSession.observe({
       modes: ["dom", "console", "network"]
     });
+    const openingSnapshot = await gameSession.translate(openingFrame);
     const openingObservationEvent: RunEvent = {
       eventId: randomUUID(),
       runId: run.runId,
@@ -129,12 +162,11 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       type: "observation.captured",
       observationKind: "opening",
       summary: openingFrame.summary,
-      payload: openingFrame.payload
+      payload: buildObservationPayload(openingFrame, openingSnapshot)
     };
     await container.runEngine.appendEvent(openingObservationEvent);
     await collectFindings(openingObservationEvent);
 
-    const openingSnapshot = await gameSession.translate(openingFrame);
     const openingActions = await gameSession.actions(openingSnapshot);
     const openingDecision = await brain.decide({
       run,
@@ -170,15 +202,26 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
         actionKind: environmentAction.kind,
         status: actionResult.status,
         summary: actionResult.detail,
-        payload: {
-          action: environmentAction.kind,
-          ...actionResult.payload
-        }
+        payload: buildActionEventPayload(environmentAction, actionResult.payload)
       };
 
       await container.runEngine.appendEvent(actionEvent);
       await collectFindings(actionEvent);
     }
+
+    const health = await environmentSession.health();
+    const healthObservationEvent: RunEvent = {
+      eventId: randomUUID(),
+      runId: run.runId,
+      sequence: await container.runEngine.nextSequence(run.runId),
+      timestamp: health.checkedAt,
+      type: "observation.captured",
+      observationKind: "environment-health",
+      summary: health.detail,
+      payload: buildHealthObservationPayload(health)
+    };
+    await container.runEngine.appendEvent(healthObservationEvent);
+    await collectFindings(healthObservationEvent);
 
     const screenshot = await environmentSession.capture({
       kind: "screenshot",
@@ -211,6 +254,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
     const closingFrame = await environmentSession.observe({
       modes: ["dom", "console", "network"]
     });
+    const closingSnapshot = await gameSession.translate(closingFrame);
     const closingObservationEvent: RunEvent = {
       eventId: randomUUID(),
       runId: run.runId,
@@ -219,12 +263,11 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       type: "observation.captured",
       observationKind: "post-action",
       summary: closingFrame.summary,
-      payload: closingFrame.payload
+      payload: buildObservationPayload(closingFrame, closingSnapshot)
     };
     await container.runEngine.appendEvent(closingObservationEvent);
     await collectFindings(closingObservationEvent);
 
-    const closingSnapshot = await gameSession.translate(closingFrame);
     const closingActions = await gameSession.actions(closingSnapshot);
     const closingDecision = await brain.decide({
       run,

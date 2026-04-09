@@ -30,4 +30,15 @@ CREATE TABLE IF NOT EXISTS reports (
   generated_at TEXT NOT NULL,
   payload_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS findings (
+  finding_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_findings_run_id_created_at ON findings(run_id, created_at);
 `;

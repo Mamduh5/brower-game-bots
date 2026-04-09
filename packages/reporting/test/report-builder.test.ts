@@ -27,7 +27,12 @@ describe("ReportBuilder", () => {
           category: "crash",
           confidence: 0.95,
           evidence: [{ label: "trace", artifactId: "artifact-1" }],
-          reproSteps: [],
+          reproSteps: [
+            {
+              order: 1,
+              instruction: "Open crash screen"
+            }
+          ],
           createdAt: "2026-04-09T00:05:00.000Z"
         }
       ],
@@ -37,6 +42,9 @@ describe("ReportBuilder", () => {
 
     expect(report.summary.totalFindings).toBe(1);
     expect(report.summary.criticalFindings).toBe(1);
+    expect(report.summary.severityCounts.critical).toBe(1);
+    expect(report.summary.categoryCounts.crash).toBe(1);
     expect(report.summary.outcome).toBe("failed");
+    expect(report.findings[0]?.reproSteps[0]?.instruction).toBe("Open crash screen");
   });
 });

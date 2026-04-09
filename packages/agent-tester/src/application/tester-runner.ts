@@ -1,4 +1,8 @@
-import type { AgentBrain, AgentContext, AgentDecision, DecisionInput } from "@game-bots/runtime-core";
+import type { AgentBrain, AgentContext, AgentDecision, DecisionInput, Evaluator } from "@game-bots/runtime-core";
+
+import { CrashDetector } from "../evaluators/crash-detector.js";
+import { FreezeDetector } from "../evaluators/freeze-detector.js";
+import { UiHeuristicsEvaluator } from "../evaluators/ui-heuristics.js";
 
 class TesterBrain implements AgentBrain {
   readonly kind = "tester" as const;
@@ -31,4 +35,8 @@ class TesterBrain implements AgentBrain {
 
 export function createTesterBrain(): AgentBrain {
   return new TesterBrain();
+}
+
+export function createDefaultTesterEvaluators(): readonly Evaluator[] {
+  return [new CrashDetector(), new FreezeDetector(), new UiHeuristicsEvaluator()];
 }

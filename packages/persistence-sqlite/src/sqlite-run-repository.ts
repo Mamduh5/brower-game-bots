@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 
 import initSqlJs, { type Database } from "sql.js";
 import {
+  FindingSchema,
   RunEventSchema,
   RunRecordSchema,
   RunReportSchema,
+  type Finding,
   type RunEvent,
   type RunPhase,
   type RunRecord,
@@ -107,6 +109,26 @@ export class SqliteRunRepository implements RunRepository {
         "INSERT INTO events (event_id, run_id, sequence, timestamp, event_type, payload_json) VALUES (?, ?, ?, ?, ?, ?)",
         [event.eventId, event.runId, event.sequence, event.timestamp, event.type, JSON.stringify(event)]
       );
+
+      if (event.type === "evaluation.finding_created") {
+        db.run(
+          `INSERT INTO findings (finding_id, run_id, category, severity, created_at, payload_json)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(finding_id) DO UPDATE SET
+             category = excluded.category,
+             severity = excluded.severity,
+             created_at = excluded.created_at,
+             payload_json = excluded.payload_json`,
+          [
+            event.finding.findingId,
+            event.finding.runId,
+            event.finding.category,
+            event.finding.severity,
+            event.finding.createdAt,
+            JSON.stringify(event.finding)
+          ]
+        );
+      }
     });
   }
 
@@ -150,6 +172,17 @@ export class SqliteRunRepository implements RunRepository {
     }
 
     return RunReportSchema.parse(JSON.parse(String(row.payload_json)));
+  }
+
+  async getFindings(runId: string): Promise<readonly Finding[]> {
+    const db = await this.databasePromise;
+    const rows = this.selectAll(
+      db,
+      "SELECT payload_json FROM findings WHERE run_id = ? ORDER BY created_at ASC",
+      [runId]
+    );
+
+    return rows.map((row) => FindingSchema.parse(JSON.parse(String(row.payload_json))));
   }
 
   private async initialize(): Promise<Database> {

@@ -7,6 +7,8 @@ import { ReportIdSchema, RunIdSchema } from "./ids.js";
 export const RunReportSummarySchema = z.object({
   totalFindings: z.number().int().nonnegative(),
   criticalFindings: z.number().int().nonnegative(),
+  severityCounts: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  categoryCounts: z.record(z.string(), z.number().int().nonnegative()).default({}),
   completedAt: z.string().datetime(),
   outcome: z.enum(["completed", "failed", "cancelled"])
 });
