@@ -18,6 +18,12 @@ function evidenceKey(evidence: EvidenceRef): string {
   return [evidence.eventId ?? "", evidence.artifactId ?? "", evidence.label, evidence.detail ?? ""].join("|");
 }
 
+function byEvidence(left: EvidenceRef, right: EvidenceRef): number {
+  const leftKey = [left.eventId ?? "", left.artifactId ?? "", left.label, left.detail ?? ""].join("|");
+  const rightKey = [right.eventId ?? "", right.artifactId ?? "", right.label, right.detail ?? ""].join("|");
+  return leftKey.localeCompare(rightKey);
+}
+
 function dedupeEvidence(evidence: readonly EvidenceRef[]): EvidenceRef[] {
   const seen = new Set<string>();
   const deduped: EvidenceRef[] = [];
@@ -32,7 +38,7 @@ function dedupeEvidence(evidence: readonly EvidenceRef[]): EvidenceRef[] {
     deduped.push(item);
   }
 
-  return deduped;
+  return deduped.sort(byEvidence);
 }
 
 function hasMetadataFlag(finding: Finding, key: string): boolean {
@@ -74,7 +80,8 @@ function attachRelevantArtifacts(finding: Finding, artifacts: readonly ArtifactR
     evidence.map((entry) => entry.artifactId).filter((artifactId): artifactId is string => Boolean(artifactId))
   );
 
-  for (const kind of desiredKinds) {
+  for (let index = 0; index < desiredKinds.length; index += 1) {
+    const kind = desiredKinds[index];
     const artifact = artifacts.find((candidate) => candidate.kind === kind);
     if (!artifact || existingArtifactIds.has(artifact.artifactId)) {
       continue;
@@ -82,7 +89,7 @@ function attachRelevantArtifacts(finding: Finding, artifacts: readonly ArtifactR
 
     evidence.push({
       artifactId: artifact.artifactId,
-      label: `artifact-${artifact.kind}`,
+      label: index === 0 ? `artifact-primary-${artifact.kind}` : `artifact-supporting-${artifact.kind}`,
       detail: artifact.relativePath
     });
     existingArtifactIds.add(artifact.artifactId);
@@ -91,6 +98,32 @@ function attachRelevantArtifacts(finding: Finding, artifacts: readonly ArtifactR
   return {
     ...finding,
     evidence: dedupeEvidence(evidence)
+  };
+}
+
+function annotatePrimaryEvidence(finding: Finding): Finding {
+  const primaryArtifactEvidence = finding.evidence.find(
+    (evidence) => Boolean(evidence.artifactId) && evidence.label.startsWith("artifact-primary-")
+  );
+  const primaryEventEvidence =
+    finding.evidence.find((evidence) => evidence.label === "state-expectation" && Boolean(evidence.eventId)) ??
+    finding.evidence.find((evidence) => Boolean(evidence.eventId));
+
+  const metadata: JsonObject = isJsonObject(finding.metadata) ? { ...finding.metadata } : {};
+
+  const primaryEvidence: JsonObject = {
+    ...(primaryArtifactEvidence?.artifactId ? { artifactId: primaryArtifactEvidence.artifactId } : {}),
+    ...(primaryArtifactEvidence?.detail ? { artifactPath: primaryArtifactEvidence.detail } : {}),
+    ...(primaryEventEvidence?.eventId ? { eventId: primaryEventEvidence.eventId } : {}),
+    ...(primaryEventEvidence?.label ? { label: primaryEventEvidence.label } : {})
+  };
+
+  return {
+    ...finding,
+    metadata: {
+      ...metadata,
+      ...(Object.keys(primaryEvidence).length > 0 ? { primaryEvidence } : {})
+    }
   };
 }
 
@@ -210,5 +243,5 @@ export function finalizeFindingsQuality(
   const withRelevantArtifacts = findings.map((finding) => attachRelevantArtifacts(finding, artifacts));
   const withoutRedundantFreeze = suppressRedundantFreezeFindings(withRelevantArtifacts);
   const deduped = dedupeFindings(withoutRedundantFreeze);
-  return deduped.sort(bySeverityThenCreatedAt);
+  return deduped.map((finding) => annotatePrimaryEvidence(finding)).sort(bySeverityThenCreatedAt);
 }

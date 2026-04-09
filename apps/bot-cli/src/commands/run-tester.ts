@@ -17,6 +17,7 @@ import type { GameSnapshot } from "@game-bots/game-sdk";
 
 import type { AppContainer } from "../bootstrap/container.js";
 import { finalizeFindingsQuality, withEvaluatorMetadata } from "./finding-quality.js";
+import { buildArtifactCaptureName, buildArtifactIndex } from "./run-artifact-index.js";
 
 export interface TesterRunResult {
   run: RunRecord;
@@ -73,6 +74,10 @@ function buildActionEventPayload(
 
 function isTerminalPhase(phase: RunRecord["phase"]): boolean {
   return phase === "completed" || phase === "failed" || phase === "cancelled";
+}
+
+function byArtifactPath(left: ArtifactRef, right: ArtifactRef): number {
+  return left.relativePath.localeCompare(right.relativePath);
 }
 
 function toJsonValue(value: unknown): JsonObject | string | number | boolean | null | JsonObject[] | (string | number | boolean | null)[] {
@@ -286,7 +291,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
 
     const screenshot = await environmentSession.capture({
       kind: "screenshot",
-      name: "tester-after-submit"
+      name: buildArtifactCaptureName(40, "post-action-screen")
     });
     capturedArtifacts.push(screenshot);
     await container.runEngine.appendEvent({
@@ -300,7 +305,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
 
     const domSnapshot = await environmentSession.capture({
       kind: "dom-snapshot",
-      name: "tester-after-submit"
+      name: buildArtifactCaptureName(41, "post-action-dom")
     });
     capturedArtifacts.push(domSnapshot);
     await container.runEngine.appendEvent({
@@ -417,7 +422,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       {
         runId: run.runId,
         kind: "report",
-        relativePath: `reports/${run.runId}.report.json`,
+        relativePath: "reports/01-run-report.json",
         contentType: "application/json"
       },
       Buffer.from(toJsonReport(report), "utf8")
@@ -431,6 +436,34 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       type: "artifact.stored",
       artifact: reportArtifact
     });
+
+    const eventsForIndex = await container.runEngine.listEvents(run.runId);
+    const artifactIndexPayload = buildArtifactIndex({
+      run,
+      artifacts: [...capturedArtifacts].sort(byArtifactPath),
+      findings: qualityFindings,
+      events: eventsForIndex
+    });
+    const artifactIndex = await container.artifactStore.put(
+      {
+        runId: run.runId,
+        kind: "json",
+        relativePath: "reports/02-artifact-index.json",
+        contentType: "application/json"
+      },
+      Buffer.from(JSON.stringify(artifactIndexPayload, null, 2), "utf8")
+    );
+    capturedArtifacts.push(artifactIndex);
+    await container.runEngine.appendEvent({
+      eventId: randomUUID(),
+      runId: run.runId,
+      sequence: await container.runEngine.nextSequence(run.runId),
+      timestamp: artifactIndex.createdAt,
+      type: "artifact.stored",
+      artifact: artifactIndex
+    });
+
+    const sortedArtifacts = [...capturedArtifacts].sort(byArtifactPath);
     await container.runEngine.appendEvent({
       eventId: randomUUID(),
       runId: run.runId,
@@ -438,7 +471,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       timestamp: clock.now().toISOString(),
       type: "report.generated",
       reportId: report.reportId,
-      evidence: capturedArtifacts.map((artifact) => ({
+      evidence: sortedArtifacts.map((artifact) => ({
         artifactId: artifact.artifactId,
         label: artifact.kind,
         detail: artifact.relativePath
@@ -451,13 +484,13 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       {
         finalPhase: run.phase,
         findingCount: qualityFindings.length,
-        artifactCount: capturedArtifacts.length
+        artifactCount: sortedArtifacts.length
       },
       "Completed tester run."
     );
 
     process.stdout.write(
-      `Completed tester run ${run.runId} with ${qualityFindings.length} findings and ${capturedArtifacts.length} artifacts.\n`
+      `Completed tester run ${run.runId} with ${qualityFindings.length} findings and ${sortedArtifacts.length} artifacts.\n`
     );
 
     return {
@@ -465,7 +498,7 @@ export async function runTester(container: AppContainer): Promise<TesterRunResul
       events: await container.runEngine.listEvents(run.runId),
       findings: qualityFindings,
       report,
-      artifacts: capturedArtifacts
+      artifacts: sortedArtifacts
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown tester run failure.";

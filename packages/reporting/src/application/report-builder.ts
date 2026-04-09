@@ -35,6 +35,17 @@ function sortFindings(findings: readonly Finding[]): Finding[] {
   });
 }
 
+function sortArtifacts(artifacts: readonly ArtifactRef[]): ArtifactRef[] {
+  return [...artifacts].sort((left, right) => {
+    const kindDelta = left.kind.localeCompare(right.kind);
+    if (kindDelta !== 0) {
+      return kindDelta;
+    }
+
+    return left.relativePath.localeCompare(right.relativePath);
+  });
+}
+
 function summarizeTopFindings(findings: readonly Finding[]) {
   return findings.slice(0, 5).map((finding) => {
     const expectationStep = finding.reproSteps.find(
@@ -61,12 +72,13 @@ export class ReportBuilder {
   }): RunReport {
     const outcome = input.run.status === "active" ? "completed" : input.run.status;
     const sortedFindings = sortFindings(input.findings);
+    const sortedArtifacts = sortArtifacts(input.evidence);
 
     return {
       reportId: randomUUID(),
       runId: input.run.runId,
       findings: sortedFindings,
-      evidence: [...input.evidence],
+      evidence: sortedArtifacts,
       generatedAt: input.completedAt.toISOString(),
       summary: {
         totalFindings: sortedFindings.length,
@@ -76,7 +88,7 @@ export class ReportBuilder {
         ).length,
         severityCounts: countBy(sortedFindings.map((finding) => finding.severity)),
         categoryCounts: countBy(sortedFindings.map((finding) => finding.category)),
-        artifactCounts: countBy(input.evidence.map((artifact) => artifact.kind)),
+        artifactCounts: countBy(sortedArtifacts.map((artifact) => artifact.kind)),
         topFindings: summarizeTopFindings(sortedFindings),
         completedAt: input.completedAt.toISOString(),
         outcome

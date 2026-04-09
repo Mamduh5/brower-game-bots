@@ -98,9 +98,17 @@ describe("runTester integration", () => {
       expect(result.report.summary.artifactCounts.screenshot).toBeGreaterThanOrEqual(1);
 
       const reportArtifact = result.artifacts.find((artifact) => artifact.kind === "report");
+      const artifactIndex = result.artifacts.find((artifact) => artifact.kind === "json");
       expect(reportArtifact).toBeDefined();
+      expect(artifactIndex).toBeDefined();
+      expect(reportArtifact?.relativePath).toContain("reports/01-run-report.json");
+      expect(artifactIndex?.relativePath).toContain("reports/02-artifact-index.json");
       await expect(access(path.join(artifactsPath, reportArtifact!.relativePath))).resolves.toBeUndefined();
+      await expect(access(path.join(artifactsPath, artifactIndex!.relativePath))).resolves.toBeUndefined();
       const reportJson = JSON.parse(await readFile(path.join(artifactsPath, reportArtifact!.relativePath), "utf8"));
+      const artifactIndexJson = JSON.parse(
+        await readFile(path.join(artifactsPath, artifactIndex!.relativePath), "utf8")
+      );
       const reportClickabilityFinding = reportJson.findings.find(
         (finding: { metadata?: { clickProbe?: unknown } }) => Boolean(finding.metadata?.clickProbe)
       );
@@ -116,6 +124,11 @@ describe("runTester integration", () => {
       expect(reportStateExpectationFinding).toBeDefined();
       expect(reportStateExpectationFinding.metadata.stateExpectation.failedEffects.length).toBeGreaterThanOrEqual(1);
       expect(reportJson.summary.topFindings.length).toBeGreaterThan(0);
+      expect(artifactIndexJson.run.runId).toBe(result.run.runId);
+      expect(artifactIndexJson.summary.findingCount).toBe(result.findings.length);
+      expect(artifactIndexJson.summary.artifactCount).toBe(result.artifacts.length - 1);
+      expect(artifactIndexJson.findings.length).toBe(result.findings.length);
+      expect(artifactIndexJson.findings[0].linkedArtifacts.length).toBeGreaterThan(0);
     },
     30_000
   );

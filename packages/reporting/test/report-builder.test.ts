@@ -59,6 +59,14 @@ describe("ReportBuilder", () => {
       ],
       evidence: [
         {
+          artifactId: "artifact-3",
+          runId: "run-1",
+          kind: "dom-snapshot",
+          relativePath: "captures/b.html",
+          contentType: "text/html",
+          createdAt: "2026-04-09T00:04:20.000Z"
+        },
+        {
           artifactId: "artifact-2",
           runId: "run-1",
           kind: "screenshot",
@@ -81,5 +89,6 @@ describe("ReportBuilder", () => {
     expect(report.summary.topFindings[0]?.title).toBe("App crashed");
     expect(report.summary.topFindings[0]?.expected).toBe("Screen remains responsive");
     expect(report.summary.topFindings[0]?.actual).toBe("Renderer stopped responding");
+    expect(report.evidence[0]?.kind).toBe("dom-snapshot");
   });
 });
