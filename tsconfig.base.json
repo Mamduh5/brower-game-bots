@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
+    // "baseUrl": ".",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -18,21 +18,21 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
-    "paths": {
-      "@game-bots/contracts": ["packages/contracts/src/index.ts"],
-      "@game-bots/config": ["packages/config/src/index.ts"],
-      "@game-bots/logging": ["packages/logging/src/index.ts"],
-      "@game-bots/runtime-core": ["packages/runtime-core/src/index.ts"],
-      "@game-bots/environment-sdk": ["packages/environment-sdk/src/index.ts"],
-      "@game-bots/environment-playwright": ["packages/environment-playwright/src/index.ts"],
-      "@game-bots/game-sdk": ["packages/game-sdk/src/index.ts"],
-      "@game-bots/agent-player": ["packages/agent-player/src/index.ts"],
-      "@game-bots/agent-tester": ["packages/agent-tester/src/index.ts"],
-      "@game-bots/reporting": ["packages/reporting/src/index.ts"],
-      "@game-bots/artifact-store-fs": ["packages/artifact-store-fs/src/index.ts"],
-      "@game-bots/persistence-sqlite": ["packages/persistence-sqlite/src/index.ts"],
-      "@game-bots/testing-kit": ["packages/testing-kit/src/index.ts"],
-      "@game-bots/wordle-web": ["games/wordle-web/src/index.ts"]
+   "paths": {
+      "@game-bots/contracts": ["./packages/contracts/src/index.ts"],
+      "@game-bots/config": ["./packages/config/src/index.ts"],
+      "@game-bots/logging": ["./packages/logging/src/index.ts"],
+      "@game-bots/runtime-core": ["./packages/runtime-core/src/index.ts"],
+      "@game-bots/environment-sdk": ["./packages/environment-sdk/src/index.ts"],
+      "@game-bots/environment-playwright": ["./packages/environment-playwright/src/index.ts"],
+      "@game-bots/game-sdk": ["./packages/game-sdk/src/index.ts"],
+      "@game-bots/agent-player": ["./packages/agent-player/src/index.ts"],
+      "@game-bots/agent-tester": ["./packages/agent-tester/src/index.ts"],
+      "@game-bots/reporting": ["./packages/reporting/src/index.ts"],
+      "@game-bots/artifact-store-fs": ["./packages/artifact-store-fs/src/index.ts"],
+      "@game-bots/persistence-sqlite": ["./packages/persistence-sqlite/src/index.ts"],
+      "@game-bots/testing-kit": ["./packages/testing-kit/src/index.ts"],
+      "@game-bots/wordle-web": ["./games/wordle-web/src/index.ts"]
     },
     "types": [
       "node"
