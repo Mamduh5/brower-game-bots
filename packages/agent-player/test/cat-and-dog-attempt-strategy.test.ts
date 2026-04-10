@@ -81,11 +81,13 @@ describe("selectCatAndDogAttemptStrategy", () => {
       history: [lossAttempt]
     });
 
-    expect(next.selectionReason).toBe("exploit-top-recent-repeat");
+    expect(next.selectionReason).toBe("anchor-exact-replay");
     expect(next.strategy.turnResolutionWaitMs).toBe(initial.turnResolutionWaitMs);
     expect(next.strategy.powerDirection).toBe(initial.powerDirection);
     expect(next.selectionDetails.topReferenceAttemptNumber).toBe(1);
     expect(next.selectionDetails.topReferenceDistance).toBe(0);
+    expect(next.selectionDetails.selectionMode).toBe("exact-replay");
+    expect(next.selectionDetails.changedKnob).toBe("none");
     expect(next.selectionDetails.rankedRecentAttempts[0]?.attemptNumber).toBe(1);
   });
 
@@ -125,8 +127,9 @@ describe("selectCatAndDogAttemptStrategy", () => {
       history: [progressAttempt]
     });
 
-    expect(next.selectionReason).toBe("exploit-top-recent-repeat");
+    expect(next.selectionReason).toBe("anchor-exact-replay");
     expect(next.strategy.angleDirection).toBe(initial.angleDirection);
+    expect(next.selectionDetails.selectionMode).toBe("exact-replay");
     expect(next.selectionDetails.topReferenceScore).toBeGreaterThan(300);
   });
 
@@ -168,5 +171,75 @@ describe("selectCatAndDogAttemptStrategy", () => {
 
     expect(next.selectionReason).toBe("avoid-weaker-repeat");
     expect(next.selectionDetails.selectedFingerprint).not.toBe(next.selectionDetails.rankedRecentAttempts[0]?.fingerprint);
+  });
+
+  it("switches to a one-knob local mutation after repeated local failures around the same anchor attempt", () => {
+    const anchor = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "baseline"
+    }).strategy;
+
+    const anchorLoss: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "LOSS",
+      strategy: anchor,
+      diagnostics: {
+        semanticActionCount: 4,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: true,
+        stepBudgetReached: false,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 1,
+        wallHits: 0,
+        misses: 0,
+        healsObserved: 0,
+        damageDealt: 28,
+        damageTaken: 100
+      }
+    };
+
+    const repeatedLocalUnknown: CatAndDogAttemptFeedback = {
+      attemptNumber: 2,
+      outcome: "UNKNOWN",
+      strategy: {
+        ...anchor,
+        attemptNumber: 2
+      },
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 2,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: true,
+        turnsObserved: 1,
+        shotResolutionsObserved: 0,
+        directHits: 0,
+        splashHits: 0,
+        wallHits: 1,
+        misses: 0,
+        healsObserved: 0,
+        damageDealt: 0,
+        damageTaken: 18
+      }
+    };
+
+    const next = selectCatAndDogAttemptStrategy({
+      attemptNumber: 3,
+      strategyMode: "baseline",
+      history: [anchorLoss, repeatedLocalUnknown]
+    });
+
+    expect(next.selectionReason.startsWith("anchor-one-knob-")).toBe(true);
+    expect(next.selectionDetails.selectionMode).toBe("one-knob-mutation");
+    expect(next.selectionDetails.topReferenceAttemptNumber).toBe(1);
+    expect(next.selectionDetails.changedKnob).not.toBe("none");
+    expect(next.selectionDetails.topReferenceDistance).toBe(1);
   });
 });
