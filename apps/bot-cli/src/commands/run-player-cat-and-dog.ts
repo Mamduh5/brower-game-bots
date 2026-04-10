@@ -5,6 +5,8 @@ import type { ArtifactRef, JsonObject, JsonValue, RunEvent, RunRecord, RunReport
 import {
   type CatAndDogAttemptDiagnostics,
   type CatAndDogAttemptFeedback,
+  type CatAndDogStrategySelectionDetails,
+  scoreCatAndDogAttemptFeedback,
   selectCatAndDogAttemptStrategy,
   type CatAndDogAttemptStrategy,
   type CatAndDogStrategyMode,
@@ -60,6 +62,7 @@ export interface CatAndDogPlayerAttemptRecord {
   note: string;
   strategy: CatAndDogAttemptStrategy;
   strategySelectionReason: string;
+  strategySelectionDetails: CatAndDogStrategySelectionDetails;
   diagnostics: CatAndDogAttemptRunDiagnostics;
   actionHistory: readonly JsonObject[];
   finalState: JsonObject;
@@ -152,6 +155,10 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       damageTaken: attempt.diagnostics.damageTaken
     }
   };
+}
+
+function scoreAttemptRecord(attempt: CatAndDogPlayerAttemptRecord): number {
+  return scoreCatAndDogAttemptFeedback(buildAttemptFeedback(attempt));
 }
 
 function readSemanticNumber(snapshot: GameSnapshot, key: string): number | null {
@@ -398,26 +405,26 @@ function buildPlayerSummaryJson(input: {
   artifacts: readonly ArtifactRef[];
 }): JsonObject {
   const winningAttempt = input.attempts.find((attempt) => attempt.outcome === "WIN") ?? null;
-  const progressScore = (attempt: CatAndDogPlayerAttemptRecord): number =>
-    Number(attempt.outcome === "WIN") * 200 +
-    Number(attempt.outcome === "LOSS") * 80 +
-    Number(attempt.diagnostics.endOverlayObserved) * 50 +
-    Number(attempt.diagnostics.playerTurnReadyObserved) * 15 +
-    Number(attempt.diagnostics.gameplayEnteredObserved) * 8 +
-    (attempt.diagnostics.damageDealt ?? 0) * 9 -
-    (attempt.diagnostics.damageTaken ?? 0) * 5 +
-    attempt.diagnostics.directHits * 40 +
-    attempt.diagnostics.splashHits * 20 +
-    attempt.diagnostics.wallHits * 8 -
-    attempt.diagnostics.misses * 10 +
-    attempt.diagnostics.shotsFired * 6 +
-    attempt.diagnostics.turnsObserved * 3;
   const mostProgressiveAttempt =
     [...input.attempts]
       .sort(
         (left, right) =>
-          progressScore(right) - progressScore(left) || right.attemptNumber - left.attemptNumber
+          scoreAttemptRecord(right) - scoreAttemptRecord(left) || right.attemptNumber - left.attemptNumber
       )[0] ?? null;
+  const rankedAttemptVariants = [...input.attempts]
+    .sort(
+      (left, right) =>
+        scoreAttemptRecord(right) - scoreAttemptRecord(left) || right.attemptNumber - left.attemptNumber
+    )
+    .slice(0, 3)
+    .map((attempt) => ({
+      attemptNumber: attempt.attemptNumber,
+      outcome: attempt.outcome,
+      assessment: attempt.assessment,
+      score: scoreAttemptRecord(attempt),
+      strategySelectionReason: attempt.strategySelectionReason,
+      strategy: toJsonValue(attempt.strategy)
+    }));
 
   return {
     run: {
@@ -442,8 +449,12 @@ function buildPlayerSummaryJson(input: {
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptNumber: mostProgressiveAttempt.attemptNumber } : {}),
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptStrategy: toJsonValue(mostProgressiveAttempt.strategy) } : {}),
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptAssessment: mostProgressiveAttempt.assessment } : {}),
+      ...(mostProgressiveAttempt ? { mostProgressiveAttemptScore: scoreAttemptRecord(mostProgressiveAttempt) } : {}),
       reportId: input.report.reportId,
       artifactCount: input.artifacts.length
+    },
+    strategyInsights: {
+      rankedAttemptVariants
     },
     attempts: input.attempts.map((attempt) => ({
       attemptNumber: attempt.attemptNumber,
@@ -454,6 +465,7 @@ function buildPlayerSummaryJson(input: {
       note: attempt.note,
       strategy: toJsonValue(attempt.strategy),
       strategySelectionReason: attempt.strategySelectionReason,
+      strategySelectionDetails: toJsonValue(attempt.strategySelectionDetails),
       diagnostics: toJsonValue(attempt.diagnostics),
       actionHistory: toJsonValue(attempt.actionHistory),
       finalState: toJsonValue(attempt.finalState),
@@ -558,7 +570,11 @@ export async function runPlayerCatAndDog(
         strategyMode,
         history: attempts.map((attempt) => buildAttemptFeedback(attempt))
       });
-      const { strategy, selectionReason: strategySelectionReason } = strategySelection;
+      const {
+        strategy,
+        selectionReason: strategySelectionReason,
+        selectionDetails: strategySelectionDetails
+      } = strategySelection;
       const attemptArtifacts: ArtifactRef[] = [];
       const attemptStartedAt = clock.now().toISOString();
       const attemptLogger = logger.child({
@@ -587,7 +603,8 @@ export async function runPlayerCatAndDog(
           attemptNumber,
           strategy: toJsonValue(strategy),
           strategyMode,
-          strategySelectionReason
+          strategySelectionReason,
+          strategySelectionDetails: toJsonValue(strategySelectionDetails)
         }
       });
 
@@ -815,6 +832,7 @@ export async function runPlayerCatAndDog(
         note,
         strategy,
         strategySelectionReason,
+        strategySelectionDetails,
         diagnostics,
         actionHistory,
         finalState: summarizeFinalState(currentSnapshot),
@@ -839,6 +857,7 @@ export async function runPlayerCatAndDog(
           note,
           strategy: toJsonValue(strategy),
           strategySelectionReason,
+          strategySelectionDetails: toJsonValue(strategySelectionDetails),
           diagnostics: toJsonValue(diagnostics),
           actionHistory: toJsonValue(actionHistory),
           finalState: summarizeFinalState(currentSnapshot),

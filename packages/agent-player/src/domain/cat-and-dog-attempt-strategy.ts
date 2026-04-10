@@ -48,9 +48,26 @@ export const CatAndDogAttemptFeedbackSchema = z.object({
 });
 export type CatAndDogAttemptFeedback = z.infer<typeof CatAndDogAttemptFeedbackSchema>;
 
+export interface CatAndDogRankedAttemptMemoryEntry {
+  attemptNumber: number;
+  outcome: CatAndDogAttemptOutcome;
+  score: number;
+  fingerprint: string;
+}
+
+export interface CatAndDogStrategySelectionDetails {
+  selectedFingerprint: string;
+  exactUseCount: number;
+  topReferenceAttemptNumber: number | null;
+  topReferenceScore: number | null;
+  topReferenceDistance: number | null;
+  rankedRecentAttempts: readonly CatAndDogRankedAttemptMemoryEntry[];
+}
+
 export interface CatAndDogStrategySelection {
   strategy: CatAndDogAttemptStrategy;
   selectionReason: string;
+  selectionDetails: CatAndDogStrategySelectionDetails;
 }
 
 const BASELINE_VARIANTS = [
@@ -182,6 +199,24 @@ const EXPLORE_VARIANTS = [
     powerTapCount: 1,
     settleMs: 140,
     turnResolutionWaitMs: 2200
+  },
+  {
+    weaponKey: "light",
+    angleDirection: "right",
+    angleTapCount: 2,
+    powerDirection: "up",
+    powerTapCount: 3,
+    settleMs: 210,
+    turnResolutionWaitMs: 2800
+  },
+  {
+    weaponKey: "heavy",
+    angleDirection: "right",
+    angleTapCount: 1,
+    powerDirection: "up",
+    powerTapCount: 4,
+    settleMs: 230,
+    turnResolutionWaitMs: 3100
   }
 ] as const;
 
@@ -250,32 +285,119 @@ function hasStalled(feedback: CatAndDogAttemptFeedback): boolean {
   );
 }
 
-function feedbackProgressScore(feedback: CatAndDogAttemptFeedback): number {
+export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback): number {
   const damageDealt = feedback.diagnostics.damageDealt ?? 0;
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
+  const lowResolutionPenalty =
+    feedback.diagnostics.shotsFired > 0 && feedback.diagnostics.shotResolutionsObserved === 0 ? 120 : 0;
+  const unproductiveShotPenalty =
+    feedback.diagnostics.shotsFired > 0 &&
+    damageDealt === 0 &&
+    feedback.diagnostics.directHits === 0 &&
+    feedback.diagnostics.splashHits === 0
+      ? 75
+      : 0;
+  const wallHeavyPenalty =
+    feedback.diagnostics.wallHits >= Math.max(1, feedback.diagnostics.shotsFired) ? 95 : 0;
 
   return (
-    (feedback.outcome === "WIN" ? 1_500 : 0) +
-    (feedback.outcome === "LOSS" ? 260 : 0) +
+    (feedback.outcome === "WIN" ? 1_900 : 0) +
+    (feedback.outcome === "LOSS" ? 320 : 0) +
     (feedback.outcome === "UNKNOWN" ? 40 : 0) +
-    damageDealt * 9 -
-    damageTaken * 5 +
-    feedback.diagnostics.directHits * 90 +
-    feedback.diagnostics.splashHits * 45 +
-    feedback.diagnostics.wallHits * 15 +
-    feedback.diagnostics.healsObserved * 12 -
-    feedback.diagnostics.misses * 20 +
-    feedback.diagnostics.shotResolutionsObserved * 24 +
+    damageDealt * 14 -
+    damageTaken * 6 +
+    feedback.diagnostics.directHits * 180 +
+    feedback.diagnostics.splashHits * 95 -
+    feedback.diagnostics.wallHits * 55 +
+    feedback.diagnostics.healsObserved * 10 -
+    feedback.diagnostics.misses * 45 +
+    feedback.diagnostics.shotResolutionsObserved * 28 +
+    feedback.diagnostics.shotsFired * 10 +
     feedback.diagnostics.turnsObserved * 6 +
+    (feedback.diagnostics.endOverlayObserved ? 40 : 0) +
     (feedback.diagnostics.gameplayEnteredObserved ? 12 : 0) +
-    (feedback.diagnostics.playerTurnReadyObserved ? 10 : 0) -
-    (feedback.diagnostics.stepBudgetReached ? 40 : 0)
+    (feedback.diagnostics.playerTurnReadyObserved ? 14 : 0) -
+    (feedback.diagnostics.stepBudgetReached ? 80 : 0) -
+    lowResolutionPenalty -
+    unproductiveShotPenalty -
+    wallHeavyPenalty
   );
 }
 
-function buildSelectionReason(history: readonly CatAndDogAttemptFeedback[], exactUseCount: number): string {
+function isWeakAttempt(feedback: CatAndDogAttemptFeedback): boolean {
+  const score = scoreCatAndDogAttemptFeedback(feedback);
+  return (
+    feedback.outcome !== "WIN" &&
+    (
+      score < 180 ||
+      (
+        (feedback.diagnostics.damageDealt ?? 0) === 0 &&
+        feedback.diagnostics.directHits === 0 &&
+        feedback.diagnostics.splashHits === 0 &&
+        (
+          feedback.diagnostics.wallHits > 0 ||
+          feedback.diagnostics.misses > 0 ||
+          feedback.diagnostics.stepBudgetReached
+        )
+      )
+    )
+  );
+}
+
+function buildRankedRecentMemory(
+  history: readonly CatAndDogAttemptFeedback[],
+  limit = 3
+): readonly (CatAndDogRankedAttemptMemoryEntry & { strategy: CatAndDogAttemptStrategy })[] {
+  const recentHistory = history.slice(-6);
+  const ranked = recentHistory
+    .map((feedback) => ({
+      attemptNumber: feedback.attemptNumber,
+      outcome: feedback.outcome,
+      score: scoreCatAndDogAttemptFeedback(feedback),
+      fingerprint: toFingerprint(feedback.strategy),
+      strategy: feedback.strategy
+    }))
+    .sort((left, right) => right.score - left.score || right.attemptNumber - left.attemptNumber);
+  const unique: (CatAndDogRankedAttemptMemoryEntry & { strategy: CatAndDogAttemptStrategy })[] = [];
+
+  for (const entry of ranked) {
+    if (unique.some((existing) => existing.fingerprint === entry.fingerprint)) {
+      continue;
+    }
+
+    unique.push(entry);
+    if (unique.length >= limit) {
+      break;
+    }
+  }
+
+  return unique;
+}
+
+function buildSelectionReason(input: {
+  history: readonly CatAndDogAttemptFeedback[];
+  exactUseCount: number;
+  topReference: (CatAndDogRankedAttemptMemoryEntry & { strategy: CatAndDogAttemptStrategy }) | null;
+  topReferenceDistance: number | null;
+  weakRepeatCount: number;
+  hasWeakHistory: boolean;
+}): string {
+  const { history, exactUseCount, topReference, topReferenceDistance, weakRepeatCount, hasWeakHistory } = input;
   if (history.length === 0) {
     return "initial-candidate";
+  }
+
+  if (
+    topReference &&
+    topReference.score >= 260 &&
+    topReferenceDistance !== null &&
+    topReferenceDistance <= 2
+  ) {
+    return exactUseCount === 0 ? "exploit-top-recent-region" : "exploit-top-recent-repeat";
+  }
+
+  if (weakRepeatCount > 0 && exactUseCount === 0) {
+    return "avoid-weaker-repeat";
   }
 
   const latest = history[history.length - 1];
@@ -287,8 +409,12 @@ function buildSelectionReason(history: readonly CatAndDogAttemptFeedback[], exac
     return exactUseCount === 0 ? "terminal-loss-neighbor-search" : "terminal-loss-avoid-repeat";
   }
 
-  if (latest && feedbackProgressScore(latest) > 120) {
+  if (latest && scoreCatAndDogAttemptFeedback(latest) > 120) {
     return exactUseCount === 0 ? "progress-neighbor-search" : "progress-avoid-repeat";
+  }
+
+  if (hasWeakHistory && exactUseCount === 0) {
+    return "avoid-weaker-repeat";
   }
 
   return exactUseCount === 0 ? "untried-variant" : "least-repeated-variant";
@@ -315,14 +441,36 @@ export function selectCatAndDogAttemptStrategy(input: {
 
     return {
       strategy: selected.strategy,
-      selectionReason: "initial-candidate"
+      selectionReason: "initial-candidate",
+      selectionDetails: {
+        selectedFingerprint: toFingerprint(selected.strategy),
+        exactUseCount: 0,
+        topReferenceAttemptNumber: null,
+        topReferenceScore: null,
+        topReferenceDistance: null,
+        rankedRecentAttempts: []
+      }
     };
   }
+
+  const rankedRecentMemory = buildRankedRecentMemory(history);
+  const topReference = rankedRecentMemory[0] ?? null;
+  const weakFingerprintCounts = new Map<string, number>();
+  for (const previous of history) {
+    if (!isWeakAttempt(previous)) {
+      continue;
+    }
+
+    const fingerprint = toFingerprint(previous.strategy);
+    weakFingerprintCounts.set(fingerprint, (weakFingerprintCounts.get(fingerprint) ?? 0) + 1);
+  }
+  const hasWeakHistory = weakFingerprintCounts.size > 0;
 
   const scored = candidates.map((candidate) => {
     const candidateFingerprint = toFingerprint(candidate.strategy);
     let score = 1_000 - candidate.index * 20;
     let exactUseCount = 0;
+    let weakRepeatCount = weakFingerprintCounts.get(candidateFingerprint) ?? 0;
 
     for (const previous of history) {
       const previousFingerprint = toFingerprint(previous.strategy);
@@ -356,7 +504,7 @@ export function selectCatAndDogAttemptStrategy(input: {
           score += 8;
         }
 
-        score += Math.max(0, feedbackProgressScore(previous) - 200) / 8;
+        score += Math.max(0, scoreCatAndDogAttemptFeedback(previous) - 220) / 7;
 
         continue;
       }
@@ -382,7 +530,7 @@ export function selectCatAndDogAttemptStrategy(input: {
           score += 10;
         }
       } else {
-        const progress = feedbackProgressScore(previous);
+        const progress = scoreCatAndDogAttemptFeedback(previous);
         if (distance <= 2) {
           score += 24 - distance * 8;
         }
@@ -405,9 +553,38 @@ export function selectCatAndDogAttemptStrategy(input: {
       }
     }
 
+    for (const [memoryIndex, memory] of rankedRecentMemory.entries()) {
+      const distance = strategyDistance(candidate.strategy, memory.strategy);
+      const baseWeight = memoryIndex === 0 ? 230 : memoryIndex === 1 ? 120 : 70;
+      if (memory.score >= 260) {
+        if (distance <= 1) {
+          score += baseWeight;
+        } else if (distance <= 3) {
+          score += Math.max(0, baseWeight - distance * 45);
+        } else {
+          score -= Math.min(160, (distance - 3) * 40);
+        }
+      } else if (memory.score >= 160 && distance <= 3) {
+        score += Math.max(0, baseWeight - distance * 35);
+      }
+
+      if (memory.score >= 220 && candidate.strategy.weaponKey === memory.strategy.weaponKey) {
+        score += 18;
+      }
+    }
+
+    if (topReference && candidate.strategy.weaponKey !== topReference.strategy.weaponKey && topReference.score >= 260) {
+      score -= 35;
+    }
+
+    if (weakRepeatCount > 0) {
+      score -= 160 + weakRepeatCount * 55;
+    }
+
     return {
       ...candidate,
       exactUseCount,
+      weakRepeatCount,
       score
     };
   });
@@ -431,7 +608,27 @@ export function selectCatAndDogAttemptStrategy(input: {
 
   return {
     strategy: best.strategy,
-    selectionReason: buildSelectionReason(history, best.exactUseCount)
+    selectionReason: buildSelectionReason({
+      history,
+      exactUseCount: best.exactUseCount,
+      topReference,
+      topReferenceDistance: topReference ? strategyDistance(best.strategy, topReference.strategy) : null,
+      weakRepeatCount: best.weakRepeatCount,
+      hasWeakHistory
+    }),
+    selectionDetails: {
+      selectedFingerprint: toFingerprint(best.strategy),
+      exactUseCount: best.exactUseCount,
+      topReferenceAttemptNumber: topReference?.attemptNumber ?? null,
+      topReferenceScore: topReference?.score ?? null,
+      topReferenceDistance: topReference ? strategyDistance(best.strategy, topReference.strategy) : null,
+      rankedRecentAttempts: rankedRecentMemory.map((entry) => ({
+        attemptNumber: entry.attemptNumber,
+        outcome: entry.outcome,
+        score: entry.score,
+        fingerprint: entry.fingerprint
+      }))
+    }
   };
 }
 

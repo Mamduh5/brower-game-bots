@@ -76,7 +76,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts).toHaveLength(2);
         expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["LOSS", "WIN"]);
         expect(result.attempts[0]?.strategySelectionReason).toBe("initial-candidate");
-        expect(result.attempts[1]?.strategySelectionReason).toBe("terminal-loss-neighbor-search");
+        expect(result.attempts[1]?.strategySelectionReason).toBe("exploit-top-recent-repeat");
+        expect(result.attempts[1]?.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
         expect(result.attempts[0]?.diagnostics.gameplayEnteredObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.playerTurnReadyObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.shotsFired).toBeGreaterThan(0);
@@ -88,7 +89,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[1]?.diagnostics.damageTaken).toBe(22);
         expect(result.attempts[1]?.diagnostics.stepBudgetReached).toBe(false);
         expect(result.attempts[1]?.assessment).toBe("won-round");
-        expect(result.attempts[0]?.strategy.turnResolutionWaitMs).not.toBe(result.attempts[1]?.strategy.turnResolutionWaitMs);
+        expect(result.attempts[0]?.strategy.turnResolutionWaitMs).toBe(result.attempts[1]?.strategy.turnResolutionWaitMs);
+        expect(result.attempts[1]?.strategySelectionDetails.topReferenceDistance).toBe(0);
         expect(
           storedEvents.some(
             (event) => event.type === "report.generated" && event.reportId === result.report.reportId
@@ -110,6 +112,7 @@ describe("runPlayerCatAndDog integration", () => {
         expect(attemptCompletedEvents[1]?.payload.diagnostics.damageDealt).toBe(100);
         expect(attemptCompletedEvents[1]?.payload.diagnostics.endOverlayObserved).toBe(true);
         expect(attemptCompletedEvents[1]?.payload.assessment).toBe("won-round");
+        expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
 
         const screenshotPaths = result.artifacts
           .filter((artifact) => artifact.kind === "screenshot")
@@ -130,13 +133,19 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.summary.terminalAttempts).toBe(2);
         expect(summaryJson.summary.mostProgressiveAttemptNumber).toBe(2);
         expect(summaryJson.summary.mostProgressiveAttemptAssessment).toBe("won-round");
+        expect(summaryJson.summary.mostProgressiveAttemptScore).toBeGreaterThan(500);
         expect(summaryJson.summary.winningStrategy).toBeUndefined();
         expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
-        expect(summaryJson.attempts[1].strategySelectionReason).toBe("terminal-loss-neighbor-search");
+        expect(summaryJson.attempts[1].strategySelectionReason).toBe("exploit-top-recent-repeat");
+        expect(summaryJson.attempts[1].strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
         expect(summaryJson.attempts[0].diagnostics.shotsFired).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].assessment).toBe("loss-with-damage");
         expect(summaryJson.attempts[0].diagnostics.damageDealt).toBe(28);
         expect(summaryJson.attempts[1].diagnostics.damageDealt).toBe(100);
+        expect(summaryJson.strategyInsights.rankedAttemptVariants[0].attemptNumber).toBe(2);
+        expect(summaryJson.strategyInsights.rankedAttemptVariants[0].score).toBeGreaterThan(
+          summaryJson.strategyInsights.rankedAttemptVariants[1].score
+        );
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
