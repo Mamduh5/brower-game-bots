@@ -38,6 +38,10 @@ type ShotResolutionCategory =
 
 export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnostics {
   maxStepsBudget: number;
+  elapsedMs: number;
+  totalWaitMs: number;
+  resolutionWaitMs: number;
+  waitHeavyRatio: number;
   turnsObserved: number;
   shotResolutionsObserved: number;
   directHits: number;
@@ -320,6 +324,10 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     endOverlayObserved: false,
     stepBudgetReached: false,
     maxStepsBudget,
+    elapsedMs: 0,
+    totalWaitMs: 0,
+    resolutionWaitMs: 0,
+    waitHeavyRatio: 0,
     turnsObserved: 0,
     shotResolutionsObserved: 0,
     directHits: 0,
@@ -688,6 +696,7 @@ export async function runPlayerCatAndDog(
       } = strategySelection;
       const attemptArtifacts: ArtifactRef[] = [];
       const attemptStartedAt = clock.now().toISOString();
+      const attemptStartedAtMs = Date.parse(attemptStartedAt);
       const attemptLogger = logger.child({
         attemptNumber,
         strategyMode,
@@ -820,6 +829,18 @@ export async function runPlayerCatAndDog(
         );
 
         for (const environmentAction of environmentActions) {
+          if (environmentAction.kind === "wait") {
+            diagnostics = {
+              ...diagnostics,
+              totalWaitMs: diagnostics.totalWaitMs + environmentAction.durationMs,
+              ...(decision.actionId === "wait-for-turn-resolution"
+                ? {
+                    resolutionWaitMs: diagnostics.resolutionWaitMs + environmentAction.durationMs
+                  }
+                : {})
+            };
+          }
+
           const actionResult = await environmentSession.execute(environmentAction);
           await container.runEngine.appendEvent({
             eventId: randomUUID(),
@@ -897,6 +918,9 @@ export async function runPlayerCatAndDog(
             );
           }
           endStateCaptured = true;
+          outcome = postActionOutcome;
+          note = buildAttemptNote(currentSnapshot, `Attempt ${attemptNumber} reached a terminal state.`);
+          break;
         }
       }
 
@@ -947,6 +971,10 @@ export async function runPlayerCatAndDog(
       }
 
       const attemptEndedAt = clock.now().toISOString();
+      const elapsedMs = Math.max(
+        0,
+        Number.isFinite(attemptStartedAtMs) ? Date.parse(attemptEndedAt) - attemptStartedAtMs : 0
+      );
       const assessment = buildAttemptAssessment(outcome, diagnostics);
       const attemptRecord: CatAndDogPlayerAttemptRecord = {
         attemptNumber,
@@ -958,7 +986,14 @@ export async function runPlayerCatAndDog(
         strategy,
         strategySelectionReason,
         strategySelectionDetails,
-        diagnostics,
+        diagnostics: {
+          ...diagnostics,
+          elapsedMs,
+          waitHeavyRatio:
+            elapsedMs > 0
+              ? Number((diagnostics.totalWaitMs / elapsedMs).toFixed(3))
+              : 0
+        },
         actionHistory,
         finalState: summarizeFinalState(currentSnapshot),
         artifacts: [...attemptArtifacts].sort(byArtifactPath)
@@ -983,7 +1018,7 @@ export async function runPlayerCatAndDog(
           strategy: toJsonValue(strategy),
           strategySelectionReason,
           strategySelectionDetails: toJsonValue(strategySelectionDetails),
-          diagnostics: toJsonValue(diagnostics),
+          diagnostics: toJsonValue(attemptRecord.diagnostics),
           actionHistory: toJsonValue(actionHistory),
           finalState: summarizeFinalState(currentSnapshot),
           artifacts: attemptRecord.artifacts.map((artifact) => ({
@@ -994,7 +1029,10 @@ export async function runPlayerCatAndDog(
         }
       });
 
-      attemptLogger.info({ outcome, assessment, note, diagnostics }, "Completed cat-and-dog player attempt.");
+      attemptLogger.info(
+        { outcome, assessment, note, diagnostics: attemptRecord.diagnostics },
+        "Completed cat-and-dog player attempt."
+      );
 
       if (outcome === "WIN" && stopOnWin) {
         break;

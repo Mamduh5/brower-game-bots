@@ -142,7 +142,7 @@ export class CatAndDogGameSession implements GameSession {
 
     await environment.execute({
       kind: "wait",
-      durationMs: 800
+      durationMs: 450
     });
   }
 
@@ -289,7 +289,7 @@ export class CatAndDogGameSession implements GameSession {
           },
           {
             kind: "wait",
-            durationMs: 400
+            durationMs: 220
           }
         ];
       }
@@ -307,7 +307,7 @@ export class CatAndDogGameSession implements GameSession {
           },
           {
             kind: "wait",
-            durationMs: 200
+            durationMs: 120
           },
           {
             kind: "click",
@@ -317,7 +317,7 @@ export class CatAndDogGameSession implements GameSession {
           },
           {
             kind: "wait",
-            durationMs: 700
+            durationMs: 360
           }
         ];
       }
@@ -330,7 +330,7 @@ export class CatAndDogGameSession implements GameSession {
         const powerTapCount = readIntegerParam(action.params, "powerTapCount", 1);
         const settleMs = readIntegerParam(action.params, "settleMs", 150);
         const turnResolutionWaitMs = readIntegerParam(action.params, "turnResolutionWaitMs", 1800);
-        const postFireObserveDelayMs = Math.max(700, Math.min(1400, Math.floor(turnResolutionWaitMs / 2)));
+        const postFireObserveDelayMs = Math.max(260, Math.min(700, Math.floor(turnResolutionWaitMs / 3)));
 
         if (snapshot.semanticState.playerTurnReady !== true) {
           throw new Error("Cannot execute a planned shot before the player turn is ready.");
@@ -343,7 +343,7 @@ export class CatAndDogGameSession implements GameSession {
           },
           {
             kind: "wait",
-            durationMs: 120
+            durationMs: 70
           },
           ...buildRepeatedKeypresses(angleDirection === "left" ? "A" : "D", angleTapCount),
           ...buildRepeatedKeypresses(powerDirection === "down" ? "S" : "W", powerTapCount),

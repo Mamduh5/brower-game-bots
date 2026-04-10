@@ -780,6 +780,8 @@ export function selectCatAndDogAttemptStrategy(input: {
     let score = 1_000 - candidate.index * 20;
     let exactUseCount = 0;
     let weakRepeatCount = weakFingerprintCounts.get(candidateFingerprint) ?? 0;
+    const anchorDistance =
+      anchorFeedback ? strategyDistance(candidate.strategy, anchorFeedback.strategy) : null;
 
     for (const previous of history) {
       const previousFingerprint = toFingerprint(previous.strategy);
@@ -873,7 +875,8 @@ export function selectCatAndDogAttemptStrategy(input: {
     if (
       anchorFeedback &&
       candidate.meta.origin === "catalog" &&
-      strategyDistance(candidate.strategy, anchorFeedback.strategy) > 2
+      anchorDistance !== null &&
+      anchorDistance > 2
     ) {
       score -= localFailureCount >= 2 ? 140 : 280;
     }
@@ -881,10 +884,23 @@ export function selectCatAndDogAttemptStrategy(input: {
     if (
       anchorFeedback &&
       candidate.meta.origin === "catalog" &&
-      strategyDistance(candidate.strategy, anchorFeedback.strategy) > 1 &&
+      anchorDistance !== null &&
+      anchorDistance > 1 &&
       localFailureCount < 2
     ) {
       score -= 120;
+    }
+
+    if (topReference && topReference.score >= 260 && anchorDistance !== null) {
+      if (anchorDistance === 0) {
+        score += localFailureCount === 0 ? 170 : 90;
+      } else if (anchorDistance === 1) {
+        score += localFailureCount >= 1 ? 120 : 45;
+      } else if (anchorDistance === 2) {
+        score -= localFailureCount >= 2 ? 25 : 180;
+      } else {
+        score -= localFailureCount >= 2 ? 140 : 320;
+      }
     }
 
     for (const [memoryIndex, memory] of rankedRecentMemory.entries()) {

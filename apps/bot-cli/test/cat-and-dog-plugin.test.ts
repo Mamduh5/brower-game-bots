@@ -341,7 +341,7 @@ describe("cat-and-dog plugin", () => {
         },
         {
           kind: "wait",
-          durationMs: 800
+          durationMs: 450
         }
       ]);
     } finally {
@@ -488,7 +488,7 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "wait",
-        durationMs: 400
+        durationMs: 220
       }
     ]);
 
@@ -528,7 +528,7 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "wait",
-        durationMs: 200
+        durationMs: 120
       },
       {
         kind: "click",
@@ -538,7 +538,7 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "wait",
-        durationMs: 700
+        durationMs: 360
       }
     ]);
 
@@ -610,7 +610,7 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "wait",
-        durationMs: 120
+        durationMs: 70
       },
       {
         kind: "keypress",
@@ -638,7 +638,7 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "wait",
-        durationMs: 1200
+        durationMs: 700
       }
     ]);
 
