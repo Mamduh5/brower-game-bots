@@ -179,6 +179,7 @@ export class CatAndDogGameSession implements GameSession {
         matchNoteText: shell.matchNoteText,
         canvasHintVisible: shell.canvasHintVisible,
         canvasHintText: shell.canvasHintText,
+        canvasHintCategory: shell.canvasHintCategory,
         turnBannerVisible: shell.turnBannerVisible,
         turnBannerLabelText: shell.turnBannerLabelText,
         turnBannerTitleText: shell.turnBannerTitleText,
@@ -212,6 +213,14 @@ export class CatAndDogGameSession implements GameSession {
         gameplayInputApplied: shell.gameplayInputApplied ? 1 : 0,
         playerTurnReady: shell.playerTurnReady ? 1 : 0,
         canvasHintVisible: shell.canvasHintVisible ? 1 : 0,
+        canvasHintCategory:
+          shell.canvasHintCategory === "combat-result"
+            ? 3
+            : shell.canvasHintCategory === "turn-status"
+              ? 2
+              : shell.canvasHintCategory === "instructional"
+                ? 1
+                : 0,
         turnBannerVisible: shell.turnBannerVisible ? 1 : 0,
         shotResolved: shell.shotResolved ? 1 : 0,
         hpTrackingAvailable: shell.hpTrackingAvailable ? 1 : 0,

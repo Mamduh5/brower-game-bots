@@ -51,6 +51,9 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   damageTrackingConfirmed: boolean;
   progressSignalSource: "hp" | "combat-hint" | "turn-only" | "unavailable";
   combatHintsObserved: number;
+  instructionalHintsObserved: number;
+  turnStatusHintsObserved: number;
+  lastHintCategory: "none" | "instructional" | "turn-status" | "combat-result" | "cpu-planning" | "unknown";
   lastCombatHintText: string | null;
   playerHpStart: number | null;
   playerHpEnd: number | null;
@@ -189,12 +192,28 @@ function buildResolutionSignature(snapshot: GameSnapshot): string | null {
 }
 
 function buildCombatHintSignature(snapshot: GameSnapshot): string | null {
+  if (
+    snapshot.semanticState.canvasHintVisible !== true ||
+    snapshot.semanticState.canvasHintCategory !== "combat-result" ||
+    typeof snapshot.semanticState.canvasHintText !== "string"
+  ) {
+    return null;
+  }
+
+  return [
+    snapshot.semanticState.turnCounter ?? "",
+    snapshot.semanticState.canvasHintText.trim()
+  ].join("|");
+}
+
+function buildHintSignature(snapshot: GameSnapshot): string | null {
   if (snapshot.semanticState.canvasHintVisible !== true || typeof snapshot.semanticState.canvasHintText !== "string") {
     return null;
   }
 
   return [
     snapshot.semanticState.turnCounter ?? "",
+    snapshot.semanticState.canvasHintCategory ?? "",
     snapshot.semanticState.canvasHintText.trim()
   ].join("|");
 }
@@ -231,6 +250,7 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     matchNoteText: toJsonValue(snapshot.semanticState.matchNoteText),
     canvasHintVisible: toJsonValue(snapshot.semanticState.canvasHintVisible),
     canvasHintText: toJsonValue(snapshot.semanticState.canvasHintText),
+    canvasHintCategory: toJsonValue(snapshot.semanticState.canvasHintCategory),
     playerHpValue: toJsonValue(snapshot.semanticState.playerHpValue),
     playerHpMax: toJsonValue(snapshot.semanticState.playerHpMax),
     cpuHpValue: toJsonValue(snapshot.semanticState.cpuHpValue),
@@ -313,6 +333,9 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     damageTrackingConfirmed: false,
     progressSignalSource: "unavailable",
     combatHintsObserved: 0,
+    instructionalHintsObserved: 0,
+    turnStatusHintsObserved: 0,
+    lastHintCategory: "none",
     lastCombatHintText: null,
     playerHpStart: null,
     playerHpEnd: null,
@@ -340,12 +363,14 @@ function updateAttemptProgressFromSnapshot(
   snapshot: GameSnapshot,
   input: {
     lastResolutionSignature: string | null;
+    lastHintSignature: string | null;
     lastCombatHintSignature: string | null;
     previousPlayerTurnReady: boolean;
   }
 ): {
   diagnostics: CatAndDogAttemptRunDiagnostics;
   lastResolutionSignature: string | null;
+  lastHintSignature: string | null;
   lastCombatHintSignature: string | null;
   previousPlayerTurnReady: boolean;
 } {
@@ -440,11 +465,35 @@ function updateAttemptProgressFromSnapshot(
     };
   }
 
+  const hintSignature = buildHintSignature(snapshot);
+  if (hintSignature && hintSignature !== input.lastHintSignature) {
+    const hintCategory = snapshot.semanticState.canvasHintCategory;
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      ...(hintCategory === "instructional"
+        ? { instructionalHintsObserved: nextDiagnostics.instructionalHintsObserved + 1 }
+        : {}),
+      ...(hintCategory === "turn-status"
+        ? { turnStatusHintsObserved: nextDiagnostics.turnStatusHintsObserved + 1 }
+        : {}),
+      ...(hintCategory === "combat-result"
+        ? { combatHintsObserved: nextDiagnostics.combatHintsObserved + 1 }
+        : {}),
+      lastHintCategory:
+        hintCategory === "instructional" ||
+        hintCategory === "turn-status" ||
+        hintCategory === "combat-result" ||
+        hintCategory === "cpu-planning" ||
+        hintCategory === "unknown"
+          ? hintCategory
+          : "none"
+    };
+  }
+
   const combatHintSignature = buildCombatHintSignature(snapshot);
   if (combatHintSignature && combatHintSignature !== input.lastCombatHintSignature) {
     nextDiagnostics = {
       ...nextDiagnostics,
-      combatHintsObserved: nextDiagnostics.combatHintsObserved + 1,
       lastCombatHintText:
         typeof snapshot.semanticState.canvasHintText === "string" ? snapshot.semanticState.canvasHintText : null
     };
@@ -453,6 +502,7 @@ function updateAttemptProgressFromSnapshot(
   return {
     diagnostics: nextDiagnostics,
     lastResolutionSignature: resolutionSignature ?? input.lastResolutionSignature,
+    lastHintSignature: hintSignature ?? input.lastHintSignature,
     lastCombatHintSignature: combatHintSignature ?? input.lastCombatHintSignature,
     previousPlayerTurnReady: snapshot.semanticState.playerTurnReady === true
   };
@@ -699,15 +749,18 @@ export async function runPlayerCatAndDog(
       let maxStepsBudget = maxStepsPerAttempt;
       let diagnostics = createAttemptDiagnostics(maxStepsBudget);
       let lastResolutionSignature: string | null = null;
+      let lastHintSignature: string | null = null;
       let lastCombatHintSignature: string | null = null;
       let previousPlayerTurnReady = false;
       ({
         diagnostics,
         lastResolutionSignature,
+        lastHintSignature,
         lastCombatHintSignature,
         previousPlayerTurnReady
       } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
         lastResolutionSignature,
+        lastHintSignature,
         lastCombatHintSignature,
         previousPlayerTurnReady
       }));
@@ -793,10 +846,12 @@ export async function runPlayerCatAndDog(
         ({
           diagnostics,
           lastResolutionSignature,
+          lastHintSignature,
           lastCombatHintSignature,
           previousPlayerTurnReady
         } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
           lastResolutionSignature,
+          lastHintSignature,
           lastCombatHintSignature,
           previousPlayerTurnReady
         }));
@@ -875,10 +930,12 @@ export async function runPlayerCatAndDog(
       ({
         diagnostics,
         lastResolutionSignature,
+        lastHintSignature,
         lastCombatHintSignature,
         previousPlayerTurnReady
       } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
         lastResolutionSignature,
+        lastHintSignature,
         lastCombatHintSignature,
         previousPlayerTurnReady
       }));

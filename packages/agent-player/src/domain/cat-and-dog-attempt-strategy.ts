@@ -288,8 +288,10 @@ function hasStalled(feedback: CatAndDogAttemptFeedback): boolean {
 export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback): number {
   const damageDealt = feedback.diagnostics.damageDealt ?? 0;
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
+  const unresolvedShots = Math.max(0, feedback.diagnostics.shotsFired - feedback.diagnostics.shotResolutionsObserved);
   const lowResolutionPenalty =
-    feedback.diagnostics.shotsFired > 0 && feedback.diagnostics.shotResolutionsObserved === 0 ? 120 : 0;
+    unresolvedShots * 95 +
+    (feedback.diagnostics.shotsFired > 0 && feedback.diagnostics.shotResolutionsObserved === 0 ? 140 : 0);
   const unproductiveShotPenalty =
     feedback.diagnostics.shotsFired > 0 &&
     damageDealt === 0 &&
@@ -312,7 +314,7 @@ export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback
     feedback.diagnostics.healsObserved * 10 -
     feedback.diagnostics.misses * 45 +
     feedback.diagnostics.shotResolutionsObserved * 28 +
-    feedback.diagnostics.shotsFired * 10 +
+    feedback.diagnostics.shotsFired * 4 +
     feedback.diagnostics.turnsObserved * 6 +
     (feedback.diagnostics.endOverlayObserved ? 40 : 0) +
     (feedback.diagnostics.gameplayEnteredObserved ? 12 : 0) +

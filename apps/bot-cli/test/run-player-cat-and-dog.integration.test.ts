@@ -88,10 +88,13 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.damageTrackingConfirmed).toBe(true);
         expect(result.attempts[0]?.diagnostics.progressSignalSource).toBe("hp");
         expect(result.attempts[0]?.diagnostics.combatHintsObserved).toBeGreaterThan(0);
+        expect(result.attempts[0]?.diagnostics.instructionalHintsObserved).toBeGreaterThan(0);
+        expect(result.attempts[0]?.diagnostics.lastHintCategory).toBe("combat-result");
         expect(result.attempts[1]?.diagnostics.endOverlayObserved).toBe(true);
         expect(result.attempts[1]?.diagnostics.damageDealt).toBe(100);
         expect(result.attempts[1]?.diagnostics.damageTaken).toBe(22);
         expect(result.attempts[1]?.diagnostics.hpTrackingAvailable).toBe(true);
+        expect(result.attempts[1]?.diagnostics.turnStatusHintsObserved).toBeGreaterThanOrEqual(0);
         expect(result.attempts[1]?.diagnostics.stepBudgetReached).toBe(false);
         expect(result.attempts[1]?.assessment).toBe("won-round");
         expect(result.attempts[0]?.strategy.turnResolutionWaitMs).toBe(result.attempts[1]?.strategy.turnResolutionWaitMs);
@@ -117,6 +120,7 @@ describe("runPlayerCatAndDog integration", () => {
         expect(attemptCompletedEvents[1]?.payload.diagnostics.damageDealt).toBe(100);
         expect(attemptCompletedEvents[0]?.payload.diagnostics.hpTrackingAvailable).toBe(true);
         expect(attemptCompletedEvents[0]?.payload.diagnostics.progressSignalSource).toBe("hp");
+        expect(attemptCompletedEvents[0]?.payload.diagnostics.lastHintCategory).toBe("combat-result");
         expect(attemptCompletedEvents[1]?.payload.diagnostics.endOverlayObserved).toBe(true);
         expect(attemptCompletedEvents[1]?.payload.assessment).toBe("won-round");
         expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
@@ -150,6 +154,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.attempts[0].diagnostics.damageDealt).toBe(28);
         expect(summaryJson.attempts[0].diagnostics.hpTrackingAvailable).toBe(true);
         expect(summaryJson.attempts[0].diagnostics.progressSignalSource).toBe("hp");
+        expect(summaryJson.attempts[0].diagnostics.instructionalHintsObserved).toBeGreaterThan(0);
+        expect(summaryJson.attempts[0].diagnostics.lastHintCategory).toBe("combat-result");
         expect(summaryJson.attempts[1].diagnostics.damageDealt).toBe(100);
         expect(summaryJson.strategyInsights.rankedAttemptVariants[0].attemptNumber).toBe(2);
         expect(summaryJson.strategyInsights.rankedAttemptVariants[0].score).toBeGreaterThan(

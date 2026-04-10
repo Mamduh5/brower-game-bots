@@ -27,6 +27,7 @@ export interface CatAndDogShellState {
   matchNoteText: string | null;
   canvasHintVisible: boolean;
   canvasHintText: string | null;
+  canvasHintCategory: "none" | "instructional" | "turn-status" | "combat-result" | "cpu-planning" | "unknown";
   turnBannerVisible: boolean;
   turnBannerLabelText: string | null;
   turnBannerTitleText: string | null;
@@ -229,6 +230,7 @@ function parseHpText(value: string | null): { current: number | null; max: numbe
 
 function parseShotResolutionCategory(
   canvasHintText: string | null,
+  canvasHintCategory: CatAndDogShellState["canvasHintCategory"],
   playerTurnReady: boolean,
   turnBannerVisible: boolean,
   endVisible: boolean
@@ -242,58 +244,51 @@ function parseShotResolutionCategory(
     return turnBannerVisible ? "turn-start" : "none";
   }
 
-  if (normalized.includes("stepping in") || normalized.includes("get ready")) {
+  if (canvasHintCategory === "turn-status" && (normalized.includes("stepping in") || normalized.includes("get ready"))) {
     return "turn-start";
   }
 
-  if (
-    normalized.includes("adjust angle") ||
-    normalized.includes("controls: a/d") ||
-    normalized.includes("press a/d") ||
-    normalized.includes("drag to aim") ||
-    normalized.includes("release to fire") ||
-    normalized.includes("pull back")
-  ) {
+  if (canvasHintCategory === "instructional") {
     return playerTurnReady ? "aiming" : "cpu-planning";
   }
 
-  if (normalized.includes("winds up")) {
+  if (canvasHintCategory === "turn-status" && normalized.includes("winds up")) {
     return "windup";
   }
 
-  if (normalized.includes("heavy impact landed")) {
+  if (canvasHintCategory === "combat-result" && normalized.includes("heavy impact landed")) {
     return "direct-hit";
   }
 
-  if (normalized.includes("wall hit and splash damage landed")) {
+  if (canvasHintCategory === "combat-result" && normalized.includes("wall hit and splash damage landed")) {
     return "splash-hit";
   }
 
-  if (normalized.includes("heavy burst scatters shards")) {
+  if (canvasHintCategory === "combat-result" && normalized.includes("heavy burst scatters shards")) {
     return "splash-hit";
   }
 
-  if (normalized.includes("direct hit")) {
+  if (canvasHintCategory === "combat-result" && normalized.includes("direct hit")) {
     return "direct-hit";
   }
 
-  if (normalized.includes("splash damage")) {
+  if (canvasHintCategory === "combat-result" && normalized.includes("splash damage")) {
     return "splash-hit";
   }
 
-  if (normalized.includes("wall hit") || normalized.includes("slammed into the wall")) {
+  if (canvasHintCategory === "combat-result" && (normalized.includes("wall hit") || normalized.includes("slammed into the wall"))) {
     return "wall-hit";
   }
 
-  if (normalized.includes("recovered") || normalized.includes("full hp") || normalized.includes("heal")) {
+  if (canvasHintCategory === "combat-result" && (normalized.includes("recovered") || normalized.includes("full hp") || normalized.includes("heal"))) {
     return "heal";
   }
 
-  if (normalized.includes("missed clean")) {
+  if (canvasHintCategory === "combat-result" && normalized.includes("missed clean")) {
     return "miss";
   }
 
-  if (normalized.includes("reading the wind") || normalized.includes("fire twice") || normalized.includes("cheat shot")) {
+  if (canvasHintCategory === "cpu-planning") {
     return "cpu-planning";
   }
 
@@ -303,6 +298,60 @@ function parseShotResolutionCategory(
 
   if (turnBannerVisible) {
     return "turn-start";
+  }
+
+  return "unknown";
+}
+
+function parseCanvasHintCategory(canvasHintText: string | null): CatAndDogShellState["canvasHintCategory"] {
+  const normalized = (canvasHintText ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return "none";
+  }
+
+  if (
+    normalized.includes("adjust angle") ||
+    normalized.includes("controls: a/d") ||
+    normalized.includes("press a/d") ||
+    normalized.includes("drag to aim") ||
+    normalized.includes("release to fire") ||
+    normalized.includes("pull back") ||
+    normalized.includes("switched to")
+  ) {
+    return "instructional";
+  }
+
+  if (
+    normalized.includes("stepping in") ||
+    normalized.includes("get ready") ||
+    normalized.includes("winds up")
+  ) {
+    return "turn-status";
+  }
+
+  if (
+    normalized.includes("reading the wind") ||
+    normalized.includes("plans to fire twice") ||
+    normalized.includes("cheat shot") ||
+    normalized.includes("sizes up") ||
+    normalized.includes("deciding whether to patch up")
+  ) {
+    return "cpu-planning";
+  }
+
+  if (
+    normalized.includes("direct hit") ||
+    normalized.includes("heavy impact landed") ||
+    normalized.includes("splash damage landed") ||
+    normalized.includes("wall hit and splash damage landed") ||
+    normalized.includes("heavy burst scatters shards") ||
+    normalized.includes("shot slammed into the wall") ||
+    normalized.includes("missed clean") ||
+    normalized.includes("recovered") ||
+    normalized.includes("full hp") ||
+    normalized.includes("heal")
+  ) {
+    return "combat-result";
   }
 
   return "unknown";
@@ -392,8 +441,7 @@ function parseSelectedWeaponKey(domHtml: string): string | null {
 function resolveProgressSignalSource(input: {
   playerHpValue: number | null;
   cpuHpValue: number | null;
-  canvasHintVisible: boolean;
-  canvasHintText: string | null;
+  canvasHintCategory: CatAndDogShellState["canvasHintCategory"];
   turnBannerVisible: boolean;
   turnCounter: number | null;
 }): CatAndDogShellState["progressSignalSource"] {
@@ -401,7 +449,7 @@ function resolveProgressSignalSource(input: {
     return "hp";
   }
 
-  if (input.canvasHintVisible && input.canvasHintText) {
+  if (input.canvasHintCategory === "combat-result") {
     return "combat-hint";
   }
 
@@ -490,6 +538,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const canvasHintText = canvasHintVisible
     ? extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.canvasHintCandidates)
     : null;
+  const canvasHintCategory = parseCanvasHintCategory(canvasHintText);
   const turnBannerVisible = isVisibleElementById(domHtml, "turnBanner");
   const turnBannerLabelText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerLabelCandidates);
   const turnBannerTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerTitleCandidates);
@@ -522,6 +571,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     endVisible !== true;
   const shotResolutionCategory = parseShotResolutionCategory(
     canvasHintText,
+    canvasHintCategory,
     playerTurnReady,
     turnBannerVisible,
     endVisible
@@ -537,8 +587,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const progressSignalSource = resolveProgressSignalSource({
     playerHpValue: playerHp.current,
     cpuHpValue: cpuHp.current,
-    canvasHintVisible,
-    canvasHintText,
+    canvasHintCategory,
     turnBannerVisible,
     turnCounter
   });
@@ -576,6 +625,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     matchNoteText,
     canvasHintVisible,
     canvasHintText,
+    canvasHintCategory,
     turnBannerVisible,
     turnBannerLabelText,
     turnBannerTitleText,
