@@ -47,6 +47,11 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   healsObserved: number;
   damageDealt: number | null;
   damageTaken: number | null;
+  hpTrackingAvailable: boolean;
+  damageTrackingConfirmed: boolean;
+  progressSignalSource: "hp" | "combat-hint" | "turn-only" | "unavailable";
+  combatHintsObserved: number;
+  lastCombatHintText: string | null;
   playerHpStart: number | null;
   playerHpEnd: number | null;
   cpuHpStart: number | null;
@@ -183,6 +188,17 @@ function buildResolutionSignature(snapshot: GameSnapshot): string | null {
   ].join("|");
 }
 
+function buildCombatHintSignature(snapshot: GameSnapshot): string | null {
+  if (snapshot.semanticState.canvasHintVisible !== true || typeof snapshot.semanticState.canvasHintText !== "string") {
+    return null;
+  }
+
+  return [
+    snapshot.semanticState.turnCounter ?? "",
+    snapshot.semanticState.canvasHintText.trim()
+  ].join("|");
+}
+
 function detectAttemptOutcome(snapshot: GameSnapshot): AttemptOutcome | null {
   const outcome = snapshot.semanticState.outcome;
   if (outcome === "win") {
@@ -213,11 +229,14 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     selectedWeaponKey: toJsonValue(snapshot.semanticState.selectedWeaponKey),
     modeLabelText: toJsonValue(snapshot.semanticState.modeLabelText),
     matchNoteText: toJsonValue(snapshot.semanticState.matchNoteText),
+    canvasHintVisible: toJsonValue(snapshot.semanticState.canvasHintVisible),
     canvasHintText: toJsonValue(snapshot.semanticState.canvasHintText),
     playerHpValue: toJsonValue(snapshot.semanticState.playerHpValue),
     playerHpMax: toJsonValue(snapshot.semanticState.playerHpMax),
     cpuHpValue: toJsonValue(snapshot.semanticState.cpuHpValue),
     cpuHpMax: toJsonValue(snapshot.semanticState.cpuHpMax),
+    hpTrackingAvailable: toJsonValue(snapshot.semanticState.hpTrackingAvailable),
+    progressSignalSource: toJsonValue(snapshot.semanticState.progressSignalSource),
     turnCounter: toJsonValue(snapshot.semanticState.turnCounter),
     shotResolutionCategory: toJsonValue(snapshot.semanticState.shotResolutionCategory),
     shotResolved: toJsonValue(snapshot.semanticState.shotResolved),
@@ -290,6 +309,11 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     healsObserved: 0,
     damageDealt: null,
     damageTaken: null,
+    hpTrackingAvailable: false,
+    damageTrackingConfirmed: false,
+    progressSignalSource: "unavailable",
+    combatHintsObserved: 0,
+    lastCombatHintText: null,
     playerHpStart: null,
     playerHpEnd: null,
     cpuHpStart: null,
@@ -316,16 +340,19 @@ function updateAttemptProgressFromSnapshot(
   snapshot: GameSnapshot,
   input: {
     lastResolutionSignature: string | null;
+    lastCombatHintSignature: string | null;
     previousPlayerTurnReady: boolean;
   }
 ): {
   diagnostics: CatAndDogAttemptRunDiagnostics;
   lastResolutionSignature: string | null;
+  lastCombatHintSignature: string | null;
   previousPlayerTurnReady: boolean;
 } {
   let nextDiagnostics = updateAttemptDiagnostics(diagnostics, snapshot);
   const playerHpValue = readSemanticNumber(snapshot, "playerHpValue");
   const cpuHpValue = readSemanticNumber(snapshot, "cpuHpValue");
+  const semanticProgressSignalSource = snapshot.semanticState.progressSignalSource;
 
   if (nextDiagnostics.playerHpStart === null && playerHpValue !== null) {
     nextDiagnostics = {
@@ -369,6 +396,29 @@ function updateAttemptProgressFromSnapshot(
     };
   }
 
+  const hpTrackingAvailable =
+    nextDiagnostics.hpTrackingAvailable ||
+    snapshot.semanticState.hpTrackingAvailable === true ||
+    playerHpValue !== null ||
+    cpuHpValue !== null;
+  const damageTrackingConfirmed =
+    ((nextDiagnostics.playerHpStart !== null && nextDiagnostics.playerHpEnd !== null) ||
+      (nextDiagnostics.cpuHpStart !== null && nextDiagnostics.cpuHpEnd !== null));
+  const progressSignalSource =
+    hpTrackingAvailable
+      ? "hp"
+      : semanticProgressSignalSource === "combat-hint" || nextDiagnostics.shotResolutionsObserved > 0
+        ? "combat-hint"
+        : semanticProgressSignalSource === "turn-only" || nextDiagnostics.turnsObserved > 0
+          ? "turn-only"
+          : "unavailable";
+  nextDiagnostics = {
+    ...nextDiagnostics,
+    hpTrackingAvailable,
+    damageTrackingConfirmed,
+    progressSignalSource
+  };
+
   if (snapshot.semanticState.playerTurnReady === true && input.previousPlayerTurnReady !== true) {
     nextDiagnostics = {
       ...nextDiagnostics,
@@ -390,9 +440,20 @@ function updateAttemptProgressFromSnapshot(
     };
   }
 
+  const combatHintSignature = buildCombatHintSignature(snapshot);
+  if (combatHintSignature && combatHintSignature !== input.lastCombatHintSignature) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      combatHintsObserved: nextDiagnostics.combatHintsObserved + 1,
+      lastCombatHintText:
+        typeof snapshot.semanticState.canvasHintText === "string" ? snapshot.semanticState.canvasHintText : null
+    };
+  }
+
   return {
     diagnostics: nextDiagnostics,
     lastResolutionSignature: resolutionSignature ?? input.lastResolutionSignature,
+    lastCombatHintSignature: combatHintSignature ?? input.lastCombatHintSignature,
     previousPlayerTurnReady: snapshot.semanticState.playerTurnReady === true
   };
 }
@@ -638,13 +699,16 @@ export async function runPlayerCatAndDog(
       let maxStepsBudget = maxStepsPerAttempt;
       let diagnostics = createAttemptDiagnostics(maxStepsBudget);
       let lastResolutionSignature: string | null = null;
+      let lastCombatHintSignature: string | null = null;
       let previousPlayerTurnReady = false;
       ({
         diagnostics,
         lastResolutionSignature,
+        lastCombatHintSignature,
         previousPlayerTurnReady
       } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
         lastResolutionSignature,
+        lastCombatHintSignature,
         previousPlayerTurnReady
       }));
 
@@ -729,9 +793,11 @@ export async function runPlayerCatAndDog(
         ({
           diagnostics,
           lastResolutionSignature,
+          lastCombatHintSignature,
           previousPlayerTurnReady
         } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
           lastResolutionSignature,
+          lastCombatHintSignature,
           previousPlayerTurnReady
         }));
         await container.runEngine.appendEvent({
@@ -809,9 +875,11 @@ export async function runPlayerCatAndDog(
       ({
         diagnostics,
         lastResolutionSignature,
+        lastCombatHintSignature,
         previousPlayerTurnReady
       } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
         lastResolutionSignature,
+        lastCombatHintSignature,
         previousPlayerTurnReady
       }));
       if (outcome === "UNKNOWN" && actionHistory.length >= maxStepsBudget) {

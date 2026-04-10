@@ -272,6 +272,35 @@ const CPU_END_VARIANT_DOM = `
 </main>
 `;
 
+const LIVE_HINT_ONLY_BATTLE_DOM = `
+<main class="play-shell device-desktop" id="playRoot">
+  <header class="play-topbar">
+    <div class="mode-pill" id="modeLabel">Mode: 1P vs CPU / Easy</div>
+  </header>
+  <section class="play-frame">
+    <div class="panel canvas-wrap" id="gameplaySurface">
+      <canvas id="gameCanvas" width="960" height="540" aria-label="Backyard Ballistics game canvas"></canvas>
+      <div class="weapon-bar" id="weaponBar" aria-label="Battle weapon bar">
+        <button class="weapon-bar-button weapon-normal is-active" data-weapon-key="normal" type="button">Normal</button>
+      </div>
+      <div class="turn-banner hidden" id="turnBanner" aria-live="polite">
+        <p class="turn-banner-label" id="turnBannerLabel">Get Ready</p>
+        <strong class="turn-banner-title" id="turnBannerTitle">P1 Cat</strong>
+      </div>
+      <div class="canvas-hint" id="canvasHint">Clean direct hit.</div>
+      <div class="overlay menu-overlay hidden" id="menuOverlay"></div>
+      <div class="overlay end-overlay hidden" id="endOverlay"></div>
+    </div>
+    <aside class="side-panel">
+      <div class="panel notes-panel compact-panel">
+        <p class="panel-title">Match Notes</p>
+        <p id="matchNote">CPU: Solid read, believable mistakes.</p>
+      </div>
+    </aside>
+  </section>
+</main>
+`;
+
 describe("cat-and-dog plugin", () => {
   it("bootstraps by navigating to the configured real-game URL and waiting for settle", async () => {
     const previousUrl = process.env.GAME_BOTS_CAT_AND_DOG_URL;
@@ -624,6 +653,35 @@ describe("cat-and-dog plugin", () => {
       endVisible: true,
       endTitleText: "Player 1 Cat wins!",
       outcome: "win",
+      shotResolved: true
+    });
+  });
+
+  it("keeps HP unavailable in the live shell when the real DOM does not render health nodes, while still parsing honest combat hints", async () => {
+    const session = await catAndDogWebPlugin.createSession({
+      profileId: CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
+    });
+
+    const snapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: LIVE_HINT_ONLY_BATTLE_DOM
+      },
+      summary: "live-hint-only"
+    });
+
+    expect(snapshot.semanticState).toMatchObject({
+      gameplayEntered: true,
+      playerTurnReady: true,
+      canvasHintVisible: true,
+      canvasHintText: "Clean direct hit.",
+      hpTrackingAvailable: false,
+      playerHpValue: null,
+      cpuHpValue: null,
+      progressSignalSource: "combat-hint",
+      shotResolutionCategory: "direct-hit",
       shotResolved: true
     });
   });

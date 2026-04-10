@@ -25,6 +25,7 @@ export interface CatAndDogShellState {
   selectedWeaponKey: string | null;
   modeLabelText: string | null;
   matchNoteText: string | null;
+  canvasHintVisible: boolean;
   canvasHintText: string | null;
   turnBannerVisible: boolean;
   turnBannerLabelText: string | null;
@@ -35,8 +36,10 @@ export interface CatAndDogShellState {
   cpuHpText: string | null;
   cpuHpValue: number | null;
   cpuHpMax: number | null;
+  hpTrackingAvailable: boolean;
   turnCounterText: string | null;
   turnCounter: number | null;
+  progressSignalSource: "hp" | "combat-hint" | "turn-only" | "unavailable";
   shotResolutionCategory:
     | "none"
     | "turn-start"
@@ -258,6 +261,18 @@ function parseShotResolutionCategory(
     return "windup";
   }
 
+  if (normalized.includes("heavy impact landed")) {
+    return "direct-hit";
+  }
+
+  if (normalized.includes("wall hit and splash damage landed")) {
+    return "splash-hit";
+  }
+
+  if (normalized.includes("heavy burst scatters shards")) {
+    return "splash-hit";
+  }
+
   if (normalized.includes("direct hit")) {
     return "direct-hit";
   }
@@ -374,6 +389,29 @@ function parseSelectedWeaponKey(domHtml: string): string | null {
   return null;
 }
 
+function resolveProgressSignalSource(input: {
+  playerHpValue: number | null;
+  cpuHpValue: number | null;
+  canvasHintVisible: boolean;
+  canvasHintText: string | null;
+  turnBannerVisible: boolean;
+  turnCounter: number | null;
+}): CatAndDogShellState["progressSignalSource"] {
+  if (input.playerHpValue !== null || input.cpuHpValue !== null) {
+    return "hp";
+  }
+
+  if (input.canvasHintVisible && input.canvasHintText) {
+    return "combat-hint";
+  }
+
+  if (input.turnBannerVisible || input.turnCounter !== null) {
+    return "turn-only";
+  }
+
+  return "unavailable";
+}
+
 function parseOutcome(endVisible: boolean, endTitleText: string | null, gameplayEntered: boolean): CatAndDogShellState["outcome"] {
   if (!endVisible) {
     return gameplayEntered ? "in-progress" : "not-started";
@@ -448,7 +486,10 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const selectedWeaponKey = parseSelectedWeaponKey(domHtml);
   const modeLabelText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.modeLabelCandidates);
   const matchNoteText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.matchNoteCandidates);
-  const canvasHintText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.canvasHintCandidates);
+  const canvasHintVisible = isVisibleElementById(domHtml, "canvasHint");
+  const canvasHintText = canvasHintVisible
+    ? extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.canvasHintCandidates)
+    : null;
   const turnBannerVisible = isVisibleElementById(domHtml, "turnBanner");
   const turnBannerLabelText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerLabelCandidates);
   const turnBannerTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerTitleCandidates);
@@ -456,6 +497,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const playerHp = parseHpText(playerHpText);
   const cpuHpText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.cpuHpCandidates);
   const cpuHp = parseHpText(cpuHpText);
+  const hpTrackingAvailable = playerHp.current !== null || cpuHp.current !== null;
   const turnCounterText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnCounterCandidates);
   const turnCounter = parseIntegerFromText(turnCounterText);
   const endVisible = isVisibleElementById(domHtml, "endOverlay");
@@ -492,6 +534,14 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     shotResolutionCategory === "miss" ||
     shotResolutionCategory === "heal";
   const outcome = parseOutcome(endVisible, endTitleText, gameplayEntered);
+  const progressSignalSource = resolveProgressSignalSource({
+    playerHpValue: playerHp.current,
+    cpuHpValue: cpuHp.current,
+    canvasHintVisible,
+    canvasHintText,
+    turnBannerVisible,
+    turnCounter
+  });
 
   const status: CatAndDogShellState["status"] = gameplayEntered
     ? "gameplay"
@@ -524,6 +574,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     selectedWeaponKey,
     modeLabelText,
     matchNoteText,
+    canvasHintVisible,
     canvasHintText,
     turnBannerVisible,
     turnBannerLabelText,
@@ -534,8 +585,10 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     cpuHpText,
     cpuHpValue: cpuHp.current,
     cpuHpMax: cpuHp.max,
+    hpTrackingAvailable,
     turnCounterText,
     turnCounter,
+    progressSignalSource,
     shotResolutionCategory,
     shotResolved,
     endVisible,
