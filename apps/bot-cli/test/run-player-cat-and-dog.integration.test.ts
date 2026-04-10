@@ -96,6 +96,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.totalWaitMs).toBeGreaterThan(0);
         expect(result.attempts[0]?.diagnostics.resolutionWaitMs).toBeGreaterThanOrEqual(0);
         expect(result.attempts[0]?.diagnostics.waitHeavyRatio).toBeGreaterThan(0);
+        expect(result.attempts[0]?.diagnostics.nonWaitOverheadMs).toBeGreaterThanOrEqual(0);
+        expect(result.attempts[0]?.diagnostics.observationCount).toBeGreaterThan(0);
         expect(result.attempts[1]?.diagnostics.endOverlayObserved).toBe(true);
         expect(result.attempts[1]?.diagnostics.damageDealt).toBe(100);
         expect(result.attempts[1]?.diagnostics.damageTaken).toBe(22);
@@ -169,11 +171,107 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.attempts[0].diagnostics.lastHintCategory).toBe("combat-result");
         expect(summaryJson.attempts[0].diagnostics.elapsedMs).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.waitHeavyRatio).toBeGreaterThan(0);
+        expect(summaryJson.attempts[0].diagnostics.nonWaitOverheadMs).toBeGreaterThanOrEqual(0);
         expect(summaryJson.attempts[1].diagnostics.damageDealt).toBe(100);
         expect(summaryJson.strategyInsights.rankedAttemptVariants[0].attemptNumber).toBe(2);
         expect(summaryJson.strategyInsights.rankedAttemptVariants[0].score).toBeGreaterThan(
           summaryJson.strategyInsights.rankedAttemptVariants[1].score
         );
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+
+            resolve();
+          });
+        });
+
+        if (previousUrl === undefined) {
+          delete process.env.GAME_BOTS_CAT_AND_DOG_URL;
+        } else {
+          process.env.GAME_BOTS_CAT_AND_DOG_URL = previousUrl;
+        }
+      }
+    },
+    45_000
+  );
+
+  it(
+    "terminates a visibly stalled CPU turn loop early instead of spending the whole step budget",
+    async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "game-bots-player-cat-dog-stall-"));
+      const sqlitePath = path.join(tempDir, "run.sqlite");
+      const artifactsPath = path.join(tempDir, "artifacts");
+      const overrideConfigPath = path.join(tempDir, "integration.override.yaml");
+      const fixturePath = path.join(repoRoot, "games", "cat-and-dog-web", "fixtures", "cat-and-dog-fixture.html");
+      const fixtureHtml = await readFile(fixturePath, "utf8");
+      const stalledFixtureHtml = fixtureHtml.replace(
+        "window.setTimeout(resolveShotOutcome, 150);",
+        [
+          "window.setTimeout(() => {",
+          "  state.turnCount += 1;",
+          "  state.playerTurnReady = false;",
+          "  matchNote.textContent = 'CPU Dog sizes up the next shot.';",
+          "  canvasHint.textContent = 'CPU Dog sizes up the next shot.';",
+          "  syncUi();",
+          "}, 150);"
+        ].join("\n")
+      );
+
+      await writeFile(
+        overrideConfigPath,
+        [
+          "logging:",
+          "  level: debug",
+          "persistence:",
+          "  sqlite:",
+          `    filename: ${JSON.stringify(sqlitePath)}`,
+          "artifacts:",
+          `  rootDir: ${JSON.stringify(artifactsPath)}`
+        ].join("\n"),
+        "utf8"
+      );
+
+      const previousUrl = process.env.GAME_BOTS_CAT_AND_DOG_URL;
+      const server = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(stalledFixtureHtml);
+      });
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+      });
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Failed to bind local stalled fixture server.");
+      }
+
+      process.env.GAME_BOTS_CAT_AND_DOG_URL = `http://127.0.0.1:${address.port}/play/desktop/`;
+
+      try {
+        const container = await createContainer({
+          cwd: repoRoot,
+          configPaths: [path.join(repoRoot, "config", "default.yaml"), overrideConfigPath]
+        });
+
+        const result = await runPlayerCatAndDog(container, {
+          maxAttempts: 1,
+          stopOnWin: true,
+          strategyMode: "baseline",
+          maxStepsPerAttempt: 12
+        });
+
+        expect(result.attempts).toHaveLength(1);
+        expect(result.attempts[0]?.outcome).toBe("UNKNOWN");
+        expect(result.attempts[0]?.assessment).toBe("stalled-loop");
+        expect(result.attempts[0]?.note).toContain("stalled");
+        expect(result.attempts[0]?.diagnostics.stalledLoopDetected).toBe(true);
+        expect(result.attempts[0]?.diagnostics.stalledLoopReason).toBe("unresolved-shot-loop");
+        expect(result.attempts[0]?.diagnostics.stepBudgetReached).toBe(false);
+        expect(result.attempts[0]?.diagnostics.maxUnchangedObservationCycles).toBeGreaterThanOrEqual(2);
+        expect(result.attempts[0]?.diagnostics.observationCount).toBeGreaterThan(0);
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {

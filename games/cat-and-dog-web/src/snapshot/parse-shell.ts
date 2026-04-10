@@ -357,6 +357,34 @@ function parseCanvasHintCategory(canvasHintText: string | null): CatAndDogShellS
   return "unknown";
 }
 
+function isPlayerActionableHintState(
+  canvasHintCategory: CatAndDogShellState["canvasHintCategory"],
+  canvasHintText: string | null,
+  matchNoteText: string | null
+): boolean {
+  const hintNormalized = (canvasHintText ?? "").trim().toLowerCase();
+  const noteNormalized = (matchNoteText ?? "").trim().toLowerCase();
+
+  if (
+    canvasHintCategory === "combat-result" ||
+    canvasHintCategory === "cpu-planning" ||
+    canvasHintCategory === "turn-status"
+  ) {
+    return false;
+  }
+
+  if (
+    hintNormalized.includes("projectile launched") ||
+    noteNormalized.includes("projectile launched") ||
+    noteNormalized.includes("stepping in") ||
+    noteNormalized.includes("sizes up")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function extractTextBySelectorHint(domHtml: string, selector: string): string | null {
   if (!domHtml) {
     return null;
@@ -567,6 +595,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     weaponBarVisible &&
     selectedWeaponKey !== null &&
     menuVisible !== true &&
+    isPlayerActionableHintState(canvasHintCategory, canvasHintText, matchNoteText) &&
     turnBannerVisible !== true &&
     endVisible !== true;
   const shotResolutionCategory = parseShotResolutionCategory(

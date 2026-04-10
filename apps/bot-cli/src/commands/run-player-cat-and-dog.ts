@@ -42,6 +42,11 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   totalWaitMs: number;
   resolutionWaitMs: number;
   waitHeavyRatio: number;
+  nonWaitOverheadMs: number;
+  observationCount: number;
+  maxUnchangedObservationCycles: number;
+  stalledLoopDetected: boolean;
+  stalledLoopReason: string | null;
   turnsObserved: number;
   shotResolutionsObserved: number;
   directHits: number;
@@ -287,6 +292,10 @@ function buildAttemptAssessment(
     return "loss-without-progress";
   }
 
+  if (diagnostics.stalledLoopDetected) {
+    return "stalled-loop";
+  }
+
   if (diagnostics.shotsFired === 0) {
     return "setup-stalled";
   }
@@ -314,6 +323,72 @@ function buildAttemptNote(snapshot: GameSnapshot, fallback: string): string {
   return fallback;
 }
 
+function buildObservationFingerprint(snapshot: GameSnapshot): string {
+  return [
+    snapshot.semanticState.turnCounter ?? "",
+    snapshot.semanticState.playerTurnReady === true ? "ready" : "blocked",
+    snapshot.semanticState.turnBannerVisible === true ? "banner" : "clear",
+    snapshot.semanticState.shotResolved === true ? "resolved" : "unresolved",
+    snapshot.semanticState.shotResolutionCategory ?? "",
+    snapshot.semanticState.canvasHintCategory ?? "",
+    snapshot.semanticState.canvasHintText ?? "",
+    snapshot.semanticState.matchNoteText ?? "",
+    snapshot.semanticState.outcome ?? "",
+    snapshot.semanticState.endVisible === true ? "end" : "live"
+  ].join("|");
+}
+
+function detectStallReason(input: {
+  snapshot: GameSnapshot;
+  diagnostics: CatAndDogAttemptRunDiagnostics;
+  decisionActionId: string;
+  unchangedObservationCycles: number;
+}): string | null {
+  const { snapshot, diagnostics, decisionActionId, unchangedObservationCycles } = input;
+  if (
+    snapshot.semanticState.endVisible === true ||
+    snapshot.semanticState.outcome === "win" ||
+    snapshot.semanticState.outcome === "loss"
+  ) {
+    return null;
+  }
+
+  if (
+    diagnostics.shotsFired > diagnostics.shotResolutionsObserved &&
+    snapshot.semanticState.playerTurnReady !== true &&
+    unchangedObservationCycles >= 2
+  ) {
+    return "unresolved-shot-loop";
+  }
+
+  if (
+    decisionActionId === "wait-for-turn-resolution" &&
+    snapshot.semanticState.playerTurnReady !== true &&
+    unchangedObservationCycles >= 3 &&
+    (
+      snapshot.semanticState.turnBannerVisible === true ||
+      snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
+      snapshot.semanticState.canvasHintCategory === "turn-status" ||
+      snapshot.semanticState.shotResolved === true
+    )
+  ) {
+    return "turn-resolution-loop";
+  }
+
+  return null;
+}
+
+function buildStallNote(reason: string, attemptNumber: number): string {
+  switch (reason) {
+    case "unresolved-shot-loop":
+      return `Attempt ${attemptNumber} stalled after a shot without visible resolution progress.`;
+    case "turn-resolution-loop":
+      return `Attempt ${attemptNumber} remained in a non-productive turn-resolution loop without reaching a terminal state.`;
+    default:
+      return `Attempt ${attemptNumber} stalled in a non-productive gameplay loop.`;
+  }
+}
+
 function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDiagnostics {
   return {
     semanticActionCount: 0,
@@ -328,6 +403,11 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     totalWaitMs: 0,
     resolutionWaitMs: 0,
     waitHeavyRatio: 0,
+    nonWaitOverheadMs: 0,
+    observationCount: 0,
+    maxUnchangedObservationCycles: 0,
+    stalledLoopDetected: false,
+    stalledLoopReason: null,
     turnsObserved: 0,
     shotResolutionsObserved: 0,
     directHits: 0,
@@ -358,6 +438,7 @@ function updateAttemptDiagnostics(
 ): CatAndDogAttemptRunDiagnostics {
   return {
     ...diagnostics,
+    observationCount: diagnostics.observationCount + 1,
     gameplayEnteredObserved:
       diagnostics.gameplayEnteredObserved || snapshot.semanticState.gameplayEntered === true,
     playerTurnReadyObserved:
@@ -731,7 +812,7 @@ export async function runPlayerCatAndDog(
       await gameSession.bootstrap(environmentSession);
 
       const openingFrame = await environmentSession.observe({
-        modes: ["dom", "console", "network"]
+        modes: ["dom"]
       });
       let currentSnapshot = await gameSession.translate(openingFrame);
       const openingObservationEvent: RunEvent = {
@@ -761,6 +842,8 @@ export async function runPlayerCatAndDog(
       let lastHintSignature: string | null = null;
       let lastCombatHintSignature: string | null = null;
       let previousPlayerTurnReady = false;
+      let lastObservationFingerprint = buildObservationFingerprint(currentSnapshot);
+      let unchangedObservationCycles = 0;
       ({
         diagnostics,
         lastResolutionSignature,
@@ -861,7 +944,7 @@ export async function runPlayerCatAndDog(
         }
 
         const postActionFrame = await environmentSession.observe({
-          modes: ["dom", "console", "network"]
+          modes: ["dom"]
         });
         currentSnapshot = await gameSession.translate(postActionFrame);
         ({
@@ -876,6 +959,17 @@ export async function runPlayerCatAndDog(
           lastCombatHintSignature,
           previousPlayerTurnReady
         }));
+        const observationFingerprint = buildObservationFingerprint(currentSnapshot);
+        unchangedObservationCycles =
+          observationFingerprint === lastObservationFingerprint ? unchangedObservationCycles + 1 : 0;
+        lastObservationFingerprint = observationFingerprint;
+        diagnostics = {
+          ...diagnostics,
+          maxUnchangedObservationCycles: Math.max(
+            diagnostics.maxUnchangedObservationCycles,
+            unchangedObservationCycles
+          )
+        };
         await container.runEngine.appendEvent({
           eventId: randomUUID(),
           runId: run.runId,
@@ -920,6 +1014,22 @@ export async function runPlayerCatAndDog(
           endStateCaptured = true;
           outcome = postActionOutcome;
           note = buildAttemptNote(currentSnapshot, `Attempt ${attemptNumber} reached a terminal state.`);
+          break;
+        }
+
+        const stallReason = detectStallReason({
+          snapshot: currentSnapshot,
+          diagnostics,
+          decisionActionId: decision.actionId,
+          unchangedObservationCycles
+        });
+        if (stallReason) {
+          diagnostics = {
+            ...diagnostics,
+            stalledLoopDetected: true,
+            stalledLoopReason: stallReason
+          };
+          note = buildStallNote(stallReason, attemptNumber);
           break;
         }
       }
@@ -989,6 +1099,7 @@ export async function runPlayerCatAndDog(
         diagnostics: {
           ...diagnostics,
           elapsedMs,
+          nonWaitOverheadMs: Math.max(0, elapsedMs - diagnostics.totalWaitMs),
           waitHeavyRatio:
             elapsedMs > 0
               ? Number((diagnostics.totalWaitMs / elapsedMs).toFixed(3))

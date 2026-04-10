@@ -697,7 +697,7 @@ describe("cat-and-dog plugin", () => {
 
     expect(snapshot.semanticState).toMatchObject({
       gameplayEntered: true,
-      playerTurnReady: true,
+      playerTurnReady: false,
       canvasHintVisible: true,
       canvasHintText: "Clean direct hit.",
       canvasHintCategory: "combat-result",
