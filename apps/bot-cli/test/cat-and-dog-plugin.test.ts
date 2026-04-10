@@ -518,7 +518,8 @@ describe("cat-and-dog plugin", () => {
             angleTapCount: 2,
             powerDirection: "up",
             powerTapCount: 2,
-            settleMs: 160
+            settleMs: 160,
+            turnResolutionWaitMs: 2400
           }
         },
         battleSnapshot
@@ -558,7 +559,7 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "wait",
-        durationMs: 600
+        durationMs: 1200
       }
     ]);
 

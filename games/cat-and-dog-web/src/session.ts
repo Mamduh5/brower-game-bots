@@ -300,6 +300,8 @@ export class CatAndDogGameSession implements GameSession {
         const angleTapCount = readIntegerParam(action.params, "angleTapCount", 1);
         const powerTapCount = readIntegerParam(action.params, "powerTapCount", 1);
         const settleMs = readIntegerParam(action.params, "settleMs", 150);
+        const turnResolutionWaitMs = readIntegerParam(action.params, "turnResolutionWaitMs", 1800);
+        const postFireObserveDelayMs = Math.max(700, Math.min(1400, Math.floor(turnResolutionWaitMs / 2)));
 
         if (snapshot.semanticState.playerTurnReady !== true) {
           throw new Error("Cannot execute a planned shot before the player turn is ready.");
@@ -326,7 +328,7 @@ export class CatAndDogGameSession implements GameSession {
           },
           {
             kind: "wait",
-            durationMs: 600
+            durationMs: postFireObserveDelayMs
           }
         ];
       }

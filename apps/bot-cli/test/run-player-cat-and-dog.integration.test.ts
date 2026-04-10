@@ -75,7 +75,14 @@ describe("runPlayerCatAndDog integration", () => {
         expect(storedRun?.gameId).toBe("cat-and-dog-web");
         expect(result.attempts).toHaveLength(2);
         expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["LOSS", "WIN"]);
-        expect(result.attempts[0]?.strategy.angleDirection).not.toBe(result.attempts[1]?.strategy.angleDirection);
+        expect(result.attempts[0]?.strategySelectionReason).toBe("initial-candidate");
+        expect(result.attempts[1]?.strategySelectionReason).toBe("terminal-loss-neighbor-search");
+        expect(result.attempts[0]?.diagnostics.gameplayEnteredObserved).toBe(true);
+        expect(result.attempts[0]?.diagnostics.playerTurnReadyObserved).toBe(true);
+        expect(result.attempts[0]?.diagnostics.shotsFired).toBeGreaterThan(0);
+        expect(result.attempts[1]?.diagnostics.endOverlayObserved).toBe(true);
+        expect(result.attempts[1]?.diagnostics.stepBudgetReached).toBe(false);
+        expect(result.attempts[0]?.strategy.turnResolutionWaitMs).not.toBe(result.attempts[1]?.strategy.turnResolutionWaitMs);
         expect(
           storedEvents.some(
             (event) => event.type === "report.generated" && event.reportId === result.report.reportId
@@ -92,6 +99,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(attemptCompletedEvents).toHaveLength(2);
         expect(attemptCompletedEvents[0]?.payload.outcome).toBe("LOSS");
         expect(attemptCompletedEvents[1]?.payload.outcome).toBe("WIN");
+        expect(attemptCompletedEvents[0]?.payload.diagnostics.shotsFired).toBeGreaterThan(0);
+        expect(attemptCompletedEvents[1]?.payload.diagnostics.endOverlayObserved).toBe(true);
 
         const screenshotPaths = result.artifacts
           .filter((artifact) => artifact.kind === "screenshot")
@@ -108,7 +117,13 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.summary.hadWin).toBe(true);
         expect(summaryJson.summary.winningAttemptNumber).toBe(2);
         expect(summaryJson.summary.winningAttemptStrategy.angleDirection).toBe("right");
+        expect(summaryJson.summary.unknownAttempts).toBe(0);
+        expect(summaryJson.summary.terminalAttempts).toBe(2);
+        expect(summaryJson.summary.mostProgressiveAttemptNumber).toBe(2);
         expect(summaryJson.summary.winningStrategy).toBeUndefined();
+        expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
+        expect(summaryJson.attempts[1].strategySelectionReason).toBe("terminal-loss-neighbor-search");
+        expect(summaryJson.attempts[0].diagnostics.shotsFired).toBeGreaterThan(0);
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
