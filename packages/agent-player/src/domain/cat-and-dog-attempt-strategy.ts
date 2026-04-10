@@ -61,6 +61,9 @@ export interface CatAndDogStrategySelectionDetails {
   topReferenceAttemptNumber: number | null;
   topReferenceScore: number | null;
   topReferenceDistance: number | null;
+  selectionMode: "initial" | "catalog" | "exact-replay" | "one-knob-mutation" | "wider-fallback";
+  changedKnob: "none" | "angleTapCount" | "powerTapCount" | "settleMs" | "turnResolutionWaitMs" | "weaponKey";
+  expectedMutationReason: string | null;
   rankedRecentAttempts: readonly CatAndDogRankedAttemptMemoryEntry[];
 }
 
@@ -221,6 +224,27 @@ const EXPLORE_VARIANTS = [
 ] as const;
 
 type CatAndDogStrategyVariant = (typeof BASELINE_VARIANTS)[number] | (typeof EXPLORE_VARIANTS)[number];
+type RefinementKnob = CatAndDogStrategySelectionDetails["changedKnob"];
+
+interface CatAndDogCandidateMeta {
+  origin: "catalog" | "anchor-exact" | "anchor-mutation";
+  selectionMode: Exclude<CatAndDogStrategySelectionDetails["selectionMode"], "initial">;
+  changedKnob: RefinementKnob;
+  expectedMutationReason: string | null;
+  anchorAttemptNumber: number | null;
+}
+
+function getCandidateOriginPriority(meta: CatAndDogCandidateMeta): number {
+  if (meta.origin === "anchor-exact") {
+    return 3;
+  }
+
+  if (meta.origin === "anchor-mutation") {
+    return 2;
+  }
+
+  return 1;
+}
 
 function getVariants(strategyMode: CatAndDogStrategyMode): readonly CatAndDogStrategyVariant[] {
   return strategyMode === "explore" ? EXPLORE_VARIANTS : BASELINE_VARIANTS;
@@ -251,6 +275,16 @@ function toFingerprint(strategy: CatAndDogAttemptStrategy): string {
   ].join(":");
 }
 
+function cloneStrategyWithAttemptNumber(
+  strategy: CatAndDogAttemptStrategy,
+  attemptNumber: number
+): CatAndDogAttemptStrategy {
+  return CatAndDogAttemptStrategySchema.parse({
+    ...strategy,
+    attemptNumber
+  });
+}
+
 function strategyDistance(left: CatAndDogAttemptStrategy, right: CatAndDogAttemptStrategy): number {
   let distance = 0;
   if (left.weaponKey !== right.weaponKey) {
@@ -269,6 +303,18 @@ function strategyDistance(left: CatAndDogAttemptStrategy, right: CatAndDogAttemp
   distance += Math.ceil(Math.abs(left.turnResolutionWaitMs - right.turnResolutionWaitMs) / 400);
   distance += Math.ceil(Math.abs(left.settleMs - right.settleMs) / 120);
   return distance;
+}
+
+function clampTapCount(value: number): number {
+  return Math.max(0, Math.min(5, value));
+}
+
+function clampSettleMs(value: number): number {
+  return Math.max(0, value);
+}
+
+function clampTurnResolutionWaitMs(value: number): number {
+  return Math.max(1_200, value);
 }
 
 function hasStalled(feedback: CatAndDogAttemptFeedback): boolean {
@@ -346,6 +392,183 @@ function isWeakAttempt(feedback: CatAndDogAttemptFeedback): boolean {
   );
 }
 
+function buildAnchorCandidates(input: {
+  anchor: CatAndDogAttemptFeedback;
+  attemptNumber: number;
+  strategyMode: CatAndDogStrategyMode;
+}): Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> {
+  const { anchor, attemptNumber, strategyMode } = input;
+  const base = cloneStrategyWithAttemptNumber(anchor.strategy, attemptNumber);
+  const candidates: Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> = [
+    {
+      strategy: base,
+      meta: {
+        origin: "anchor-exact",
+        selectionMode: "exact-replay",
+        changedKnob: "none",
+        expectedMutationReason: "Replay the strongest recent live shot exactly before widening.",
+        anchorAttemptNumber: anchor.attemptNumber
+      }
+    }
+  ];
+
+  const pushMutation = (
+    strategy: CatAndDogAttemptStrategy,
+    changedKnob: RefinementKnob,
+    expectedMutationReason: string
+  ) => {
+    candidates.push({
+      strategy,
+      meta: {
+        origin: "anchor-mutation",
+        selectionMode: "one-knob-mutation",
+        changedKnob,
+        expectedMutationReason,
+        anchorAttemptNumber: anchor.attemptNumber
+      }
+    });
+  };
+
+  const angleMinus = clampTapCount(base.angleTapCount - 1);
+  if (angleMinus !== base.angleTapCount) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          angleTapCount: angleMinus
+        },
+        attemptNumber
+      ),
+      "angleTapCount",
+      "Nudge the aim angle one tap lower around the best recent attempt."
+    );
+  }
+
+  const anglePlus = clampTapCount(base.angleTapCount + 1);
+  if (anglePlus !== base.angleTapCount) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          angleTapCount: anglePlus
+        },
+        attemptNumber
+      ),
+      "angleTapCount",
+      "Nudge the aim angle one tap higher around the best recent attempt."
+    );
+  }
+
+  const powerMinus = clampTapCount(base.powerTapCount - 1);
+  if (powerMinus !== base.powerTapCount) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          powerTapCount: powerMinus
+        },
+        attemptNumber
+      ),
+      "powerTapCount",
+      "Reduce power by one tap to refine the strongest recent shot."
+    );
+  }
+
+  const powerPlus = clampTapCount(base.powerTapCount + 1);
+  if (powerPlus !== base.powerTapCount) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          powerTapCount: powerPlus
+        },
+        attemptNumber
+      ),
+      "powerTapCount",
+      "Increase power by one tap to refine the strongest recent shot."
+    );
+  }
+
+  const settleMinus = clampSettleMs(base.settleMs - 40);
+  if (settleMinus !== base.settleMs) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          settleMs: settleMinus
+        },
+        attemptNumber
+      ),
+      "settleMs",
+      "Shorten the pre-fire settle slightly while staying in the same shot region."
+    );
+  }
+
+  const settlePlus = clampSettleMs(base.settleMs + 40);
+  if (settlePlus !== base.settleMs) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          settleMs: settlePlus
+        },
+        attemptNumber
+      ),
+      "settleMs",
+      "Lengthen the pre-fire settle slightly while staying in the same shot region."
+    );
+  }
+
+  const waitMinus = clampTurnResolutionWaitMs(base.turnResolutionWaitMs - 300);
+  if (waitMinus !== base.turnResolutionWaitMs) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          turnResolutionWaitMs: waitMinus
+        },
+        attemptNumber
+      ),
+      "turnResolutionWaitMs",
+      "Shorten turn-resolution wait slightly around the strongest recent attempt."
+    );
+  }
+
+  const waitPlus = clampTurnResolutionWaitMs(base.turnResolutionWaitMs + 300);
+  if (waitPlus !== base.turnResolutionWaitMs) {
+    pushMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          turnResolutionWaitMs: waitPlus
+        },
+        attemptNumber
+      ),
+      "turnResolutionWaitMs",
+      "Lengthen turn-resolution wait slightly around the strongest recent attempt."
+    );
+  }
+
+  if (strategyMode === "explore") {
+    const alternateWeapon = base.weaponKey === "normal" ? "light" : base.weaponKey === "light" ? "heavy" : null;
+    if (alternateWeapon) {
+      pushMutation(
+        cloneStrategyWithAttemptNumber(
+          {
+            ...base,
+            weaponKey: alternateWeapon
+          },
+          attemptNumber
+        ),
+        "weaponKey",
+        "Try one nearby weapon variant without changing the rest of the strongest recent shot."
+      );
+    }
+  }
+
+  return candidates;
+}
+
 function buildRankedRecentMemory(
   history: readonly CatAndDogAttemptFeedback[],
   limit = 3
@@ -383,10 +606,23 @@ function buildSelectionReason(input: {
   topReferenceDistance: number | null;
   weakRepeatCount: number;
   hasWeakHistory: boolean;
+  selectedMeta: CatAndDogCandidateMeta;
 }): string {
-  const { history, exactUseCount, topReference, topReferenceDistance, weakRepeatCount, hasWeakHistory } = input;
+  const { history, exactUseCount, topReference, topReferenceDistance, weakRepeatCount, hasWeakHistory, selectedMeta } = input;
   if (history.length === 0) {
     return "initial-candidate";
+  }
+
+  if (selectedMeta.selectionMode === "exact-replay") {
+    return "anchor-exact-replay";
+  }
+
+  if (selectedMeta.selectionMode === "one-knob-mutation") {
+    return `anchor-one-knob-${selectedMeta.changedKnob}`;
+  }
+
+  if (selectedMeta.selectionMode === "wider-fallback") {
+    return "anchor-wider-fallback";
   }
 
   if (
@@ -430,13 +666,20 @@ export function selectCatAndDogAttemptStrategy(input: {
   const strategyMode = input.strategyMode ?? "baseline";
   const variants = getVariants(strategyMode);
   const history = (input.history ?? []).map((entry) => CatAndDogAttemptFeedbackSchema.parse(entry));
-  const candidates = variants.map((variant, index) => ({
+  const baseCandidates = variants.map((variant, index) => ({
     index,
-    strategy: toStrategy(variant, input.attemptNumber, strategyMode)
+    strategy: toStrategy(variant, input.attemptNumber, strategyMode),
+    meta: {
+      origin: "catalog" as const,
+      selectionMode: "catalog" as const,
+      changedKnob: "none" as const,
+      expectedMutationReason: null,
+      anchorAttemptNumber: null
+    }
   }));
 
   if (history.length === 0) {
-    const selected = candidates[(input.attemptNumber - 1) % candidates.length];
+    const selected = baseCandidates[(input.attemptNumber - 1) % baseCandidates.length];
     if (!selected) {
       throw new Error("Expected at least one cat-and-dog strategy candidate.");
     }
@@ -450,6 +693,9 @@ export function selectCatAndDogAttemptStrategy(input: {
         topReferenceAttemptNumber: null,
         topReferenceScore: null,
         topReferenceDistance: null,
+        selectionMode: "initial",
+        changedKnob: "none",
+        expectedMutationReason: null,
         rankedRecentAttempts: []
       }
     };
@@ -457,6 +703,10 @@ export function selectCatAndDogAttemptStrategy(input: {
 
   const rankedRecentMemory = buildRankedRecentMemory(history);
   const topReference = rankedRecentMemory[0] ?? null;
+  const anchorFeedback =
+    topReference
+      ? history.find((entry) => entry.attemptNumber === topReference.attemptNumber) ?? null
+      : null;
   const weakFingerprintCounts = new Map<string, number>();
   for (const previous of history) {
     if (!isWeakAttempt(previous)) {
@@ -467,8 +717,65 @@ export function selectCatAndDogAttemptStrategy(input: {
     weakFingerprintCounts.set(fingerprint, (weakFingerprintCounts.get(fingerprint) ?? 0) + 1);
   }
   const hasWeakHistory = weakFingerprintCounts.size > 0;
+  const localFailureCount =
+    anchorFeedback
+      ? history
+          .slice(-3)
+          .filter(
+            (entry) =>
+              entry.attemptNumber !== anchorFeedback.attemptNumber &&
+              strategyDistance(entry.strategy, anchorFeedback.strategy) <= 1 &&
+              entry.outcome !== "WIN" &&
+              scoreCatAndDogAttemptFeedback(entry) <= scoreCatAndDogAttemptFeedback(anchorFeedback)
+          ).length
+      : 0;
+  const anchorCandidates =
+    anchorFeedback && topReference && topReference.score >= 220
+      ? buildAnchorCandidates({
+          anchor: anchorFeedback,
+          attemptNumber: input.attemptNumber,
+          strategyMode
+        })
+      : [];
+  const candidates = [
+    ...anchorCandidates.map((candidate, index) => ({
+      index,
+      strategy: candidate.strategy,
+      meta: candidate.meta
+    })),
+    ...baseCandidates.map((candidate, index) => ({
+      ...candidate,
+      index: anchorCandidates.length + index
+    }))
+  ];
+  const uniqueCandidates = new Map<
+    string,
+    {
+      index: number;
+      strategy: CatAndDogAttemptStrategy;
+      meta: CatAndDogCandidateMeta;
+    }
+  >();
 
-  const scored = candidates.map((candidate) => {
+  for (const candidate of candidates) {
+    const fingerprint = toFingerprint(candidate.strategy);
+    const existing = uniqueCandidates.get(fingerprint);
+    if (!existing) {
+      uniqueCandidates.set(fingerprint, candidate);
+      continue;
+    }
+
+    const candidatePriority = getCandidateOriginPriority(candidate.meta);
+    const existingPriority = getCandidateOriginPriority(existing.meta);
+    if (
+      candidatePriority > existingPriority ||
+      (candidatePriority === existingPriority && candidate.index < existing.index)
+    ) {
+      uniqueCandidates.set(fingerprint, candidate);
+    }
+  }
+
+  const scored = [...uniqueCandidates.values()].map((candidate) => {
     const candidateFingerprint = toFingerprint(candidate.strategy);
     let score = 1_000 - candidate.index * 20;
     let exactUseCount = 0;
@@ -555,6 +862,31 @@ export function selectCatAndDogAttemptStrategy(input: {
       }
     }
 
+    if (candidate.meta.selectionMode === "exact-replay") {
+      score += localFailureCount === 0 ? 360 : localFailureCount >= 2 ? 90 : 150;
+    }
+
+    if (candidate.meta.selectionMode === "one-knob-mutation") {
+      score += localFailureCount === 0 ? 100 : localFailureCount >= 2 ? 220 : 280;
+    }
+
+    if (
+      anchorFeedback &&
+      candidate.meta.origin === "catalog" &&
+      strategyDistance(candidate.strategy, anchorFeedback.strategy) > 2
+    ) {
+      score -= localFailureCount >= 2 ? 140 : 280;
+    }
+
+    if (
+      anchorFeedback &&
+      candidate.meta.origin === "catalog" &&
+      strategyDistance(candidate.strategy, anchorFeedback.strategy) > 1 &&
+      localFailureCount < 2
+    ) {
+      score -= 120;
+    }
+
     for (const [memoryIndex, memory] of rankedRecentMemory.entries()) {
       const distance = strategyDistance(candidate.strategy, memory.strategy);
       const baseWeight = memoryIndex === 0 ? 230 : memoryIndex === 1 ? 120 : 70;
@@ -580,7 +912,10 @@ export function selectCatAndDogAttemptStrategy(input: {
     }
 
     if (weakRepeatCount > 0) {
-      score -= 160 + weakRepeatCount * 55;
+      score -= 180 + weakRepeatCount * 75;
+      if (exactUseCount > 0) {
+        score -= 320;
+      }
     }
 
     return {
@@ -616,7 +951,14 @@ export function selectCatAndDogAttemptStrategy(input: {
       topReference,
       topReferenceDistance: topReference ? strategyDistance(best.strategy, topReference.strategy) : null,
       weakRepeatCount: best.weakRepeatCount,
-      hasWeakHistory
+      hasWeakHistory,
+      selectedMeta:
+        best.meta.origin === "catalog" && anchorFeedback && localFailureCount >= 2
+          ? {
+              ...best.meta,
+              selectionMode: "wider-fallback"
+            }
+          : best.meta
     }),
     selectionDetails: {
       selectedFingerprint: toFingerprint(best.strategy),
@@ -624,6 +966,12 @@ export function selectCatAndDogAttemptStrategy(input: {
       topReferenceAttemptNumber: topReference?.attemptNumber ?? null,
       topReferenceScore: topReference?.score ?? null,
       topReferenceDistance: topReference ? strategyDistance(best.strategy, topReference.strategy) : null,
+      selectionMode:
+        best.meta.origin === "catalog" && anchorFeedback && localFailureCount >= 2
+          ? "wider-fallback"
+          : best.meta.selectionMode,
+      changedKnob: best.meta.changedKnob,
+      expectedMutationReason: best.meta.expectedMutationReason,
       rankedRecentAttempts: rankedRecentMemory.map((entry) => ({
         attemptNumber: entry.attemptNumber,
         outcome: entry.outcome,

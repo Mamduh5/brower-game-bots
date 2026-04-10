@@ -76,8 +76,10 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts).toHaveLength(2);
         expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["LOSS", "WIN"]);
         expect(result.attempts[0]?.strategySelectionReason).toBe("initial-candidate");
-        expect(result.attempts[1]?.strategySelectionReason).toBe("exploit-top-recent-repeat");
+        expect(result.attempts[1]?.strategySelectionReason).toBe("anchor-exact-replay");
         expect(result.attempts[1]?.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
+        expect(result.attempts[1]?.strategySelectionDetails.selectionMode).toBe("exact-replay");
+        expect(result.attempts[1]?.strategySelectionDetails.changedKnob).toBe("none");
         expect(result.attempts[0]?.diagnostics.gameplayEnteredObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.playerTurnReadyObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.shotsFired).toBeGreaterThan(0);
@@ -147,8 +149,9 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.summary.mostProgressiveAttemptScore).toBeGreaterThan(500);
         expect(summaryJson.summary.winningStrategy).toBeUndefined();
         expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
-        expect(summaryJson.attempts[1].strategySelectionReason).toBe("exploit-top-recent-repeat");
+        expect(summaryJson.attempts[1].strategySelectionReason).toBe("anchor-exact-replay");
         expect(summaryJson.attempts[1].strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
+        expect(summaryJson.attempts[1].strategySelectionDetails.selectionMode).toBe("exact-replay");
         expect(summaryJson.attempts[0].diagnostics.shotsFired).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].assessment).toBe("loss-with-damage");
         expect(summaryJson.attempts[0].diagnostics.damageDealt).toBe(28);
