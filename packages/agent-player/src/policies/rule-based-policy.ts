@@ -87,11 +87,12 @@ export class RuleBasedPlayerPolicy implements PlayerPolicy {
     }
 
     if (availableActionIds.has("wait-for-turn-resolution")) {
+      const turnBannerVisible = input.gameState.turnBannerVisible === true;
       return {
         type: "game-action",
         actionId: "wait-for-turn-resolution",
         params: {
-          durationMs: strategy?.turnResolutionWaitMs ?? 1800
+          durationMs: turnBannerVisible ? 700 : (strategy?.turnResolutionWaitMs ?? 1800)
         }
       };
     }

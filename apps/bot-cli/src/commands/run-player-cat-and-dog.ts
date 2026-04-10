@@ -160,7 +160,7 @@ function buildPlayerSummaryJson(input: {
       strategyMode: input.options.strategyMode,
       hadWin: Boolean(winningAttempt),
       ...(winningAttempt ? { winningAttemptNumber: winningAttempt.attemptNumber } : {}),
-      ...(winningAttempt ? { winningStrategy: toJsonValue(winningAttempt.strategy) } : {}),
+      ...(winningAttempt ? { winningAttemptStrategy: toJsonValue(winningAttempt.strategy) } : {}),
       reportId: input.report.reportId,
       artifactCount: input.artifacts.length
     },

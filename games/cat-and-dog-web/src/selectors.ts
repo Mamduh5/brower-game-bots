@@ -37,6 +37,10 @@ export const CAT_AND_DOG_SELECTORS = {
   gameplayControlsCandidates: ["#controls-hint", "#canvasHint", "[data-testid='controls-hint']", ".controls-hint", ".controls-list"],
   aimStatusCandidates: ["#aim-status", "[data-testid='aim-status']", ".aim-status"],
   powerStatusCandidates: ["#power-status", "[data-testid='power-status']", ".power-status"],
+  matchNoteCandidates: ["#matchNote", "[data-testid='match-note']"],
+  canvasHintCandidates: ["#canvasHint", "[data-testid='controls-hint']"],
+  turnBannerCandidates: ["#turnBanner", "[data-testid='turn-banner']"],
+  turnBannerTitleCandidates: ["#turnBannerTitle", "[data-testid='turn-banner-title']"],
   startControlCandidates: [
     "#playCpuButton",
     "#playLocalButton",

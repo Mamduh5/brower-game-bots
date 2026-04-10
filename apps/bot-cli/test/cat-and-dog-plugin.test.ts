@@ -119,6 +119,10 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
       weaponBarVisible: false,
       selectedWeaponKey: null,
       modeLabelText: null,
+      matchNoteText: null,
+      canvasHintText: null,
+      turnBannerVisible: false,
+      turnBannerTitleText: null,
       endVisible: false,
       endTitleText: null,
       endSubtitleText: null,
@@ -169,6 +173,7 @@ const GAMEPLAY_DOM = `
   <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
   <p id="aim-status" data-testid="aim-status">Aim: left</p>
   <p id="power-status" data-testid="power-status">Power: medium</p>
+  <div id="turnBanner" class="hidden"><strong id="turnBannerTitle">P1 Cat</strong></div>
 </main>
 `;
 
@@ -202,6 +207,24 @@ const CPU_BATTLE_DOM = `
   <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
   <p id="aim-status" data-testid="aim-status">Aim: right</p>
   <p id="power-status" data-testid="power-status">Power: high</p>
+  <div id="turnBanner" class="hidden"><strong id="turnBannerTitle">P1 Cat</strong></div>
+</main>
+`;
+
+const CPU_TRANSITION_DOM = `
+<main id="playRoot">
+  <div id="modeLabel">Mode: 1P vs CPU / Easy</div>
+  <div id="gameplaySurface">
+    <canvas id="gameCanvas" data-testid="game-canvas" width="800" height="600"></canvas>
+  </div>
+  <div id="weaponBar" class="is-hidden" data-testid="weapon-bar">
+    <button class="weapon-bar-button is-active" data-weapon-key="normal">Normal</button>
+  </div>
+  <p id="matchNote">P1 Cat is stepping in.</p>
+  <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+  <p id="aim-status" data-testid="aim-status">Aim: center</p>
+  <p id="power-status" data-testid="power-status">Power: medium</p>
+  <div id="turnBanner"><strong id="turnBannerTitle">P1 Cat</strong></div>
 </main>
 `;
 
@@ -216,6 +239,19 @@ const CPU_END_DOM = `
   </div>
   <div id="endOverlay">
     <h2 id="endTitle">P1 Cat Wins</h2>
+    <p id="endSubtitle">Winning shot landed cleanly.</p>
+  </div>
+</main>
+`;
+
+const CPU_END_VARIANT_DOM = `
+<main id="playRoot">
+  <div id="modeLabel">Mode: 1P vs CPU / Easy</div>
+  <div id="gameplaySurface">
+    <canvas id="gameCanvas" data-testid="game-canvas" width="800" height="600"></canvas>
+  </div>
+  <div id="endOverlay">
+    <h2 id="endTitle">Player 1 Cat wins!</h2>
     <p id="endSubtitle">Winning shot landed cleanly.</p>
   </div>
 </main>
@@ -343,7 +379,8 @@ describe("cat-and-dog plugin", () => {
       aimDirection: "left",
       powerStatusText: "Power: medium",
       gameplayInputApplied: true,
-      gameplayEntered: true
+      gameplayEntered: true,
+      turnBannerVisible: false
     });
     expect(await session.actions(closingSnapshot)).toEqual([]);
   });
@@ -447,10 +484,29 @@ describe("cat-and-dog plugin", () => {
       gameplayEntered: true,
       playerTurnReady: true,
       selectedWeaponKey: "normal",
+      turnBannerVisible: false,
       outcome: "in-progress",
       modeLabelText: "Mode: 1P vs CPU / Easy"
     });
     expect((await session.actions(battleSnapshot)).map((action) => action.actionId)).toEqual(["execute-planned-shot"]);
+
+    const transitionSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_TRANSITION_DOM
+      },
+      summary: "transition"
+    });
+    expect(transitionSnapshot.semanticState).toMatchObject({
+      gameplayEntered: true,
+      playerTurnReady: false,
+      turnBannerVisible: true,
+      turnBannerTitleText: "P1 Cat",
+      outcome: "in-progress"
+    });
+    expect((await session.actions(transitionSnapshot)).map((action) => action.actionId)).toEqual(["wait-for-turn-resolution"]);
 
     expect(
       await session.resolveAction(
@@ -522,5 +578,20 @@ describe("cat-and-dog plugin", () => {
       outcome: "win"
     });
     expect(await session.actions(endSnapshot)).toEqual([]);
+
+    const endVariantSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_END_VARIANT_DOM
+      },
+      summary: "end-variant"
+    });
+    expect(endVariantSnapshot.semanticState).toMatchObject({
+      endVisible: true,
+      endTitleText: "Player 1 Cat wins!",
+      outcome: "win"
+    });
   });
 });

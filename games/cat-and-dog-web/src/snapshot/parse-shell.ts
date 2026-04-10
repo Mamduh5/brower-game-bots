@@ -24,6 +24,10 @@ export interface CatAndDogShellState {
   weaponBarVisible: boolean;
   selectedWeaponKey: string | null;
   modeLabelText: string | null;
+  matchNoteText: string | null;
+  canvasHintText: string | null;
+  turnBannerVisible: boolean;
+  turnBannerTitleText: string | null;
   endVisible: boolean;
   endTitleText: string | null;
   endSubtitleText: string | null;
@@ -248,16 +252,31 @@ function parseOutcome(endVisible: boolean, endTitleText: string | null, gameplay
     return gameplayEntered ? "in-progress" : "not-started";
   }
 
-  const normalized = (endTitleText ?? "").trim().toLowerCase();
+  const normalized = (endTitleText ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) {
     return "unknown";
   }
 
-  if (normalized.includes("p1 cat wins")) {
+  if (
+    normalized.includes("p1 cat wins") ||
+    /\bplayer\s*1\b.*\bcat\b.*\bwins?\b/.test(normalized) ||
+    /\bcat\b.*\bwins?\b/.test(normalized)
+  ) {
     return "win";
   }
 
-  if (normalized.includes("cpu dog wins") || normalized.includes("p2 dog wins")) {
+  if (
+    normalized.includes("cpu dog wins") ||
+    normalized.includes("p2 dog wins") ||
+    /\bcpu\b.*\bdog\b.*\bwins?\b/.test(normalized) ||
+    /\bplayer\s*2\b.*\bdog\b.*\bwins?\b/.test(normalized) ||
+    /\bdog\b.*\bwins?\b/.test(normalized)
+  ) {
     return "loss";
   }
 
@@ -301,18 +320,30 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const weaponBarVisible = isVisibleElementById(domHtml, "weaponBar");
   const selectedWeaponKey = parseSelectedWeaponKey(domHtml);
   const modeLabelText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.modeLabelCandidates);
+  const matchNoteText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.matchNoteCandidates);
+  const canvasHintText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.canvasHintCandidates);
+  const turnBannerVisible = isVisibleElementById(domHtml, "turnBanner");
+  const turnBannerTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerTitleCandidates);
   const endVisible = isVisibleElementById(domHtml, "endOverlay");
   const endTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endTitleCandidates);
   const endSubtitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endSubtitleCandidates);
   const startCpuAvailable = cpuSetupVisible && hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startCpuButtonCandidates);
   const modeLabelNormalized = (modeLabelText ?? "").toLowerCase();
+  const hasActiveModeLabel = modeLabelNormalized.includes("1p vs cpu") || modeLabelNormalized.includes("2 players");
   const gameplayEntered =
     endVisible ||
     weaponBarVisible ||
-    modeLabelNormalized.includes("1p vs cpu") ||
-    modeLabelNormalized.includes("2 players") ||
+    hasActiveModeLabel ||
     (hasPlayableSurface && !menuVisible && (hasGameplayHud || hasGameplayControls));
-  const playerTurnReady = gameplayEntered && weaponBarVisible && !endVisible;
+  const playerTurnReady =
+    gameplayEntered &&
+    hasActiveModeLabel &&
+    hasGameplayControls &&
+    weaponBarVisible &&
+    selectedWeaponKey !== null &&
+    menuVisible !== true &&
+    turnBannerVisible !== true &&
+    endVisible !== true;
   const outcome = parseOutcome(endVisible, endTitleText, gameplayEntered);
 
   const status: CatAndDogShellState["status"] = gameplayEntered
@@ -345,6 +376,10 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     weaponBarVisible,
     selectedWeaponKey,
     modeLabelText,
+    matchNoteText,
+    canvasHintText,
+    turnBannerVisible,
+    turnBannerTitleText,
     endVisible,
     endTitleText,
     endSubtitleText,

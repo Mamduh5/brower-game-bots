@@ -176,6 +176,10 @@ export class CatAndDogGameSession implements GameSession {
         weaponBarVisible: shell.weaponBarVisible,
         selectedWeaponKey: shell.selectedWeaponKey,
         modeLabelText: shell.modeLabelText,
+        matchNoteText: shell.matchNoteText,
+        canvasHintText: shell.canvasHintText,
+        turnBannerVisible: shell.turnBannerVisible,
+        turnBannerTitleText: shell.turnBannerTitleText,
         endVisible: shell.endVisible,
         endTitleText: shell.endTitleText,
         endSubtitleText: shell.endSubtitleText,
@@ -193,6 +197,7 @@ export class CatAndDogGameSession implements GameSession {
         hasGameplayControls: shell.hasGameplayControls ? 1 : 0,
         gameplayInputApplied: shell.gameplayInputApplied ? 1 : 0,
         playerTurnReady: shell.playerTurnReady ? 1 : 0,
+        turnBannerVisible: shell.turnBannerVisible ? 1 : 0,
         endVisible: shell.endVisible ? 1 : 0
       }
     };

@@ -104,6 +104,11 @@ describe("runPlayerCatAndDog integration", () => {
         const summaryArtifact = result.artifacts.find((artifact) => artifact.relativePath.includes("02-player-attempt-summary.json"));
         expect(summaryArtifact).toBeDefined();
         await expect(access(path.join(artifactsPath, summaryArtifact!.relativePath))).resolves.toBeUndefined();
+        const summaryJson = JSON.parse(await readFile(path.join(artifactsPath, summaryArtifact!.relativePath), "utf8"));
+        expect(summaryJson.summary.hadWin).toBe(true);
+        expect(summaryJson.summary.winningAttemptNumber).toBe(2);
+        expect(summaryJson.summary.winningAttemptStrategy.angleDirection).toBe("right");
+        expect(summaryJson.summary.winningStrategy).toBeUndefined();
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
