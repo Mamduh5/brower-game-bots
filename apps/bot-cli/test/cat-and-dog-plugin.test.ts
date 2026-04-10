@@ -14,7 +14,10 @@ import type {
   ObservationRequest
 } from "@game-bots/environment-sdk";
 import type { GameSnapshot } from "@game-bots/game-sdk";
-import { catAndDogWebPlugin } from "@game-bots/cat-and-dog-web";
+import {
+  CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID,
+  catAndDogWebPlugin
+} from "@game-bots/cat-and-dog-web";
 
 class RecordingEnvironmentSession implements EnvironmentSession {
   readonly executedActions: EnvironmentAction[] = [];
@@ -100,20 +103,34 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
       hasAppRoot: true,
       hasModeSelection: true,
       hasTwoPlayerOption: true,
+      hasPlayCpuOption: true,
       hasPlayableSurface: false,
       hasGameplayHud: false,
       hasGameplayControls: false,
       aimStatusText: null,
       aimDirection: "unknown",
+      powerStatusText: null,
       gameplayInputApplied: false,
       hasStartControl: true,
       gameplayEntered: false,
+      menuVisible: true,
+      cpuSetupVisible: false,
+      startCpuAvailable: false,
+      weaponBarVisible: false,
+      selectedWeaponKey: null,
+      modeLabelText: null,
+      endVisible: false,
+      endTitleText: null,
+      endSubtitleText: null,
+      playerTurnReady: false,
+      outcome: "not-started",
       modeSelectionExecuted: false,
       gameplayInteractionExecuted: false
     },
     metrics: {
       hasModeSelection: 1,
       hasTwoPlayerOption: 1,
+      hasPlayCpuOption: 1,
       hasPlayableSurface: 0,
       hasGameplayHud: 0,
       hasGameplayControls: 0,
@@ -124,20 +141,83 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
 }
 
 const LANDING_DOM = `
-<main id="root">
-  <div id="mode-selection" data-testid="mode-selection">
-    <button data-testid="play-vs-cpu">Play vs CPU</button>
-    <button id="play-2-player" data-testid="play-2-player" data-mode="two-player">2 Player</button>
+<main id="playRoot">
+  <div id="modeLabel">Mode: Menu</div>
+  <div id="menuOverlay">
+    <div id="menuActions">
+      <button id="playCpuButton" data-testid="play-vs-cpu">Play vs CPU</button>
+      <button id="playLocalButton" data-testid="play-2-player" data-mode="two-player">2 Players</button>
+    </div>
+    <div id="difficultyPanel" class="is-hidden">
+      <button data-difficulty="easy" class="is-active">Easy</button>
+      <button id="startCpuButton" data-testid="start-cpu-match">Start CPU Match</button>
+    </div>
   </div>
 </main>
 `;
 
 const GAMEPLAY_DOM = `
-<main id="root">
-  <div id="player-hud" data-testid="player-hud">HP: 100</div>
-  <canvas data-testid="game-canvas" width="800" height="600"></canvas>
+<main id="playRoot">
+  <div id="modeLabel">Mode: 2 Players</div>
+  <div id="gameplaySurface">
+    <canvas id="gameCanvas" data-testid="game-canvas" width="800" height="600"></canvas>
+  </div>
+  <div id="weaponBar" data-testid="weapon-bar">
+    <button class="weapon-bar-button is-active" data-weapon-key="normal">Normal</button>
+  </div>
+  <p id="matchNote">2-player match started.</p>
   <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
   <p id="aim-status" data-testid="aim-status">Aim: left</p>
+  <p id="power-status" data-testid="power-status">Power: medium</p>
+</main>
+`;
+
+const CPU_SETUP_DOM = `
+<main id="playRoot">
+  <div id="modeLabel">Mode: Menu</div>
+  <div id="menuOverlay">
+    <div id="menuActions">
+      <button id="playCpuButton" hidden data-testid="play-vs-cpu">Play vs CPU</button>
+      <button id="playLocalButton" hidden data-testid="play-2-player">2 Players</button>
+    </div>
+    <div id="difficultyPanel">
+      <button data-difficulty="easy" class="is-active">Easy</button>
+      <button id="startCpuButton" data-testid="start-cpu-match">Start CPU Match</button>
+    </div>
+  </div>
+</main>
+`;
+
+const CPU_BATTLE_DOM = `
+<main id="playRoot">
+  <div id="modeLabel">Mode: 1P vs CPU / Easy</div>
+  <div id="gameplaySurface">
+    <canvas id="gameCanvas" data-testid="game-canvas" width="800" height="600"></canvas>
+  </div>
+  <div id="weaponBar" data-testid="weapon-bar">
+    <button class="weapon-bar-button is-active" data-weapon-key="normal">Normal</button>
+    <button class="weapon-bar-button" data-weapon-key="light">Light</button>
+  </div>
+  <p id="matchNote">CPU attempt 1 started.</p>
+  <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+  <p id="aim-status" data-testid="aim-status">Aim: right</p>
+  <p id="power-status" data-testid="power-status">Power: high</p>
+</main>
+`;
+
+const CPU_END_DOM = `
+<main id="playRoot">
+  <div id="modeLabel">Mode: 1P vs CPU / Easy</div>
+  <div id="gameplaySurface">
+    <canvas id="gameCanvas" data-testid="game-canvas" width="800" height="600"></canvas>
+  </div>
+  <div id="weaponBar" class="is-hidden" data-testid="weapon-bar">
+    <button class="weapon-bar-button is-active" data-weapon-key="normal">Normal</button>
+  </div>
+  <div id="endOverlay">
+    <h2 id="endTitle">P1 Cat Wins</h2>
+    <p id="endSubtitle">Winning shot landed cleanly.</p>
+  </div>
 </main>
 `;
 
@@ -170,7 +250,7 @@ describe("cat-and-dog plugin", () => {
     }
   });
 
-  it("translates opening snapshot and maps one smoke interaction action", async () => {
+  it("keeps the existing tester smoke path intact", async () => {
     const session = await catAndDogWebPlugin.createSession({});
     const snapshot = await session.translate({
       capturedAt: new Date().toISOString(),
@@ -188,27 +268,20 @@ describe("cat-and-dog plugin", () => {
       hasAppRoot: true,
       hasModeSelection: true,
       hasTwoPlayerOption: true,
-      hasPlayableSurface: false,
-      hasGameplayHud: false,
-      hasGameplayControls: false,
-      aimStatusText: null,
-      aimDirection: "unknown",
-      gameplayInputApplied: false,
+      hasPlayCpuOption: true,
       gameplayEntered: false,
+      menuVisible: true,
+      outcome: "not-started",
       modeSelectionExecuted: false,
       gameplayInteractionExecuted: false
     });
 
-    const actions = await session.actions(snapshot);
-    expect(actions.map((action) => action.actionId)).toEqual(["select-two-player-mode"]);
-
-    const resolved = await session.resolveAction({ actionId: "select-two-player-mode" }, snapshot);
-    expect(resolved).toEqual([
+    expect((await session.actions(snapshot)).map((action) => action.actionId)).toEqual(["select-two-player-mode"]);
+    expect(await session.resolveAction({ actionId: "select-two-player-mode" }, snapshot)).toEqual([
       {
         kind: "click",
         target: {
-          selector:
-            "#play-2-player, [data-testid='play-2-player'], button[data-mode='two-player'], button:has-text('2 Player')"
+          selector: "#playLocalButton, #play-2-player, [data-testid='play-2-player'], button[data-mode='two-player'], [data-testid='play-local']"
         }
       },
       {
@@ -217,38 +290,31 @@ describe("cat-and-dog plugin", () => {
       }
     ]);
 
-    const scenarios = await session.scenarios();
-    expect(scenarios).toHaveLength(1);
-    expect(scenarios[0]?.scenarioId).toBe("smoke");
-  });
-
-  it("completes action list after the first smoke interaction", async () => {
-    const session = await catAndDogWebPlugin.createSession({});
-    const snapshot = buildSnapshot();
-
-    const modeSelectionResolved = await session.resolveAction({ actionId: "select-two-player-mode" }, snapshot);
-    expect(modeSelectionResolved).toHaveLength(2);
-
     const gameplayEntrySnapshot = buildSnapshot({
       semanticState: {
         ...buildSnapshot().semanticState,
         status: "gameplay",
         hasModeSelection: false,
         hasTwoPlayerOption: false,
+        hasPlayCpuOption: false,
         hasPlayableSurface: true,
         hasGameplayHud: true,
         hasGameplayControls: true,
         aimStatusText: "Aim: center",
         aimDirection: "center",
+        powerStatusText: "Power: medium",
         gameplayEntered: true,
+        menuVisible: false,
+        weaponBarVisible: true,
+        selectedWeaponKey: "normal",
+        modeLabelText: "Mode: 2 Players",
+        playerTurnReady: true,
+        outcome: "in-progress",
         modeSelectionExecuted: true
       }
     });
-    const actionsAfterModeSelection = await session.actions(gameplayEntrySnapshot);
-    expect(actionsAfterModeSelection.map((action) => action.actionId)).toEqual(["adjust-aim-left"]);
-
-    const gameplayInteractionResolved = await session.resolveAction({ actionId: "adjust-aim-left" }, gameplayEntrySnapshot);
-    expect(gameplayInteractionResolved).toEqual([
+    expect((await session.actions(gameplayEntrySnapshot)).map((action) => action.actionId)).toEqual(["adjust-aim-left"]);
+    expect(await session.resolveAction({ actionId: "adjust-aim-left" }, gameplayEntrySnapshot)).toEqual([
       {
         kind: "keypress",
         key: "A"
@@ -268,7 +334,6 @@ describe("cat-and-dog plugin", () => {
       },
       summary: "post-action"
     });
-
     expect(closingSnapshot.semanticState).toMatchObject({
       status: "gameplay",
       hasPlayableSurface: true,
@@ -276,11 +341,186 @@ describe("cat-and-dog plugin", () => {
       hasGameplayControls: true,
       aimStatusText: "Aim: left",
       aimDirection: "left",
+      powerStatusText: "Power: medium",
       gameplayInputApplied: true,
       gameplayEntered: true
     });
+    expect(await session.actions(closingSnapshot)).toEqual([]);
+  });
 
-    const actions = await session.actions(closingSnapshot);
-    expect(actions).toHaveLength(0);
+  it("maps the player-until-win flow through CPU setup, battle, and end-state outcome detection", async () => {
+    const session = await catAndDogWebPlugin.createSession({
+      profileId: CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
+    });
+
+    const openingSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: LANDING_DOM
+      },
+      summary: "landing"
+    });
+    expect(openingSnapshot.semanticState).toMatchObject({
+      menuVisible: true,
+      cpuSetupVisible: false,
+      hasPlayCpuOption: true,
+      gameplayEntered: false,
+      outcome: "not-started"
+    });
+    expect((await session.actions(openingSnapshot)).map((action) => action.actionId)).toEqual(["open-cpu-setup"]);
+
+    expect(await session.resolveAction({ actionId: "open-cpu-setup" }, openingSnapshot)).toEqual([
+      {
+        kind: "click",
+        target: {
+          selector: "#playCpuButton, [data-testid='play-vs-cpu'], button[data-mode='cpu']"
+        }
+      },
+      {
+        kind: "wait",
+        durationMs: 400
+      }
+    ]);
+
+    const cpuSetupSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_SETUP_DOM
+      },
+      summary: "cpu-setup"
+    });
+    expect(cpuSetupSnapshot.semanticState).toMatchObject({
+      menuVisible: true,
+      cpuSetupVisible: true,
+      startCpuAvailable: true,
+      gameplayEntered: false
+    });
+    expect((await session.actions(cpuSetupSnapshot)).map((action) => action.actionId)).toEqual(["start-cpu-match"]);
+
+    expect(
+      await session.resolveAction(
+        {
+          actionId: "start-cpu-match",
+          params: {
+            difficulty: "easy"
+          }
+        },
+        cpuSetupSnapshot
+      )
+    ).toEqual([
+      {
+        kind: "click",
+        target: {
+          selector: "#difficultyPanel [data-difficulty='easy']"
+        }
+      },
+      {
+        kind: "wait",
+        durationMs: 200
+      },
+      {
+        kind: "click",
+        target: {
+          selector: "#startCpuButton, [data-testid='start-cpu-match']"
+        }
+      },
+      {
+        kind: "wait",
+        durationMs: 700
+      }
+    ]);
+
+    const battleSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_BATTLE_DOM
+      },
+      summary: "battle"
+    });
+    expect(battleSnapshot.semanticState).toMatchObject({
+      gameplayEntered: true,
+      playerTurnReady: true,
+      selectedWeaponKey: "normal",
+      outcome: "in-progress",
+      modeLabelText: "Mode: 1P vs CPU / Easy"
+    });
+    expect((await session.actions(battleSnapshot)).map((action) => action.actionId)).toEqual(["execute-planned-shot"]);
+
+    expect(
+      await session.resolveAction(
+        {
+          actionId: "execute-planned-shot",
+          params: {
+            weaponKey: "normal",
+            angleDirection: "right",
+            angleTapCount: 2,
+            powerDirection: "up",
+            powerTapCount: 2,
+            settleMs: 160
+          }
+        },
+        battleSnapshot
+      )
+    ).toEqual([
+      {
+        kind: "keypress",
+        key: "1"
+      },
+      {
+        kind: "wait",
+        durationMs: 120
+      },
+      {
+        kind: "keypress",
+        key: "D"
+      },
+      {
+        kind: "keypress",
+        key: "D"
+      },
+      {
+        kind: "keypress",
+        key: "W"
+      },
+      {
+        kind: "keypress",
+        key: "W"
+      },
+      {
+        kind: "wait",
+        durationMs: 160
+      },
+      {
+        kind: "keypress",
+        key: "Space"
+      },
+      {
+        kind: "wait",
+        durationMs: 600
+      }
+    ]);
+
+    const endSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_END_DOM
+      },
+      summary: "end"
+    });
+    expect(endSnapshot.isTerminal).toBe(true);
+    expect(endSnapshot.semanticState).toMatchObject({
+      endVisible: true,
+      endTitleText: "P1 Cat Wins",
+      outcome: "win"
+    });
+    expect(await session.actions(endSnapshot)).toEqual([]);
   });
 });

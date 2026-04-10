@@ -10,7 +10,7 @@ const manifest: GameManifest = {
 
 export const catAndDogWebPlugin: GamePlugin = {
   manifest,
-  async createSession(_context: GameSessionContext): Promise<GameSession> {
-    return new CatAndDogGameSession();
+  async createSession(context: GameSessionContext): Promise<GameSession> {
+    return new CatAndDogGameSession(context);
   }
 };

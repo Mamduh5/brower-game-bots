@@ -5,95 +5,217 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cat and Dog Fixture</title>
     <style>
-      body {
-        margin: 0;
-        font-family: sans-serif;
-      }
-      #root {
-        display: grid;
-        place-items: center;
-        min-height: 100vh;
-      }
-      .landing-container,
-      .gameplay-container {
-        display: grid;
-        gap: 12px;
-      }
-      .menu-buttons {
-        display: flex;
-        gap: 8px;
-      }
-      .mode-button {
-        padding: 10px 16px;
-      }
-      canvas {
-        width: 640px;
-        height: 360px;
-        border: 1px solid #333;
-        background: #111;
-      }
-      [hidden] {
-        display: none !important;
-      }
+      body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+      .hidden, .is-hidden, [hidden] { display: none !important; }
+      #playRoot { display: grid; gap: 16px; min-height: 100vh; padding: 24px; }
+      .play-topbar, .menu-actions, .button-row, .segmented, .weapon-bar, .status-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .play-topbar { justify-content: space-between; align-items: center; }
+      .play-frame { display: grid; gap: 16px; }
+      .panel { padding: 16px; border-radius: 12px; background: rgba(15, 23, 42, 0.75); }
+      .canvas-wrap { position: relative; }
+      canvas { width: 960px; height: 540px; max-width: 100%; border: 1px solid #334155; background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%); }
+      .overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(15, 23, 42, 0.82); }
+      .overlay-card { width: min(520px, calc(100% - 32px)); padding: 24px; border-radius: 16px; background: #111827; }
+      .action-button, .ghost-button, .weapon-bar-button { padding: 10px 14px; border: 1px solid #475569; border-radius: 10px; background: #1e293b; color: inherit; }
+      .action-button.secondary, .ghost-button { background: transparent; }
+      .segment-button.is-active, .weapon-bar-button.is-active { border-color: #38bdf8; background: rgba(56, 189, 248, 0.2); }
     </style>
   </head>
   <body>
-    <main id="root">
-      <div class="landing-container" data-testid="app-root" id="landing-shell">
-        <h1>Cat and Dog Fixture Menu</h1>
-        <div id="mode-selection" data-testid="mode-selection" class="menu-buttons">
-          <button class="mode-button" data-testid="play-vs-cpu" data-mode="cpu">Play vs CPU</button>
-          <button id="play-2-player" class="mode-button" data-testid="play-2-player" data-mode="two-player">2 Player</button>
+    <main class="play-shell" id="playRoot">
+      <header class="play-topbar">
+        <div><p>Fixture / Desktop</p><h1>Backyard Ballistics Fixture</h1></div>
+        <div id="modeLabel">Mode: Menu</div>
+      </header>
+      <section class="play-frame">
+        <div class="panel canvas-wrap" id="gameplaySurface">
+          <canvas id="gameCanvas" data-testid="game-canvas" width="960" height="540"></canvas>
+          <div class="weapon-bar is-hidden" id="weaponBar" data-testid="weapon-bar">
+            <button class="weapon-bar-button is-active" data-weapon-key="normal" type="button">Normal</button>
+            <button class="weapon-bar-button" data-weapon-key="light" type="button">Light</button>
+            <button class="weapon-bar-button" data-weapon-key="heavy" type="button">Heavy</button>
+            <button class="weapon-bar-button" data-weapon-key="super" type="button">Super</button>
+            <button class="weapon-bar-button" data-weapon-key="heal" type="button">Heal</button>
+          </div>
+          <div class="overlay menu-overlay" id="menuOverlay">
+            <div class="overlay-card">
+              <h2>Backyard Ballistics</h2>
+              <div class="menu-actions" id="menuActions">
+                <button class="action-button" id="playCpuButton" data-testid="play-vs-cpu">Play vs CPU</button>
+                <button class="action-button secondary" id="playLocalButton" data-testid="play-2-player">2 Players</button>
+              </div>
+              <div class="difficulty-panel is-hidden" id="difficultyPanel" data-testid="difficulty-panel">
+                <p>CPU Difficulty</p>
+                <div class="segmented" role="group" aria-label="CPU Difficulty">
+                  <button class="segment-button easy is-active" data-difficulty="easy">Easy</button>
+                  <button class="segment-button normal" data-difficulty="normal">Normal</button>
+                  <button class="segment-button hard" data-difficulty="hard">Hard</button>
+                  <button class="segment-button impossible" data-difficulty="impossible">Impossible</button>
+                </div>
+                <p id="difficultyCopy">CPU: generous mistakes.</p>
+                <div class="button-row">
+                  <button class="action-button" id="startCpuButton" data-testid="start-cpu-match">Start CPU Match</button>
+                  <button class="ghost-button" id="cpuBackButton">Back</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="overlay end-overlay hidden" id="endOverlay">
+            <div class="overlay-card">
+              <p>Round Complete</p>
+              <h2 id="endTitle">Winner</h2>
+              <p id="endSubtitle">Press play again to continue.</p>
+              <div class="button-row">
+                <button class="action-button" id="restartButton">Play Again</button>
+                <button class="action-button secondary" id="menuButton">Back To Menu</button>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-      <div id="runtime-mount"></div>
+        <aside class="panel">
+          <p>Controls</p>
+          <ul class="controls-list">
+            <li>Aim <strong>A / D</strong></li>
+            <li>Power <strong>W / S</strong></li>
+            <li>Weapons <strong>1-5</strong></li>
+            <li>Throw <strong>Space</strong></li>
+          </ul>
+          <p id="matchNote">Choose a mode to start a new match.</p>
+          <p id="canvasHint" data-testid="controls-hint">Press A/D to aim, W/S for power, 1-5 for items.</p>
+          <div class="status-row">
+            <p id="aim-status" data-testid="aim-status">Aim: center</p>
+            <p id="power-status" data-testid="power-status">Power: medium</p>
+          </div>
+        </aside>
+      </section>
     </main>
     <script>
-      const landingShell = document.getElementById("landing-shell");
-      const runtimeMount = document.getElementById("runtime-mount");
-      const twoPlayerButton = document.getElementById("play-2-player");
-      let gameplayShell = null;
-
-      function ensureGameplayShell() {
-        if (gameplayShell) {
-          return gameplayShell;
-        }
-
-        if (!runtimeMount) {
-          return null;
-        }
-
-        const container = document.createElement("div");
-        container.id = "gameplay-shell";
-        container.className = "gameplay-container";
-        container.innerHTML = `
-          <div id="player-hud" data-testid="player-hud">HP: 100</div>
-          <canvas data-testid="game-canvas"></canvas>
-          <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
-          <p id="aim-status" data-testid="aim-status">Aim: center</p>
-        `;
-
-        runtimeMount.appendChild(container);
-        gameplayShell = container;
-        return container;
+      const storageKey = "catdog-fixture-cpu-attempts";
+      const modeLabel = document.getElementById("modeLabel");
+      const menuOverlay = document.getElementById("menuOverlay");
+      const difficultyPanel = document.getElementById("difficultyPanel");
+      const difficultyCopy = document.getElementById("difficultyCopy");
+      const playCpuButton = document.getElementById("playCpuButton");
+      const playLocalButton = document.getElementById("playLocalButton");
+      const startCpuButton = document.getElementById("startCpuButton");
+      const cpuBackButton = document.getElementById("cpuBackButton");
+      const weaponBar = document.getElementById("weaponBar");
+      const matchNote = document.getElementById("matchNote");
+      const aimStatus = document.getElementById("aim-status");
+      const powerStatus = document.getElementById("power-status");
+      const endOverlay = document.getElementById("endOverlay");
+      const endTitle = document.getElementById("endTitle");
+      const endSubtitle = document.getElementById("endSubtitle");
+      const restartButton = document.getElementById("restartButton");
+      const menuButton = document.getElementById("menuButton");
+      const difficultyButtons = Array.from(document.querySelectorAll("[data-difficulty]"));
+      const weaponButtons = Array.from(document.querySelectorAll("[data-weapon-key]"));
+      const state = { scene: "menu", mode: null, cpuDifficulty: "easy", attemptNumber: 0, selectedWeapon: "normal", aimDirection: "center", powerLevel: "medium", playerTurnReady: false, ended: false };
+      function setDifficulty(level) {
+        state.cpuDifficulty = level;
+        difficultyButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.difficulty === level));
+        difficultyCopy.textContent = `CPU: ${level}`;
       }
-
-      if (twoPlayerButton && landingShell) {
-        twoPlayerButton.addEventListener("click", () => {
-          ensureGameplayShell();
-          landingShell.setAttribute("hidden", "true");
-        });
+      function setWeapon(key) {
+        state.selectedWeapon = key;
+        weaponButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.weaponKey === key));
+        matchNote.textContent = `Selected weapon: ${key}`;
       }
-
+      function resetGameplayStatus() {
+        state.aimDirection = "center";
+        state.powerLevel = "medium";
+        aimStatus.textContent = "Aim: center";
+        powerStatus.textContent = "Power: medium";
+        setWeapon("normal");
+      }
+      function syncUi() {
+        modeLabel.textContent = state.scene === "menu" ? "Mode: Menu" : state.mode === "cpu" ? `Mode: 1P vs CPU / ${state.cpuDifficulty[0].toUpperCase()}${state.cpuDifficulty.slice(1)}` : "Mode: 2 Players";
+        menuOverlay.classList.toggle("hidden", state.scene !== "menu");
+        difficultyPanel.classList.toggle("is-hidden", !(state.scene === "menu" && playCpuButton.hidden));
+        weaponBar.classList.toggle("is-hidden", !(state.scene === "battle" && state.playerTurnReady));
+        endOverlay.classList.toggle("hidden", !state.ended);
+      }
+      function goToMenu() {
+        state.scene = "menu";
+        state.mode = null;
+        state.playerTurnReady = false;
+        state.ended = false;
+        playCpuButton.hidden = false;
+        playLocalButton.hidden = false;
+        difficultyPanel.classList.add("is-hidden");
+        matchNote.textContent = "Choose a mode to start a new match.";
+        endTitle.textContent = "Winner";
+        endSubtitle.textContent = "Press play again to continue.";
+        resetGameplayStatus();
+        syncUi();
+      }
+      function startMatch(mode) {
+        state.scene = "battle";
+        state.mode = mode;
+        state.playerTurnReady = true;
+        state.ended = false;
+        resetGameplayStatus();
+        if (mode === "cpu") {
+          const nextAttempt = Number(window.localStorage.getItem(storageKey) || "0") + 1;
+          window.localStorage.setItem(storageKey, String(nextAttempt));
+          state.attemptNumber = nextAttempt;
+          matchNote.textContent = `CPU attempt ${state.attemptNumber} started.`;
+        } else {
+          matchNote.textContent = "2-player match started.";
+        }
+        syncUi();
+      }
+      function resolveShotOutcome() {
+        const isWinningSetup = state.mode === "cpu" && state.attemptNumber >= 2 && state.selectedWeapon === "normal" && state.aimDirection === "right" && state.powerLevel === "high";
+        state.scene = "end";
+        state.playerTurnReady = false;
+        state.ended = true;
+        endTitle.textContent = isWinningSetup ? "P1 Cat Wins" : state.mode === "cpu" ? "CPU Dog Wins" : "P2 Dog Wins";
+        endSubtitle.textContent = isWinningSetup ? "Winning shot landed cleanly." : state.mode === "cpu" ? "CPU answered back." : "The second player closed the round.";
+        matchNote.textContent = isWinningSetup ? "Attempt converted into a win." : "Shot did not secure the round.";
+        syncUi();
+      }
+      playCpuButton.addEventListener("click", () => {
+        playCpuButton.hidden = true;
+        playLocalButton.hidden = true;
+        difficultyPanel.classList.remove("is-hidden");
+        matchNote.textContent = "Choose CPU difficulty.";
+        syncUi();
+      });
+      playLocalButton.addEventListener("click", () => startMatch("local"));
+      startCpuButton.addEventListener("click", () => startMatch("cpu"));
+      cpuBackButton.addEventListener("click", () => {
+        playCpuButton.hidden = false;
+        playLocalButton.hidden = false;
+        difficultyPanel.classList.add("is-hidden");
+        matchNote.textContent = "Choose a mode to start a new match.";
+        syncUi();
+      });
+      difficultyButtons.forEach((button) => button.addEventListener("click", () => setDifficulty(button.dataset.difficulty || "easy")));
+      weaponButtons.forEach((button) => button.addEventListener("click", () => {
+        if (state.scene === "battle" && state.playerTurnReady) setWeapon(button.dataset.weaponKey || "normal");
+      }));
+      restartButton.addEventListener("click", () => startMatch(state.mode === "cpu" ? "cpu" : "local"));
+      menuButton.addEventListener("click", () => goToMenu());
       window.addEventListener("keydown", (event) => {
-        if (event.key === "a" || event.key === "A") {
-          const target = document.getElementById("aim-status");
-          const gameplayVisible = Boolean(gameplayShell);
-          if (target && gameplayVisible) {
-            target.textContent = "Aim: left";
-          }
+        if (state.scene !== "battle" || state.ended) return;
+        const key = event.key.toLowerCase();
+        if (key === "a" && state.playerTurnReady) { state.aimDirection = "left"; aimStatus.textContent = "Aim: left"; }
+        if (key === "d" && state.playerTurnReady) { state.aimDirection = "right"; aimStatus.textContent = "Aim: right"; }
+        if (key === "w" && state.playerTurnReady) { state.powerLevel = "high"; powerStatus.textContent = "Power: high"; }
+        if (key === "s" && state.playerTurnReady) { state.powerLevel = "low"; powerStatus.textContent = "Power: low"; }
+        if (["1", "2", "3", "4", "5"].includes(key) && state.playerTurnReady) {
+          const map = { 1: "normal", 2: "light", 3: "heavy", 4: "super", 5: "heal" };
+          setWeapon(map[key] || "normal");
+        }
+        if (event.code === "Space" && state.playerTurnReady) {
+          state.playerTurnReady = false;
+          matchNote.textContent = "Projectile launched.";
+          syncUi();
+          window.setTimeout(resolveShotOutcome, 150);
         }
       });
+      goToMenu();
     </script>
   </body>
 </html>
