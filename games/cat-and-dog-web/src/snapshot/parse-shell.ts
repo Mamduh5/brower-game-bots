@@ -27,7 +27,29 @@ export interface CatAndDogShellState {
   matchNoteText: string | null;
   canvasHintText: string | null;
   turnBannerVisible: boolean;
+  turnBannerLabelText: string | null;
   turnBannerTitleText: string | null;
+  playerHpText: string | null;
+  playerHpValue: number | null;
+  playerHpMax: number | null;
+  cpuHpText: string | null;
+  cpuHpValue: number | null;
+  cpuHpMax: number | null;
+  turnCounterText: string | null;
+  turnCounter: number | null;
+  shotResolutionCategory:
+    | "none"
+    | "turn-start"
+    | "aiming"
+    | "windup"
+    | "direct-hit"
+    | "splash-hit"
+    | "wall-hit"
+    | "miss"
+    | "heal"
+    | "cpu-planning"
+    | "unknown";
+  shotResolved: boolean;
   endVisible: boolean;
   endTitleText: string | null;
   endSubtitleText: string | null;
@@ -161,6 +183,111 @@ function parseAimDirection(aimStatusText: string | null): "left" | "right" | "ce
 
   if (normalized.includes("center")) {
     return "center";
+  }
+
+  return "unknown";
+}
+
+function parseIntegerFromText(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.match(/(\d+)/);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseHpText(value: string | null): { current: number | null; max: number | null } {
+  if (!value) {
+    return { current: null, max: null };
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const paired = normalized.match(/(\d+)\s*\/\s*(\d+)/);
+  if (paired?.[1] && paired[2]) {
+    const current = Number.parseInt(paired[1], 10);
+    const max = Number.parseInt(paired[2], 10);
+    return {
+      current: Number.isFinite(current) ? current : null,
+      max: Number.isFinite(max) ? max : null
+    };
+  }
+
+  return {
+    current: parseIntegerFromText(normalized),
+    max: null
+  };
+}
+
+function parseShotResolutionCategory(
+  canvasHintText: string | null,
+  playerTurnReady: boolean,
+  turnBannerVisible: boolean,
+  endVisible: boolean
+): CatAndDogShellState["shotResolutionCategory"] {
+  const normalized = (canvasHintText ?? "").trim().toLowerCase();
+  if (!normalized) {
+    if (playerTurnReady) {
+      return "aiming";
+    }
+
+    return turnBannerVisible ? "turn-start" : "none";
+  }
+
+  if (normalized.includes("stepping in") || normalized.includes("get ready")) {
+    return "turn-start";
+  }
+
+  if (
+    normalized.includes("adjust angle") ||
+    normalized.includes("controls: a/d") ||
+    normalized.includes("press a/d") ||
+    normalized.includes("drag to aim") ||
+    normalized.includes("release to fire") ||
+    normalized.includes("pull back")
+  ) {
+    return playerTurnReady ? "aiming" : "cpu-planning";
+  }
+
+  if (normalized.includes("winds up")) {
+    return "windup";
+  }
+
+  if (normalized.includes("direct hit")) {
+    return "direct-hit";
+  }
+
+  if (normalized.includes("splash damage")) {
+    return "splash-hit";
+  }
+
+  if (normalized.includes("wall hit") || normalized.includes("slammed into the wall")) {
+    return "wall-hit";
+  }
+
+  if (normalized.includes("recovered") || normalized.includes("full hp") || normalized.includes("heal")) {
+    return "heal";
+  }
+
+  if (normalized.includes("missed clean")) {
+    return "miss";
+  }
+
+  if (normalized.includes("reading the wind") || normalized.includes("fire twice") || normalized.includes("cheat shot")) {
+    return "cpu-planning";
+  }
+
+  if (playerTurnReady) {
+    return "aiming";
+  }
+
+  if (turnBannerVisible) {
+    return "turn-start";
   }
 
   return "unknown";
@@ -323,7 +450,14 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const matchNoteText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.matchNoteCandidates);
   const canvasHintText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.canvasHintCandidates);
   const turnBannerVisible = isVisibleElementById(domHtml, "turnBanner");
+  const turnBannerLabelText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerLabelCandidates);
   const turnBannerTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerTitleCandidates);
+  const playerHpText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playerHpCandidates);
+  const playerHp = parseHpText(playerHpText);
+  const cpuHpText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.cpuHpCandidates);
+  const cpuHp = parseHpText(cpuHpText);
+  const turnCounterText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnCounterCandidates);
+  const turnCounter = parseIntegerFromText(turnCounterText);
   const endVisible = isVisibleElementById(domHtml, "endOverlay");
   const endTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endTitleCandidates);
   const endSubtitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endSubtitleCandidates);
@@ -344,6 +478,19 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     menuVisible !== true &&
     turnBannerVisible !== true &&
     endVisible !== true;
+  const shotResolutionCategory = parseShotResolutionCategory(
+    canvasHintText,
+    playerTurnReady,
+    turnBannerVisible,
+    endVisible
+  );
+  const shotResolved =
+    endVisible === true ||
+    shotResolutionCategory === "direct-hit" ||
+    shotResolutionCategory === "splash-hit" ||
+    shotResolutionCategory === "wall-hit" ||
+    shotResolutionCategory === "miss" ||
+    shotResolutionCategory === "heal";
   const outcome = parseOutcome(endVisible, endTitleText, gameplayEntered);
 
   const status: CatAndDogShellState["status"] = gameplayEntered
@@ -379,7 +526,18 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     matchNoteText,
     canvasHintText,
     turnBannerVisible,
+    turnBannerLabelText,
     turnBannerTitleText,
+    playerHpText,
+    playerHpValue: playerHp.current,
+    playerHpMax: playerHp.max,
+    cpuHpText,
+    cpuHpValue: cpuHp.current,
+    cpuHpMax: cpuHp.max,
+    turnCounterText,
+    turnCounter,
+    shotResolutionCategory,
+    shotResolved,
     endVisible,
     endTitleText,
     endSubtitleText,

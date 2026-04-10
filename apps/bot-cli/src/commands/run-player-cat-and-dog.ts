@@ -21,9 +21,34 @@ import { resolveGamePlugin } from "../bootstrap/game-plugins.js";
 import { buildArtifactCaptureName, buildArtifactIndex } from "./run-artifact-index.js";
 
 export type AttemptOutcome = "WIN" | "LOSS" | "UNKNOWN";
+type ShotResolutionCategory =
+  | "none"
+  | "turn-start"
+  | "aiming"
+  | "windup"
+  | "direct-hit"
+  | "splash-hit"
+  | "wall-hit"
+  | "miss"
+  | "heal"
+  | "cpu-planning"
+  | "unknown";
 
 export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnostics {
   maxStepsBudget: number;
+  turnsObserved: number;
+  shotResolutionsObserved: number;
+  directHits: number;
+  splashHits: number;
+  wallHits: number;
+  misses: number;
+  healsObserved: number;
+  damageDealt: number | null;
+  damageTaken: number | null;
+  playerHpStart: number | null;
+  playerHpEnd: number | null;
+  cpuHpStart: number | null;
+  cpuHpEnd: number | null;
 }
 
 export interface CatAndDogPlayerAttemptRecord {
@@ -31,6 +56,7 @@ export interface CatAndDogPlayerAttemptRecord {
   startedAt: string;
   endedAt: string;
   outcome: AttemptOutcome;
+  assessment: string;
   note: string;
   strategy: CatAndDogAttemptStrategy;
   strategySelectionReason: string;
@@ -114,9 +140,40 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       gameplayEnteredObserved: attempt.diagnostics.gameplayEnteredObserved,
       playerTurnReadyObserved: attempt.diagnostics.playerTurnReadyObserved,
       endOverlayObserved: attempt.diagnostics.endOverlayObserved,
-      stepBudgetReached: attempt.diagnostics.stepBudgetReached
+      stepBudgetReached: attempt.diagnostics.stepBudgetReached,
+      turnsObserved: attempt.diagnostics.turnsObserved,
+      shotResolutionsObserved: attempt.diagnostics.shotResolutionsObserved,
+      directHits: attempt.diagnostics.directHits,
+      splashHits: attempt.diagnostics.splashHits,
+      wallHits: attempt.diagnostics.wallHits,
+      misses: attempt.diagnostics.misses,
+      healsObserved: attempt.diagnostics.healsObserved,
+      damageDealt: attempt.diagnostics.damageDealt,
+      damageTaken: attempt.diagnostics.damageTaken
     }
   };
+}
+
+function readSemanticNumber(snapshot: GameSnapshot, key: string): number | null {
+  const value = snapshot.semanticState[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readShotResolutionCategory(snapshot: GameSnapshot): ShotResolutionCategory {
+  const value = snapshot.semanticState.shotResolutionCategory;
+  return typeof value === "string" ? (value as ShotResolutionCategory) : "none";
+}
+
+function buildResolutionSignature(snapshot: GameSnapshot): string | null {
+  if (snapshot.semanticState.shotResolved !== true) {
+    return null;
+  }
+
+  return [
+    snapshot.semanticState.turnCounter ?? "",
+    snapshot.semanticState.shotResolutionCategory ?? "",
+    snapshot.semanticState.canvasHintText ?? ""
+  ].join("|");
 }
 
 function detectAttemptOutcome(snapshot: GameSnapshot): AttemptOutcome | null {
@@ -145,15 +202,54 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     cpuSetupVisible: toJsonValue(snapshot.semanticState.cpuSetupVisible),
     playerTurnReady: toJsonValue(snapshot.semanticState.playerTurnReady),
     turnBannerVisible: toJsonValue(snapshot.semanticState.turnBannerVisible),
+    turnBannerLabelText: toJsonValue(snapshot.semanticState.turnBannerLabelText),
     selectedWeaponKey: toJsonValue(snapshot.semanticState.selectedWeaponKey),
     modeLabelText: toJsonValue(snapshot.semanticState.modeLabelText),
     matchNoteText: toJsonValue(snapshot.semanticState.matchNoteText),
     canvasHintText: toJsonValue(snapshot.semanticState.canvasHintText),
+    playerHpValue: toJsonValue(snapshot.semanticState.playerHpValue),
+    playerHpMax: toJsonValue(snapshot.semanticState.playerHpMax),
+    cpuHpValue: toJsonValue(snapshot.semanticState.cpuHpValue),
+    cpuHpMax: toJsonValue(snapshot.semanticState.cpuHpMax),
+    turnCounter: toJsonValue(snapshot.semanticState.turnCounter),
+    shotResolutionCategory: toJsonValue(snapshot.semanticState.shotResolutionCategory),
+    shotResolved: toJsonValue(snapshot.semanticState.shotResolved),
     endVisible: toJsonValue(snapshot.semanticState.endVisible),
     endTitleText: toJsonValue(snapshot.semanticState.endTitleText),
     endSubtitleText: toJsonValue(snapshot.semanticState.endSubtitleText),
     outcome: toJsonValue(snapshot.semanticState.outcome)
   };
+}
+
+function buildAttemptAssessment(
+  outcome: AttemptOutcome,
+  diagnostics: CatAndDogAttemptRunDiagnostics
+): string {
+  if (outcome === "WIN") {
+    return "won-round";
+  }
+
+  if (outcome === "LOSS" && (diagnostics.damageDealt ?? 0) > 0) {
+    return "loss-with-damage";
+  }
+
+  if (outcome === "LOSS") {
+    return "loss-without-progress";
+  }
+
+  if (diagnostics.shotsFired === 0) {
+    return "setup-stalled";
+  }
+
+  if (diagnostics.shotResolutionsObserved === 0) {
+    return "resolution-stalled";
+  }
+
+  if ((diagnostics.damageDealt ?? 0) > 0 || diagnostics.directHits > 0 || diagnostics.splashHits > 0) {
+    return "progress-without-terminal";
+  }
+
+  return "inconclusive";
 }
 
 function buildAttemptNote(snapshot: GameSnapshot, fallback: string): string {
@@ -177,7 +273,20 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     playerTurnReadyObserved: false,
     endOverlayObserved: false,
     stepBudgetReached: false,
-    maxStepsBudget
+    maxStepsBudget,
+    turnsObserved: 0,
+    shotResolutionsObserved: 0,
+    directHits: 0,
+    splashHits: 0,
+    wallHits: 0,
+    misses: 0,
+    healsObserved: 0,
+    damageDealt: null,
+    damageTaken: null,
+    playerHpStart: null,
+    playerHpEnd: null,
+    cpuHpStart: null,
+    cpuHpEnd: null
   };
 }
 
@@ -195,6 +304,92 @@ function updateAttemptDiagnostics(
   };
 }
 
+function updateAttemptProgressFromSnapshot(
+  diagnostics: CatAndDogAttemptRunDiagnostics,
+  snapshot: GameSnapshot,
+  input: {
+    lastResolutionSignature: string | null;
+    previousPlayerTurnReady: boolean;
+  }
+): {
+  diagnostics: CatAndDogAttemptRunDiagnostics;
+  lastResolutionSignature: string | null;
+  previousPlayerTurnReady: boolean;
+} {
+  let nextDiagnostics = updateAttemptDiagnostics(diagnostics, snapshot);
+  const playerHpValue = readSemanticNumber(snapshot, "playerHpValue");
+  const cpuHpValue = readSemanticNumber(snapshot, "cpuHpValue");
+
+  if (nextDiagnostics.playerHpStart === null && playerHpValue !== null) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      playerHpStart: playerHpValue
+    };
+  }
+
+  if (nextDiagnostics.cpuHpStart === null && cpuHpValue !== null) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      cpuHpStart: cpuHpValue
+    };
+  }
+
+  if (playerHpValue !== null) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      playerHpEnd: playerHpValue
+    };
+  }
+
+  if (cpuHpValue !== null) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      cpuHpEnd: cpuHpValue
+    };
+  }
+
+  if (nextDiagnostics.playerHpStart !== null && nextDiagnostics.playerHpEnd !== null) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      damageTaken: Math.max(0, nextDiagnostics.playerHpStart - nextDiagnostics.playerHpEnd)
+    };
+  }
+
+  if (nextDiagnostics.cpuHpStart !== null && nextDiagnostics.cpuHpEnd !== null) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      damageDealt: Math.max(0, nextDiagnostics.cpuHpStart - nextDiagnostics.cpuHpEnd)
+    };
+  }
+
+  if (snapshot.semanticState.playerTurnReady === true && input.previousPlayerTurnReady !== true) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      turnsObserved: nextDiagnostics.turnsObserved + 1
+    };
+  }
+
+  const resolutionSignature = buildResolutionSignature(snapshot);
+  if (resolutionSignature && resolutionSignature !== input.lastResolutionSignature) {
+    const category = readShotResolutionCategory(snapshot);
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      shotResolutionsObserved: nextDiagnostics.shotResolutionsObserved + 1,
+      ...(category === "direct-hit" ? { directHits: nextDiagnostics.directHits + 1 } : {}),
+      ...(category === "splash-hit" ? { splashHits: nextDiagnostics.splashHits + 1 } : {}),
+      ...(category === "wall-hit" ? { wallHits: nextDiagnostics.wallHits + 1 } : {}),
+      ...(category === "miss" ? { misses: nextDiagnostics.misses + 1 } : {}),
+      ...(category === "heal" ? { healsObserved: nextDiagnostics.healsObserved + 1 } : {})
+    };
+  }
+
+  return {
+    diagnostics: nextDiagnostics,
+    lastResolutionSignature: resolutionSignature ?? input.lastResolutionSignature,
+    previousPlayerTurnReady: snapshot.semanticState.playerTurnReady === true
+  };
+}
+
 function buildPlayerSummaryJson(input: {
   run: RunRecord;
   report: RunReport;
@@ -204,12 +399,19 @@ function buildPlayerSummaryJson(input: {
 }): JsonObject {
   const winningAttempt = input.attempts.find((attempt) => attempt.outcome === "WIN") ?? null;
   const progressScore = (attempt: CatAndDogPlayerAttemptRecord): number =>
-    Number(attempt.outcome === "WIN") * 20 +
-    Number(attempt.outcome === "LOSS") * 10 +
-    Number(attempt.diagnostics.endOverlayObserved) * 10 +
-    Number(attempt.diagnostics.playerTurnReadyObserved) * 4 +
-    Number(attempt.diagnostics.gameplayEnteredObserved) * 2 +
-    attempt.diagnostics.shotsFired;
+    Number(attempt.outcome === "WIN") * 200 +
+    Number(attempt.outcome === "LOSS") * 80 +
+    Number(attempt.diagnostics.endOverlayObserved) * 50 +
+    Number(attempt.diagnostics.playerTurnReadyObserved) * 15 +
+    Number(attempt.diagnostics.gameplayEnteredObserved) * 8 +
+    (attempt.diagnostics.damageDealt ?? 0) * 9 -
+    (attempt.diagnostics.damageTaken ?? 0) * 5 +
+    attempt.diagnostics.directHits * 40 +
+    attempt.diagnostics.splashHits * 20 +
+    attempt.diagnostics.wallHits * 8 -
+    attempt.diagnostics.misses * 10 +
+    attempt.diagnostics.shotsFired * 6 +
+    attempt.diagnostics.turnsObserved * 3;
   const mostProgressiveAttempt =
     [...input.attempts]
       .sort(
@@ -239,6 +441,7 @@ function buildPlayerSummaryJson(input: {
       ...(winningAttempt ? { winningAttemptStrategy: toJsonValue(winningAttempt.strategy) } : {}),
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptNumber: mostProgressiveAttempt.attemptNumber } : {}),
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptStrategy: toJsonValue(mostProgressiveAttempt.strategy) } : {}),
+      ...(mostProgressiveAttempt ? { mostProgressiveAttemptAssessment: mostProgressiveAttempt.assessment } : {}),
       reportId: input.report.reportId,
       artifactCount: input.artifacts.length
     },
@@ -247,6 +450,7 @@ function buildPlayerSummaryJson(input: {
       startedAt: attempt.startedAt,
       endedAt: attempt.endedAt,
       outcome: attempt.outcome,
+      assessment: attempt.assessment,
       note: attempt.note,
       strategy: toJsonValue(attempt.strategy),
       strategySelectionReason: attempt.strategySelectionReason,
@@ -415,7 +619,17 @@ export async function runPlayerCatAndDog(
       let outcome: AttemptOutcome = "UNKNOWN";
       let note = `Attempt ${attemptNumber} reached the step budget without a terminal outcome.`;
       let maxStepsBudget = maxStepsPerAttempt;
-      let diagnostics = updateAttemptDiagnostics(createAttemptDiagnostics(maxStepsBudget), currentSnapshot);
+      let diagnostics = createAttemptDiagnostics(maxStepsBudget);
+      let lastResolutionSignature: string | null = null;
+      let previousPlayerTurnReady = false;
+      ({
+        diagnostics,
+        lastResolutionSignature,
+        previousPlayerTurnReady
+      } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
+        lastResolutionSignature,
+        previousPlayerTurnReady
+      }));
 
       for (let step = 1; step <= maxStepsBudget; step += 1) {
         const detectedOutcome = detectAttemptOutcome(currentSnapshot);
@@ -495,7 +709,14 @@ export async function runPlayerCatAndDog(
           modes: ["dom", "console", "network"]
         });
         currentSnapshot = await gameSession.translate(postActionFrame);
-        diagnostics = updateAttemptDiagnostics(diagnostics, currentSnapshot);
+        ({
+          diagnostics,
+          lastResolutionSignature,
+          previousPlayerTurnReady
+        } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
+          lastResolutionSignature,
+          previousPlayerTurnReady
+        }));
         await container.runEngine.appendEvent({
           eventId: randomUUID(),
           runId: run.runId,
@@ -568,7 +789,14 @@ export async function runPlayerCatAndDog(
         await captureAttemptArtifact(attemptNumber, 50, "final-state-dom", "dom-snapshot")
       );
 
-      diagnostics = updateAttemptDiagnostics(diagnostics, currentSnapshot);
+      ({
+        diagnostics,
+        lastResolutionSignature,
+        previousPlayerTurnReady
+      } = updateAttemptProgressFromSnapshot(diagnostics, currentSnapshot, {
+        lastResolutionSignature,
+        previousPlayerTurnReady
+      }));
       if (outcome === "UNKNOWN" && actionHistory.length >= maxStepsBudget) {
         diagnostics = {
           ...diagnostics,
@@ -577,11 +805,13 @@ export async function runPlayerCatAndDog(
       }
 
       const attemptEndedAt = clock.now().toISOString();
+      const assessment = buildAttemptAssessment(outcome, diagnostics);
       const attemptRecord: CatAndDogPlayerAttemptRecord = {
         attemptNumber,
         startedAt: attemptStartedAt,
         endedAt: attemptEndedAt,
         outcome,
+        assessment,
         note,
         strategy,
         strategySelectionReason,
@@ -605,6 +835,7 @@ export async function runPlayerCatAndDog(
           startedAt: attemptStartedAt,
           endedAt: attemptEndedAt,
           outcome,
+          assessment,
           note,
           strategy: toJsonValue(strategy),
           strategySelectionReason,
@@ -619,7 +850,7 @@ export async function runPlayerCatAndDog(
         }
       });
 
-      attemptLogger.info({ outcome, note, diagnostics }, "Completed cat-and-dog player attempt.");
+      attemptLogger.info({ outcome, assessment, note, diagnostics }, "Completed cat-and-dog player attempt.");
 
       if (outcome === "WIN" && stopOnWin) {
         break;

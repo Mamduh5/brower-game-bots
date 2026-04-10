@@ -40,7 +40,11 @@ export const CAT_AND_DOG_SELECTORS = {
   matchNoteCandidates: ["#matchNote", "[data-testid='match-note']"],
   canvasHintCandidates: ["#canvasHint", "[data-testid='controls-hint']"],
   turnBannerCandidates: ["#turnBanner", "[data-testid='turn-banner']"],
+  turnBannerLabelCandidates: ["#turnBannerLabel", "[data-testid='turn-banner-label']"],
   turnBannerTitleCandidates: ["#turnBannerTitle", "[data-testid='turn-banner-title']"],
+  playerHpCandidates: ["#playerHp", "#player-hp", "[data-testid='player-hp']", ".player-hp"],
+  cpuHpCandidates: ["#cpuHp", "#cpu-hp", "[data-testid='cpu-hp']", ".cpu-hp"],
+  turnCounterCandidates: ["#turnCounter", "#turn-counter", "[data-testid='turn-counter']", ".turn-counter"],
   startControlCandidates: [
     "#playCpuButton",
     "#playLocalButton",

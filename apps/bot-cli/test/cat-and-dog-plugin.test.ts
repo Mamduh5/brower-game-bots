@@ -171,9 +171,12 @@ const GAMEPLAY_DOM = `
   </div>
   <p id="matchNote">2-player match started.</p>
   <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+  <p id="playerHp" data-testid="player-hp">P1 Cat HP: 100/100</p>
+  <p id="cpuHp" data-testid="cpu-hp">P2 Dog HP: 100/100</p>
+  <p id="turnCounter" data-testid="turn-counter">Turn 1</p>
   <p id="aim-status" data-testid="aim-status">Aim: left</p>
   <p id="power-status" data-testid="power-status">Power: medium</p>
-  <div id="turnBanner" class="hidden"><strong id="turnBannerTitle">P1 Cat</strong></div>
+  <div id="turnBanner" class="hidden"><span id="turnBannerLabel">Get Ready</span><strong id="turnBannerTitle">P1 Cat</strong></div>
 </main>
 `;
 
@@ -204,10 +207,13 @@ const CPU_BATTLE_DOM = `
     <button class="weapon-bar-button" data-weapon-key="light">Light</button>
   </div>
   <p id="matchNote">CPU attempt 1 started.</p>
-  <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+  <p id="controls-hint" data-testid="controls-hint">Adjust angle, power, and projectile, then throw.</p>
+  <p id="playerHp" data-testid="player-hp">P1 Cat HP: 100/100</p>
+  <p id="cpuHp" data-testid="cpu-hp">CPU Dog HP: 100/100</p>
+  <p id="turnCounter" data-testid="turn-counter">Turn 1</p>
   <p id="aim-status" data-testid="aim-status">Aim: right</p>
   <p id="power-status" data-testid="power-status">Power: high</p>
-  <div id="turnBanner" class="hidden"><strong id="turnBannerTitle">P1 Cat</strong></div>
+  <div id="turnBanner" class="hidden"><span id="turnBannerLabel">Get Ready</span><strong id="turnBannerTitle">P1 Cat</strong></div>
 </main>
 `;
 
@@ -221,10 +227,13 @@ const CPU_TRANSITION_DOM = `
     <button class="weapon-bar-button is-active" data-weapon-key="normal">Normal</button>
   </div>
   <p id="matchNote">P1 Cat is stepping in.</p>
-  <p id="controls-hint" data-testid="controls-hint">Controls: A/D aim, W/S power, 1-5 items</p>
+  <p id="controls-hint" data-testid="controls-hint">P1 Cat is stepping in.</p>
+  <p id="playerHp" data-testid="player-hp">P1 Cat HP: 100/100</p>
+  <p id="cpuHp" data-testid="cpu-hp">CPU Dog HP: 100/100</p>
+  <p id="turnCounter" data-testid="turn-counter">Turn 1</p>
   <p id="aim-status" data-testid="aim-status">Aim: center</p>
   <p id="power-status" data-testid="power-status">Power: medium</p>
-  <div id="turnBanner"><strong id="turnBannerTitle">P1 Cat</strong></div>
+  <div id="turnBanner"><span id="turnBannerLabel">Get Ready</span><strong id="turnBannerTitle">P1 Cat</strong></div>
 </main>
 `;
 
@@ -237,6 +246,11 @@ const CPU_END_DOM = `
   <div id="weaponBar" class="is-hidden" data-testid="weapon-bar">
     <button class="weapon-bar-button is-active" data-weapon-key="normal">Normal</button>
   </div>
+  <p id="matchNote">Attempt converted into a win.</p>
+  <p id="controls-hint" data-testid="controls-hint">Clean direct hit.</p>
+  <p id="playerHp" data-testid="player-hp">P1 Cat HP: 78/100</p>
+  <p id="cpuHp" data-testid="cpu-hp">CPU Dog HP: 0/100</p>
+  <p id="turnCounter" data-testid="turn-counter">Turn 2</p>
   <div id="endOverlay">
     <h2 id="endTitle">P1 Cat Wins</h2>
     <p id="endSubtitle">Winning shot landed cleanly.</p>
@@ -250,6 +264,7 @@ const CPU_END_VARIANT_DOM = `
   <div id="gameplaySurface">
     <canvas id="gameCanvas" data-testid="game-canvas" width="800" height="600"></canvas>
   </div>
+  <p id="controls-hint" data-testid="controls-hint">Clean direct hit.</p>
   <div id="endOverlay">
     <h2 id="endTitle">Player 1 Cat wins!</h2>
     <p id="endSubtitle">Winning shot landed cleanly.</p>
@@ -380,6 +395,10 @@ describe("cat-and-dog plugin", () => {
       powerStatusText: "Power: medium",
       gameplayInputApplied: true,
       gameplayEntered: true,
+      playerHpValue: 100,
+      cpuHpValue: 100,
+      turnCounter: 1,
+      shotResolved: false,
       turnBannerVisible: false
     });
     expect(await session.actions(closingSnapshot)).toEqual([]);
@@ -485,8 +504,14 @@ describe("cat-and-dog plugin", () => {
       playerTurnReady: true,
       selectedWeaponKey: "normal",
       turnBannerVisible: false,
+      turnBannerLabelText: "Get Ready",
       outcome: "in-progress",
-      modeLabelText: "Mode: 1P vs CPU / Easy"
+      modeLabelText: "Mode: 1P vs CPU / Easy",
+      playerHpValue: 100,
+      cpuHpValue: 100,
+      turnCounter: 1,
+      shotResolutionCategory: "aiming",
+      shotResolved: false
     });
     expect((await session.actions(battleSnapshot)).map((action) => action.actionId)).toEqual(["execute-planned-shot"]);
 
@@ -503,7 +528,9 @@ describe("cat-and-dog plugin", () => {
       gameplayEntered: true,
       playerTurnReady: false,
       turnBannerVisible: true,
+      turnBannerLabelText: "Get Ready",
       turnBannerTitleText: "P1 Cat",
+      shotResolutionCategory: "turn-start",
       outcome: "in-progress"
     });
     expect((await session.actions(transitionSnapshot)).map((action) => action.actionId)).toEqual(["wait-for-turn-resolution"]);
@@ -576,7 +603,11 @@ describe("cat-and-dog plugin", () => {
     expect(endSnapshot.semanticState).toMatchObject({
       endVisible: true,
       endTitleText: "P1 Cat Wins",
-      outcome: "win"
+      outcome: "win",
+      playerHpValue: 78,
+      cpuHpValue: 0,
+      turnCounter: 2,
+      shotResolved: true
     });
     expect(await session.actions(endSnapshot)).toEqual([]);
 
@@ -592,7 +623,8 @@ describe("cat-and-dog plugin", () => {
     expect(endVariantSnapshot.semanticState).toMatchObject({
       endVisible: true,
       endTitleText: "Player 1 Cat wins!",
-      outcome: "win"
+      outcome: "win",
+      shotResolved: true
     });
   });
 });

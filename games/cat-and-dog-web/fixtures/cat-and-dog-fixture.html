@@ -83,6 +83,11 @@
           <p id="matchNote">Choose a mode to start a new match.</p>
           <p id="canvasHint" data-testid="controls-hint">Press A/D to aim, W/S for power, 1-5 for items.</p>
           <div class="status-row">
+            <p id="playerHp" data-testid="player-hp">P1 Cat HP: 100/100</p>
+            <p id="cpuHp" data-testid="cpu-hp">CPU Dog HP: 100/100</p>
+            <p id="turnCounter" data-testid="turn-counter">Turn 0</p>
+          </div>
+          <div class="status-row">
             <p id="aim-status" data-testid="aim-status">Aim: center</p>
             <p id="power-status" data-testid="power-status">Power: medium</p>
           </div>
@@ -101,6 +106,10 @@
       const cpuBackButton = document.getElementById("cpuBackButton");
       const weaponBar = document.getElementById("weaponBar");
       const matchNote = document.getElementById("matchNote");
+      const canvasHint = document.getElementById("canvasHint");
+      const playerHp = document.getElementById("playerHp");
+      const cpuHp = document.getElementById("cpuHp");
+      const turnCounter = document.getElementById("turnCounter");
       const aimStatus = document.getElementById("aim-status");
       const powerStatus = document.getElementById("power-status");
       const endOverlay = document.getElementById("endOverlay");
@@ -110,7 +119,12 @@
       const menuButton = document.getElementById("menuButton");
       const difficultyButtons = Array.from(document.querySelectorAll("[data-difficulty]"));
       const weaponButtons = Array.from(document.querySelectorAll("[data-weapon-key]"));
-      const state = { scene: "menu", mode: null, cpuDifficulty: "easy", attemptNumber: 0, selectedWeapon: "normal", aimDirection: "center", powerLevel: "medium", playerTurnReady: false, ended: false };
+      const state = { scene: "menu", mode: null, cpuDifficulty: "easy", attemptNumber: 0, selectedWeapon: "normal", aimDirection: "center", powerLevel: "medium", playerTurnReady: false, ended: false, playerHp: 100, cpuHp: 100, turnCount: 0 };
+      function syncBattleStats() {
+        playerHp.textContent = `P1 Cat HP: ${state.playerHp}/100`;
+        cpuHp.textContent = `${state.mode === "cpu" ? "CPU Dog" : "P2 Dog"} HP: ${state.cpuHp}/100`;
+        turnCounter.textContent = `Turn ${state.turnCount}`;
+      }
       function setDifficulty(level) {
         state.cpuDifficulty = level;
         difficultyButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.difficulty === level));
@@ -126,6 +140,7 @@
         state.powerLevel = "medium";
         aimStatus.textContent = "Aim: center";
         powerStatus.textContent = "Power: medium";
+        canvasHint.textContent = "Adjust angle, power, and projectile, then throw.";
         setWeapon("normal");
       }
       function syncUi() {
@@ -134,16 +149,21 @@
         difficultyPanel.classList.toggle("is-hidden", !(state.scene === "menu" && playCpuButton.hidden));
         weaponBar.classList.toggle("is-hidden", !(state.scene === "battle" && state.playerTurnReady));
         endOverlay.classList.toggle("hidden", !state.ended);
+        syncBattleStats();
       }
       function goToMenu() {
         state.scene = "menu";
         state.mode = null;
         state.playerTurnReady = false;
         state.ended = false;
+        state.playerHp = 100;
+        state.cpuHp = 100;
+        state.turnCount = 0;
         playCpuButton.hidden = false;
         playLocalButton.hidden = false;
         difficultyPanel.classList.add("is-hidden");
         matchNote.textContent = "Choose a mode to start a new match.";
+        canvasHint.textContent = "Press A/D to aim, W/S for power, 1-5 for items.";
         endTitle.textContent = "Winner";
         endSubtitle.textContent = "Press play again to continue.";
         resetGameplayStatus();
@@ -154,6 +174,9 @@
         state.mode = mode;
         state.playerTurnReady = true;
         state.ended = false;
+        state.playerHp = 100;
+        state.cpuHp = 100;
+        state.turnCount = 1;
         resetGameplayStatus();
         if (mode === "cpu") {
           const nextAttempt = Number(window.localStorage.getItem(storageKey) || "0") + 1;
@@ -163,10 +186,21 @@
         } else {
           matchNote.textContent = "2-player match started.";
         }
+        canvasHint.textContent = "Adjust angle, power, and projectile, then throw.";
         syncUi();
       }
       function resolveShotOutcome() {
         const isWinningSetup = state.mode === "cpu" && state.attemptNumber >= 2 && state.selectedWeapon === "normal" && state.aimDirection === "right" && state.powerLevel === "high";
+        state.turnCount += 1;
+        if (isWinningSetup) {
+          state.cpuHp = 0;
+          state.playerHp = 78;
+          canvasHint.textContent = "Clean direct hit.";
+        } else {
+          state.cpuHp = 72;
+          state.playerHp = 0;
+          canvasHint.textContent = "Splash damage landed.";
+        }
         state.scene = "end";
         state.playerTurnReady = false;
         state.ended = true;
@@ -211,6 +245,7 @@
         if (event.code === "Space" && state.playerTurnReady) {
           state.playerTurnReady = false;
           matchNote.textContent = "Projectile launched.";
+          canvasHint.textContent = "P1 Cat winds up a normal shot...";
           syncUi();
           window.setTimeout(resolveShotOutcome, 150);
         }

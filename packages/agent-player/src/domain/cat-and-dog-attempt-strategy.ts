@@ -27,7 +27,16 @@ export const CatAndDogAttemptDiagnosticsSchema = z.object({
   gameplayEnteredObserved: z.boolean(),
   playerTurnReadyObserved: z.boolean(),
   endOverlayObserved: z.boolean(),
-  stepBudgetReached: z.boolean()
+  stepBudgetReached: z.boolean(),
+  turnsObserved: z.number().int().nonnegative(),
+  shotResolutionsObserved: z.number().int().nonnegative(),
+  directHits: z.number().int().nonnegative(),
+  splashHits: z.number().int().nonnegative(),
+  wallHits: z.number().int().nonnegative(),
+  misses: z.number().int().nonnegative(),
+  healsObserved: z.number().int().nonnegative(),
+  damageDealt: z.number().int().nonnegative().nullable(),
+  damageTaken: z.number().int().nonnegative().nullable()
 });
 export type CatAndDogAttemptDiagnostics = z.infer<typeof CatAndDogAttemptDiagnosticsSchema>;
 
@@ -233,8 +242,34 @@ function hasStalled(feedback: CatAndDogAttemptFeedback): boolean {
     (
       feedback.diagnostics.shotsFired === 0 ||
       feedback.diagnostics.playerTurnReadyObserved !== true ||
-      feedback.diagnostics.endOverlayObserved !== true
+      (
+        feedback.diagnostics.shotResolutionsObserved === 0 &&
+        feedback.diagnostics.endOverlayObserved !== true
+      )
     )
+  );
+}
+
+function feedbackProgressScore(feedback: CatAndDogAttemptFeedback): number {
+  const damageDealt = feedback.diagnostics.damageDealt ?? 0;
+  const damageTaken = feedback.diagnostics.damageTaken ?? 0;
+
+  return (
+    (feedback.outcome === "WIN" ? 1_500 : 0) +
+    (feedback.outcome === "LOSS" ? 260 : 0) +
+    (feedback.outcome === "UNKNOWN" ? 40 : 0) +
+    damageDealt * 9 -
+    damageTaken * 5 +
+    feedback.diagnostics.directHits * 90 +
+    feedback.diagnostics.splashHits * 45 +
+    feedback.diagnostics.wallHits * 15 +
+    feedback.diagnostics.healsObserved * 12 -
+    feedback.diagnostics.misses * 20 +
+    feedback.diagnostics.shotResolutionsObserved * 24 +
+    feedback.diagnostics.turnsObserved * 6 +
+    (feedback.diagnostics.gameplayEnteredObserved ? 12 : 0) +
+    (feedback.diagnostics.playerTurnReadyObserved ? 10 : 0) -
+    (feedback.diagnostics.stepBudgetReached ? 40 : 0)
   );
 }
 
@@ -250,6 +285,10 @@ function buildSelectionReason(history: readonly CatAndDogAttemptFeedback[], exac
 
   if (latest?.outcome === "LOSS") {
     return exactUseCount === 0 ? "terminal-loss-neighbor-search" : "terminal-loss-avoid-repeat";
+  }
+
+  if (latest && feedbackProgressScore(latest) > 120) {
+    return exactUseCount === 0 ? "progress-neighbor-search" : "progress-avoid-repeat";
   }
 
   return exactUseCount === 0 ? "untried-variant" : "least-repeated-variant";
@@ -317,6 +356,8 @@ export function selectCatAndDogAttemptStrategy(input: {
           score += 8;
         }
 
+        score += Math.max(0, feedbackProgressScore(previous) - 200) / 8;
+
         continue;
       }
 
@@ -340,8 +381,27 @@ export function selectCatAndDogAttemptStrategy(input: {
         if (candidate.strategy.angleDirection === "right") {
           score += 10;
         }
-      } else if (distance <= 2) {
-        score += 24 - distance * 8;
+      } else {
+        const progress = feedbackProgressScore(previous);
+        if (distance <= 2) {
+          score += 24 - distance * 8;
+        }
+
+        if (progress > 120 && distance <= 4) {
+          score += 48 - distance * 10;
+        }
+
+        if ((previous.diagnostics.damageDealt ?? 0) > (previous.diagnostics.damageTaken ?? 0) && distance <= 4) {
+          score += 32 - distance * 6;
+        }
+
+        if (previous.diagnostics.directHits > 0 && candidate.strategy.angleDirection === previous.strategy.angleDirection) {
+          score += 20;
+        }
+
+        if (previous.diagnostics.splashHits > 0 && candidate.strategy.powerDirection === previous.strategy.powerDirection) {
+          score += 14;
+        }
       }
     }
 
