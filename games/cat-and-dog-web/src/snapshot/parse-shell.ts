@@ -532,21 +532,26 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
 
   const hasAppRoot = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.appRootCandidates);
   const hasFallbackMenuText = normalizedText.includes("play vs cpu") && normalizedText.includes("2 player");
-  const menuVisible =
+  const overlayMenuVisible =
     isVisibleElementById(domHtml, "menuOverlay") ||
-    isVisibleElementById(domHtml, "mode-selection") ||
+    isVisibleElementById(domHtml, "mode-selection");
+  const menuVisible =
+    overlayMenuVisible ||
     (hasFallbackMenuText && !hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playableSurfaceCandidates));
-  const cpuSetupVisible = isVisibleElementById(domHtml, "difficultyPanel");
-  const hasModeSelection =
-    menuVisible ||
-    hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.modeSelectionCandidates) ||
-    hasFallbackMenuText;
+  const cpuSetupVisible = menuVisible && isVisibleElementById(domHtml, "difficultyPanel");
+  const hasModeSelection = menuVisible || (hasFallbackMenuText && !hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playableSurfaceCandidates));
   const hasTwoPlayerOption =
-    (menuVisible && hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.twoPlayerButtonCandidates)) ||
-    normalizedText.includes("2 player");
+    menuVisible &&
+    (
+      hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.twoPlayerButtonCandidates) ||
+      normalizedText.includes("2 player")
+    );
   const hasPlayCpuOption =
-    (menuVisible && hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playCpuButtonCandidates)) ||
-    normalizedText.includes("play vs cpu");
+    menuVisible &&
+    (
+      hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playCpuButtonCandidates) ||
+      normalizedText.includes("play vs cpu")
+    );
   const hasPlayableSurface = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playableSurfaceCandidates);
   const hasGameplayHud = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.gameplayHudCandidates);
   const hasGameplayControls =
@@ -556,7 +561,7 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const powerStatusText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.powerStatusCandidates);
   const aimDirection = parseAimDirection(aimStatusText);
   const gameplayInputApplied = aimDirection === "left" || aimDirection === "right";
-  const hasStartControl = hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startControlCandidates);
+  const hasStartControl = menuVisible && hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startControlCandidates);
   const routePath = parseUrlPath(url);
   const weaponBarVisible = isVisibleElementById(domHtml, "weaponBar");
   const selectedWeaponKey = parseSelectedWeaponKey(domHtml);
@@ -568,8 +573,12 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
     : null;
   const canvasHintCategory = parseCanvasHintCategory(canvasHintText);
   const turnBannerVisible = isVisibleElementById(domHtml, "turnBanner");
-  const turnBannerLabelText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerLabelCandidates);
-  const turnBannerTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerTitleCandidates);
+  const turnBannerLabelText = turnBannerVisible
+    ? extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerLabelCandidates)
+    : null;
+  const turnBannerTitleText = turnBannerVisible
+    ? extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnBannerTitleCandidates)
+    : null;
   const playerHpText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.playerHpCandidates);
   const playerHp = parseHpText(playerHpText);
   const cpuHpText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.cpuHpCandidates);
@@ -578,9 +587,13 @@ export function parseCatAndDogShell(frame: ObservationFrame): CatAndDogShellStat
   const turnCounterText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.turnCounterCandidates);
   const turnCounter = parseIntegerFromText(turnCounterText);
   const endVisible = isVisibleElementById(domHtml, "endOverlay");
-  const endTitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endTitleCandidates);
-  const endSubtitleText = extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endSubtitleCandidates);
-  const startCpuAvailable = cpuSetupVisible && hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startCpuButtonCandidates);
+  const endTitleText = endVisible ? extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endTitleCandidates) : null;
+  const endSubtitleText = endVisible
+    ? extractTextFromAnySelector(domHtml, CAT_AND_DOG_SELECTORS.endSubtitleCandidates)
+    : null;
+  const startCpuAvailable =
+    cpuSetupVisible &&
+    hasAnySelector(domHtml, CAT_AND_DOG_SELECTORS.startCpuButtonCandidates);
   const modeLabelNormalized = (modeLabelText ?? "").toLowerCase();
   const hasActiveModeLabel = modeLabelNormalized.includes("1p vs cpu") || modeLabelNormalized.includes("2 players");
   const gameplayEntered =

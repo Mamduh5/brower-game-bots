@@ -272,6 +272,10 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.stepBudgetReached).toBe(false);
         expect(result.attempts[0]?.diagnostics.maxUnchangedObservationCycles).toBeGreaterThanOrEqual(2);
         expect(result.attempts[0]?.diagnostics.observationCount).toBeGreaterThan(0);
+        expect(result.attempts[0]?.finalState.endVisible).toBe(false);
+        expect(result.attempts[0]?.finalState.endTitleText).toBeNull();
+        expect(result.attempts[0]?.finalState.endSubtitleText).toBeNull();
+        expect(result.attempts[0]?.finalState.cpuSetupVisible).toBe(false);
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {

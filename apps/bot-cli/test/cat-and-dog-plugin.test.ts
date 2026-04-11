@@ -288,8 +288,15 @@ const LIVE_HINT_ONLY_BATTLE_DOM = `
         <strong class="turn-banner-title" id="turnBannerTitle">P1 Cat</strong>
       </div>
       <div class="canvas-hint" id="canvasHint">Clean direct hit.</div>
-      <div class="overlay menu-overlay hidden" id="menuOverlay"></div>
-      <div class="overlay end-overlay hidden" id="endOverlay"></div>
+      <div class="overlay menu-overlay hidden" id="menuOverlay">
+        <div class="difficulty-panel" id="difficultyPanel">
+          <button id="startCpuButton" data-testid="start-cpu-match">Start CPU Match</button>
+        </div>
+      </div>
+      <div class="overlay end-overlay hidden" id="endOverlay">
+        <h2 id="endTitle">Winner</h2>
+        <p id="endSubtitle">Press restart to play again.</p>
+      </div>
     </div>
     <aside class="side-panel">
       <div class="panel notes-panel compact-panel">
@@ -556,7 +563,7 @@ describe("cat-and-dog plugin", () => {
       playerTurnReady: true,
       selectedWeaponKey: "normal",
       turnBannerVisible: false,
-      turnBannerLabelText: "Get Ready",
+      turnBannerLabelText: null,
       outcome: "in-progress",
       modeLabelText: "Mode: 1P vs CPU / Easy",
       playerHpValue: 100,
@@ -698,6 +705,8 @@ describe("cat-and-dog plugin", () => {
     expect(snapshot.semanticState).toMatchObject({
       gameplayEntered: true,
       playerTurnReady: false,
+      cpuSetupVisible: false,
+      startCpuAvailable: false,
       canvasHintVisible: true,
       canvasHintText: "Clean direct hit.",
       canvasHintCategory: "combat-result",
@@ -706,7 +715,10 @@ describe("cat-and-dog plugin", () => {
       cpuHpValue: null,
       progressSignalSource: "combat-hint",
       shotResolutionCategory: "direct-hit",
-      shotResolved: true
+      shotResolved: true,
+      endVisible: false,
+      endTitleText: null,
+      endSubtitleText: null
     });
   });
 
