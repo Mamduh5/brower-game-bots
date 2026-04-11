@@ -34,6 +34,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionTargetSideSignals: 0,
         visionTerrainSideSignals: 0,
         visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
         damageDealt: null,
         damageTaken: null
       }
@@ -80,6 +85,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionTargetSideSignals: 1,
         visionTerrainSideSignals: 0,
         visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
         damageDealt: 28,
         damageTaken: 100
       }
@@ -131,6 +141,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionTargetSideSignals: 1,
         visionTerrainSideSignals: 0,
         visionNoChangeShots: 0,
+        visionNearTargetShots: 1,
+        visionBlockedShots: 0,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
         damageDealt: 44,
         damageTaken: 12
       }
@@ -178,6 +193,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionTargetSideSignals: 0,
         visionTerrainSideSignals: 1,
         visionNoChangeShots: 1,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 1,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
         damageDealt: 0,
         damageTaken: 18
       }
@@ -223,6 +243,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionTargetSideSignals: 1,
         visionTerrainSideSignals: 0,
         visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
         damageDealt: 28,
         damageTaken: 100
       }
@@ -255,6 +280,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionTargetSideSignals: 0,
         visionTerrainSideSignals: 1,
         visionNoChangeShots: 1,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 1,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
         damageDealt: 0,
         damageTaken: 18
       }

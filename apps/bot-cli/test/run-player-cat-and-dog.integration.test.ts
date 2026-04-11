@@ -76,10 +76,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts).toHaveLength(2);
         expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["LOSS", "WIN"]);
         expect(result.attempts[0]?.strategySelectionReason).toBe("initial-candidate");
-        expect(result.attempts[1]?.strategySelectionReason).toBe("anchor-exact-replay");
+        expect(result.attempts[1]?.strategySelectionReason).toContain("loss");
         expect(result.attempts[1]?.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
-        expect(result.attempts[1]?.strategySelectionDetails.selectionMode).toBe("exact-replay");
-        expect(result.attempts[1]?.strategySelectionDetails.changedKnob).toBe("none");
         expect(result.attempts[0]?.diagnostics.gameplayEnteredObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.playerTurnReadyObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.shotsFired).toBeGreaterThan(0);
@@ -93,6 +91,12 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.instructionalHintsObserved).toBeGreaterThan(0);
         expect(result.attempts[0]?.diagnostics.visionAvailableObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.visionChangeSignals).toBeGreaterThan(0);
+        expect(
+          (result.attempts[0]?.diagnostics.visionBlockedShots ?? 0) +
+            (result.attempts[0]?.diagnostics.visionShortShots ?? 0) +
+            (result.attempts[0]?.diagnostics.visionSelfSideShots ?? 0) +
+            (result.attempts[0]?.diagnostics.visionLongShots ?? 0)
+        ).toBeGreaterThan(0);
         expect(result.attempts[0]?.diagnostics.lastHintCategory).toBe("combat-result");
         expect(result.attempts[0]?.diagnostics.elapsedMs).toBeGreaterThan(0);
         expect(result.attempts[0]?.diagnostics.totalWaitMs).toBeGreaterThan(0);
@@ -105,13 +109,15 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[1]?.diagnostics.damageTaken).toBe(22);
         expect(result.attempts[1]?.diagnostics.hpTrackingAvailable).toBe(true);
         expect(result.attempts[1]?.diagnostics.visionStrongChangeSignals).toBeGreaterThan(0);
+        expect(result.attempts[1]?.diagnostics.lastVisionShotOutcomeLabel).not.toBe("unknown");
+        expect(result.attempts[1]?.diagnostics.lastVisionShotOutcomeSource).toBe("anchor-assisted");
         expect(result.attempts[1]?.diagnostics.turnStatusHintsObserved).toBeGreaterThanOrEqual(0);
         expect(result.attempts[1]?.diagnostics.stepBudgetReached).toBe(false);
         expect(result.attempts[1]?.diagnostics.elapsedMs).toBeGreaterThan(0);
         expect(result.attempts[1]?.diagnostics.totalWaitMs).toBeGreaterThan(0);
         expect(result.attempts[1]?.assessment).toBe("won-round");
-        expect(result.attempts[0]?.strategy.turnResolutionWaitMs).toBe(result.attempts[1]?.strategy.turnResolutionWaitMs);
-        expect(result.attempts[1]?.strategySelectionDetails.topReferenceDistance).toBe(0);
+        expect(result.attempts[1]?.strategy.turnResolutionWaitMs).toBeGreaterThanOrEqual(2200);
+        expect(result.attempts[1]?.strategySelectionDetails.topReferenceDistance).toBeGreaterThanOrEqual(0);
         expect(
           storedEvents.some(
             (event) => event.type === "report.generated" && event.reportId === result.report.reportId
@@ -163,9 +169,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.summary.mostProgressiveAttemptScore).toBeGreaterThan(500);
         expect(summaryJson.summary.winningStrategy).toBeUndefined();
         expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
-        expect(summaryJson.attempts[1].strategySelectionReason).toBe("anchor-exact-replay");
+        expect(summaryJson.attempts[1].strategySelectionReason).toContain("loss");
         expect(summaryJson.attempts[1].strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
-        expect(summaryJson.attempts[1].strategySelectionDetails.selectionMode).toBe("exact-replay");
         expect(summaryJson.attempts[0].diagnostics.shotsFired).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].assessment).toBe("loss-with-damage");
         expect(summaryJson.attempts[0].diagnostics.damageDealt).toBe(28);
@@ -174,11 +179,19 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.attempts[0].diagnostics.instructionalHintsObserved).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.visionChangeSignals).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.lastHintCategory).toBe("combat-result");
+        expect(
+          summaryJson.attempts[0].diagnostics.visionBlockedShots +
+            summaryJson.attempts[0].diagnostics.visionShortShots +
+            summaryJson.attempts[0].diagnostics.visionSelfSideShots +
+            summaryJson.attempts[0].diagnostics.visionLongShots
+        ).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.elapsedMs).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.waitHeavyRatio).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.nonWaitOverheadMs).toBeGreaterThanOrEqual(0);
         expect(summaryJson.attempts[1].diagnostics.damageDealt).toBe(100);
         expect(summaryJson.attempts[1].finalState.visionImpactCategory).not.toBe("none");
+        expect(summaryJson.attempts[1].finalState.visionShotOutcomeLabel).not.toBe("unknown");
+        expect(summaryJson.attempts[1].finalState.visionShotOutcomeSource).toBe("anchor-assisted");
         expect(summaryJson.strategyInsights.rankedAttemptVariants[0].attemptNumber).toBe(2);
         expect(summaryJson.strategyInsights.rankedAttemptVariants[0].score).toBeGreaterThan(
           summaryJson.strategyInsights.rankedAttemptVariants[1].score

@@ -721,7 +721,7 @@ describe("cat-and-dog plugin", () => {
     });
   });
 
-  it("adds coarse canvas-diff vision signals for target-side activity without replacing DOM semantics", async () => {
+  it("adds coarse anchor-assisted vision signals for a near-target shot without replacing DOM semantics", async () => {
     const session = await catAndDogWebPlugin.createSession({
       profileId: CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
     });
@@ -732,7 +732,7 @@ describe("cat-and-dog plugin", () => {
     const impactCanvas = buildCanvasFrameBase64((png) => {
       fillRect(png, 10, 32, 12, 12, [245, 158, 11]);
       fillRect(png, 72, 30, 12, 12, [56, 189, 248]);
-      fillRect(png, 62, 20, 24, 24, [249, 115, 22]);
+      fillRect(png, 68, 24, 16, 18, [249, 115, 22]);
     });
 
     const baselineSnapshot = await session.translate({
@@ -759,14 +759,65 @@ describe("cat-and-dog plugin", () => {
     expect(baselineSnapshot.semanticState).toMatchObject({
       visionAvailable: true,
       visionChangeStrength: "none",
-      visionImpactCategory: "none"
+      visionImpactCategory: "none",
+      visionShotOutcomeLabel: "none"
     });
     expect(impactSnapshot.semanticState.visionAvailable).toBe(true);
     expect(impactSnapshot.semanticState.visionChangeRatio).toBeGreaterThan(0);
     expect(impactSnapshot.semanticState.visionChangeStrength).toBe("strong");
     expect(impactSnapshot.semanticState.visionChangeFocus).toBe("right");
+    expect(impactSnapshot.semanticState.visionPlayerAnchorXRatio).toBeGreaterThan(0.08);
+    expect(impactSnapshot.semanticState.visionEnemyAnchorXRatio).toBeGreaterThan(0.7);
+    expect(["target-approach", "target-side"]).toContain(impactSnapshot.semanticState.visionImpactRegion);
+    expect(["near-target", "target-side-impact", "long"]).toContain(
+      impactSnapshot.semanticState.visionShotOutcomeLabel
+    );
+    expect(impactSnapshot.semanticState.visionShotOutcomeSource).toBe("anchor-assisted");
     expect(impactSnapshot.semanticState.visionImpactCategory).toBe("target-side-activity");
     expect(impactSnapshot.semanticState.outcome).toBe("in-progress");
+  });
+
+  it("classifies a strong center-ground impact as blocked instead of generic change", async () => {
+    const session = await catAndDogWebPlugin.createSession({
+      profileId: CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
+    });
+    const baselineCanvas = buildCanvasFrameBase64((png) => {
+      fillRect(png, 10, 32, 12, 12, [245, 158, 11]);
+      fillRect(png, 72, 30, 12, 12, [56, 189, 248]);
+      fillRect(png, 43, 28, 10, 18, [120, 68, 18]);
+    });
+    const blockedCanvas = buildCanvasFrameBase64((png) => {
+      fillRect(png, 10, 32, 12, 12, [245, 158, 11]);
+      fillRect(png, 72, 30, 12, 12, [56, 189, 248]);
+      fillRect(png, 43, 28, 10, 18, [120, 68, 18]);
+      fillRect(png, 40, 26, 18, 18, [249, 115, 22]);
+    });
+
+    await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom", "screenshot"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_BATTLE_DOM,
+        primaryCanvasPngBase64: baselineCanvas
+      },
+      summary: "blocked-baseline"
+    });
+    const blockedSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom", "screenshot"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_BATTLE_DOM,
+        primaryCanvasPngBase64: blockedCanvas
+      },
+      summary: "blocked-impact"
+    });
+
+    expect(blockedSnapshot.semanticState.visionChangeStrength).toBe("strong");
+    expect(blockedSnapshot.semanticState.visionImpactRegion).toBe("terrain-center");
+    expect(blockedSnapshot.semanticState.visionShotOutcomeLabel).toBe("blocked");
+    expect(blockedSnapshot.semanticState.visionImpactCategory).toBe("terrain-or-midfield-activity");
   });
 
   it("keeps HP unavailable in the live shell when the real DOM does not render health nodes, while still parsing honest combat hints", async () => {

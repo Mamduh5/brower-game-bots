@@ -40,6 +40,11 @@ export const CatAndDogAttemptDiagnosticsSchema = z.object({
   visionTargetSideSignals: z.number().int().nonnegative(),
   visionTerrainSideSignals: z.number().int().nonnegative(),
   visionNoChangeShots: z.number().int().nonnegative(),
+  visionNearTargetShots: z.number().int().nonnegative(),
+  visionBlockedShots: z.number().int().nonnegative(),
+  visionShortShots: z.number().int().nonnegative(),
+  visionLongShots: z.number().int().nonnegative(),
+  visionSelfSideShots: z.number().int().nonnegative(),
   damageDealt: z.number().int().nonnegative().nullable(),
   damageTaken: z.number().int().nonnegative().nullable()
 });
@@ -341,9 +346,14 @@ export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
   const unresolvedShots = Math.max(0, feedback.diagnostics.shotsFired - feedback.diagnostics.shotResolutionsObserved);
   const visualProgressScore =
+    feedback.diagnostics.visionNearTargetShots * 145 +
     feedback.diagnostics.visionTargetSideSignals * 90 +
     feedback.diagnostics.visionStrongChangeSignals * 35 +
     feedback.diagnostics.visionChangeSignals * 20 -
+    feedback.diagnostics.visionBlockedShots * 55 -
+    feedback.diagnostics.visionShortShots * 45 -
+    feedback.diagnostics.visionLongShots * 35 -
+    feedback.diagnostics.visionSelfSideShots * 95 -
     feedback.diagnostics.visionTerrainSideSignals * 30 -
     feedback.diagnostics.visionNoChangeShots * 55;
   const lowResolutionPenalty =

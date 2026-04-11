@@ -35,6 +35,16 @@ type ShotResolutionCategory =
   | "heal"
   | "cpu-planning"
   | "unknown";
+type VisionShotOutcomeLabel =
+  | "none"
+  | "no-meaningful-visual-change"
+  | "self-side-impact"
+  | "short"
+  | "blocked"
+  | "near-target"
+  | "target-side-impact"
+  | "long"
+  | "unknown";
 
 export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnostics {
   maxStepsBudget: number;
@@ -60,6 +70,11 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   visionTargetSideSignals: number;
   visionTerrainSideSignals: number;
   visionNoChangeShots: number;
+  visionNearTargetShots: number;
+  visionBlockedShots: number;
+  visionShortShots: number;
+  visionLongShots: number;
+  visionSelfSideShots: number;
   lastVisionChangeStrength: "none" | "subtle" | "strong" | "unknown";
   lastVisionImpactCategory:
     | "none"
@@ -67,6 +82,9 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
     | "terrain-or-midfield-activity"
     | "self-side-activity"
     | "unknown";
+  lastVisionShotOutcomeLabel: VisionShotOutcomeLabel;
+  lastVisionShotOutcomeConfidence: "low" | "medium" | "unknown";
+  lastVisionShotOutcomeSource: "diff-only" | "anchor-assisted" | "unavailable";
   damageDealt: number | null;
   damageTaken: number | null;
   hpTrackingAvailable: boolean;
@@ -189,6 +207,11 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       visionTargetSideSignals: attempt.diagnostics.visionTargetSideSignals,
       visionTerrainSideSignals: attempt.diagnostics.visionTerrainSideSignals,
       visionNoChangeShots: attempt.diagnostics.visionNoChangeShots,
+      visionNearTargetShots: attempt.diagnostics.visionNearTargetShots,
+      visionBlockedShots: attempt.diagnostics.visionBlockedShots,
+      visionShortShots: attempt.diagnostics.visionShortShots,
+      visionLongShots: attempt.diagnostics.visionLongShots,
+      visionSelfSideShots: attempt.diagnostics.visionSelfSideShots,
       damageDealt: attempt.diagnostics.damageDealt,
       damageTaken: attempt.diagnostics.damageTaken
     }
@@ -294,7 +317,19 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     visionChangeRatio: toJsonValue(snapshot.semanticState.visionChangeRatio),
     visionChangeStrength: toJsonValue(snapshot.semanticState.visionChangeStrength),
     visionChangeFocus: toJsonValue(snapshot.semanticState.visionChangeFocus),
+    visionPlayerAnchorXRatio: toJsonValue(snapshot.semanticState.visionPlayerAnchorXRatio),
+    visionPlayerAnchorYRatio: toJsonValue(snapshot.semanticState.visionPlayerAnchorYRatio),
+    visionPlayerAnchorSource: toJsonValue(snapshot.semanticState.visionPlayerAnchorSource),
+    visionEnemyAnchorXRatio: toJsonValue(snapshot.semanticState.visionEnemyAnchorXRatio),
+    visionEnemyAnchorYRatio: toJsonValue(snapshot.semanticState.visionEnemyAnchorYRatio),
+    visionEnemyAnchorSource: toJsonValue(snapshot.semanticState.visionEnemyAnchorSource),
+    visionImpactXRatio: toJsonValue(snapshot.semanticState.visionImpactXRatio),
+    visionImpactYRatio: toJsonValue(snapshot.semanticState.visionImpactYRatio),
+    visionImpactRegion: toJsonValue(snapshot.semanticState.visionImpactRegion),
     visionImpactCategory: toJsonValue(snapshot.semanticState.visionImpactCategory),
+    visionShotOutcomeLabel: toJsonValue(snapshot.semanticState.visionShotOutcomeLabel),
+    visionShotOutcomeConfidence: toJsonValue(snapshot.semanticState.visionShotOutcomeConfidence),
+    visionShotOutcomeSource: toJsonValue(snapshot.semanticState.visionShotOutcomeSource),
     endVisible: toJsonValue(snapshot.semanticState.endVisible),
     endTitleText: toJsonValue(snapshot.semanticState.endTitleText),
     endSubtitleText: toJsonValue(snapshot.semanticState.endSubtitleText),
@@ -360,6 +395,7 @@ function buildObservationFingerprint(snapshot: GameSnapshot): string {
     snapshot.semanticState.canvasHintText ?? "",
     snapshot.semanticState.visionChangeStrength ?? "",
     snapshot.semanticState.visionImpactCategory ?? "",
+    snapshot.semanticState.visionShotOutcomeLabel ?? "",
     snapshot.semanticState.matchNoteText ?? "",
     snapshot.semanticState.outcome ?? "",
     snapshot.semanticState.endVisible === true ? "end" : "live"
@@ -450,8 +486,16 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     visionTargetSideSignals: 0,
     visionTerrainSideSignals: 0,
     visionNoChangeShots: 0,
+    visionNearTargetShots: 0,
+    visionBlockedShots: 0,
+    visionShortShots: 0,
+    visionLongShots: 0,
+    visionSelfSideShots: 0,
     lastVisionChangeStrength: "unknown",
     lastVisionImpactCategory: "unknown",
+    lastVisionShotOutcomeLabel: "unknown",
+    lastVisionShotOutcomeConfidence: "unknown",
+    lastVisionShotOutcomeSource: "unavailable",
     damageDealt: null,
     damageTaken: null,
     hpTrackingAvailable: false,
@@ -517,6 +561,27 @@ function updateAttemptProgressFromSnapshot(
     snapshot.semanticState.visionImpactCategory === "self-side-activity"
       ? snapshot.semanticState.visionImpactCategory
       : "unknown";
+  const visionShotOutcomeLabel =
+    snapshot.semanticState.visionShotOutcomeLabel === "none" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "no-meaningful-visual-change" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "self-side-impact" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "short" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "blocked" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "near-target" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "target-side-impact" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "long"
+      ? snapshot.semanticState.visionShotOutcomeLabel
+      : "unknown";
+  const visionShotOutcomeConfidence =
+    snapshot.semanticState.visionShotOutcomeConfidence === "low" ||
+    snapshot.semanticState.visionShotOutcomeConfidence === "medium"
+      ? snapshot.semanticState.visionShotOutcomeConfidence
+      : "unknown";
+  const visionShotOutcomeSource =
+    snapshot.semanticState.visionShotOutcomeSource === "diff-only" ||
+    snapshot.semanticState.visionShotOutcomeSource === "anchor-assisted"
+      ? snapshot.semanticState.visionShotOutcomeSource
+      : "unavailable";
 
   if (nextDiagnostics.playerHpStart === null && playerHpValue !== null) {
     nextDiagnostics = {
@@ -645,6 +710,9 @@ function updateAttemptProgressFromSnapshot(
       ...nextDiagnostics,
       lastVisionChangeStrength: visionChangeStrength,
       lastVisionImpactCategory: visionImpactCategory,
+      lastVisionShotOutcomeLabel: visionShotOutcomeLabel,
+      lastVisionShotOutcomeConfidence: visionShotOutcomeConfidence,
+      lastVisionShotOutcomeSource: visionShotOutcomeSource,
       ...(visionChangeStrength === "subtle" || visionChangeStrength === "strong"
         ? {
             visionChangeSignals: nextDiagnostics.visionChangeSignals + 1
@@ -663,6 +731,37 @@ function updateAttemptProgressFromSnapshot(
       ...(visionImpactCategory === "terrain-or-midfield-activity" || visionImpactCategory === "self-side-activity"
         ? {
             visionTerrainSideSignals: nextDiagnostics.visionTerrainSideSignals + 1
+          }
+        : {})
+    };
+  }
+
+  if (snapshot.semanticState.visionAvailable === true) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      ...(visionShotOutcomeLabel === "near-target"
+        ? {
+            visionNearTargetShots: nextDiagnostics.visionNearTargetShots + 1
+          }
+        : {}),
+      ...(visionShotOutcomeLabel === "blocked"
+        ? {
+            visionBlockedShots: nextDiagnostics.visionBlockedShots + 1
+          }
+        : {}),
+      ...(visionShotOutcomeLabel === "short"
+        ? {
+            visionShortShots: nextDiagnostics.visionShortShots + 1
+          }
+        : {}),
+      ...(visionShotOutcomeLabel === "long"
+        ? {
+            visionLongShots: nextDiagnostics.visionLongShots + 1
+          }
+        : {}),
+      ...(visionShotOutcomeLabel === "self-side-impact"
+        ? {
+            visionSelfSideShots: nextDiagnostics.visionSelfSideShots + 1
           }
         : {})
     };

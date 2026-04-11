@@ -213,6 +213,18 @@ export class CatAndDogGameSession implements GameSession {
         visionChangeRatio: visionSummary.visionChangeRatio,
         visionChangeStrength: visionSummary.visionChangeStrength,
         visionChangeFocus: visionSummary.visionChangeFocus,
+        visionPlayerAnchorXRatio: visionSummary.visionPlayerAnchorXRatio,
+        visionPlayerAnchorYRatio: visionSummary.visionPlayerAnchorYRatio,
+        visionPlayerAnchorSource: visionSummary.visionPlayerAnchorSource,
+        visionEnemyAnchorXRatio: visionSummary.visionEnemyAnchorXRatio,
+        visionEnemyAnchorYRatio: visionSummary.visionEnemyAnchorYRatio,
+        visionEnemyAnchorSource: visionSummary.visionEnemyAnchorSource,
+        visionImpactXRatio: visionSummary.visionImpactXRatio,
+        visionImpactYRatio: visionSummary.visionImpactYRatio,
+        visionImpactRegion: visionSummary.visionImpactRegion,
+        visionShotOutcomeLabel: visionSummary.visionShotOutcomeLabel,
+        visionShotOutcomeConfidence: visionSummary.visionShotOutcomeConfidence,
+        visionShotOutcomeSource: visionSummary.visionShotOutcomeSource,
         visionImpactCategory: visionSummary.visionImpactCategory,
         visionFrameWidth: visionSummary.visionFrameWidth,
         visionFrameHeight: visionSummary.visionFrameHeight,
@@ -246,6 +258,14 @@ export class CatAndDogGameSession implements GameSession {
         visionChangeRatio: visionSummary.visionChangeRatio ?? 0,
         visionStrongChange: visionSummary.visionChangeStrength === "strong" ? 1 : 0,
         visionTargetSideActivity: visionSummary.visionImpactCategory === "target-side-activity" ? 1 : 0,
+        visionNearTarget:
+          visionSummary.visionShotOutcomeLabel === "near-target" ? 1 : 0,
+        visionBlocked:
+          visionSummary.visionShotOutcomeLabel === "blocked" ? 1 : 0,
+        visionShort:
+          visionSummary.visionShotOutcomeLabel === "short" ? 1 : 0,
+        visionLong:
+          visionSummary.visionShotOutcomeLabel === "long" ? 1 : 0,
         playerHpValue: shell.playerHpValue ?? -1,
         cpuHpValue: shell.cpuHpValue ?? -1,
         turnCounter: shell.turnCounter ?? 0,
