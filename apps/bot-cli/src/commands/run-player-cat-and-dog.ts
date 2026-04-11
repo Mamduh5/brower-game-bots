@@ -212,6 +212,7 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       visionShortShots: attempt.diagnostics.visionShortShots,
       visionLongShots: attempt.diagnostics.visionLongShots,
       visionSelfSideShots: attempt.diagnostics.visionSelfSideShots,
+      lastVisionShotOutcomeLabel: attempt.diagnostics.lastVisionShotOutcomeLabel,
       damageDealt: attempt.diagnostics.damageDealt,
       damageTaken: attempt.diagnostics.damageTaken
     }

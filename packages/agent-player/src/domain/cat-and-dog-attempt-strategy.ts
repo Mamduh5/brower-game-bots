@@ -20,6 +20,19 @@ export type CatAndDogAttemptStrategy = z.infer<typeof CatAndDogAttemptStrategySc
 export const CatAndDogAttemptOutcomeSchema = z.enum(["WIN", "LOSS", "UNKNOWN"]);
 export type CatAndDogAttemptOutcome = z.infer<typeof CatAndDogAttemptOutcomeSchema>;
 
+export const CatAndDogVisionShotOutcomeLabelSchema = z.enum([
+  "none",
+  "no-meaningful-visual-change",
+  "self-side-impact",
+  "short",
+  "blocked",
+  "near-target",
+  "target-side-impact",
+  "long",
+  "unknown"
+]);
+export type CatAndDogVisionShotOutcomeLabel = z.infer<typeof CatAndDogVisionShotOutcomeLabelSchema>;
+
 export const CatAndDogAttemptDiagnosticsSchema = z.object({
   semanticActionCount: z.number().int().nonnegative(),
   shotsFired: z.number().int().nonnegative(),
@@ -45,6 +58,7 @@ export const CatAndDogAttemptDiagnosticsSchema = z.object({
   visionShortShots: z.number().int().nonnegative(),
   visionLongShots: z.number().int().nonnegative(),
   visionSelfSideShots: z.number().int().nonnegative(),
+  lastVisionShotOutcomeLabel: CatAndDogVisionShotOutcomeLabelSchema,
   damageDealt: z.number().int().nonnegative().nullable(),
   damageTaken: z.number().int().nonnegative().nullable()
 });
@@ -73,6 +87,7 @@ export interface CatAndDogStrategySelectionDetails {
   topReferenceDistance: number | null;
   selectionMode: "initial" | "catalog" | "exact-replay" | "one-knob-mutation" | "wider-fallback";
   changedKnob: "none" | "angleTapCount" | "powerTapCount" | "settleMs" | "turnResolutionWaitMs" | "weaponKey";
+  triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
   expectedMutationReason: string | null;
   rankedRecentAttempts: readonly CatAndDogRankedAttemptMemoryEntry[];
 }
@@ -240,6 +255,7 @@ interface CatAndDogCandidateMeta {
   origin: "catalog" | "anchor-exact" | "anchor-mutation";
   selectionMode: Exclude<CatAndDogStrategySelectionDetails["selectionMode"], "initial">;
   changedKnob: RefinementKnob;
+  triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
   expectedMutationReason: string | null;
   anchorAttemptNumber: number | null;
 }
@@ -341,6 +357,72 @@ function hasStalled(feedback: CatAndDogAttemptFeedback): boolean {
   );
 }
 
+function resolveVisualCorrectionSignal(
+  feedback: CatAndDogAttemptFeedback | null | undefined
+): CatAndDogVisionShotOutcomeLabel {
+  if (!feedback) {
+    return "none";
+  }
+
+  const explicit = feedback.diagnostics.lastVisionShotOutcomeLabel;
+  if (
+    explicit !== "none" &&
+    explicit !== "unknown" &&
+    explicit !== "no-meaningful-visual-change"
+  ) {
+    return explicit;
+  }
+
+  if (feedback.diagnostics.visionNearTargetShots > 0) {
+    return "near-target";
+  }
+
+  if (feedback.diagnostics.visionBlockedShots > 0) {
+    return "blocked";
+  }
+
+  if (feedback.diagnostics.visionShortShots > 0) {
+    return "short";
+  }
+
+  if (feedback.diagnostics.visionLongShots > 0) {
+    return "long";
+  }
+
+  if (feedback.diagnostics.visionSelfSideShots > 0) {
+    return "self-side-impact";
+  }
+
+  if (feedback.diagnostics.visionTargetSideSignals > 0) {
+    return "target-side-impact";
+  }
+
+  if (feedback.diagnostics.visionNoChangeShots > 0) {
+    return "no-meaningful-visual-change";
+  }
+
+  return "none";
+}
+
+function buildVisualCorrectionReason(label: CatAndDogVisionShotOutcomeLabel): string | null {
+  switch (label) {
+    case "short":
+      return "Visual correction: previous shot looked short, so add one power tap.";
+    case "long":
+      return "Visual correction: previous shot looked long, so reduce power by one tap.";
+    case "blocked":
+      return "Visual correction: previous shot looked blocked, so raise angle more aggressively.";
+    case "near-target":
+      return "Visual correction: previous shot landed near target, so refine with a tiny local nudge.";
+    case "target-side-impact":
+      return "Visual correction: previous shot reached target side, so exploit the same local region.";
+    case "self-side-impact":
+      return "Visual correction: previous shot hit too close to self side, so recover with a larger rightward angle change.";
+    default:
+      return null;
+  }
+}
+
 export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback): number {
   const damageDealt = feedback.diagnostics.damageDealt ?? 0;
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
@@ -418,8 +500,9 @@ function buildAnchorCandidates(input: {
   anchor: CatAndDogAttemptFeedback;
   attemptNumber: number;
   strategyMode: CatAndDogStrategyMode;
+  visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel;
 }): Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> {
-  const { anchor, attemptNumber, strategyMode } = input;
+  const { anchor, attemptNumber, strategyMode, visualCorrectionSignal } = input;
   const base = cloneStrategyWithAttemptNumber(anchor.strategy, attemptNumber);
   const candidates: Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> = [
     {
@@ -428,7 +511,14 @@ function buildAnchorCandidates(input: {
         origin: "anchor-exact",
         selectionMode: "exact-replay",
         changedKnob: "none",
-        expectedMutationReason: "Replay the strongest recent live shot exactly before widening.",
+        triggeredByVisualOutcomeLabel:
+          visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact"
+            ? visualCorrectionSignal
+            : "none",
+        expectedMutationReason:
+          visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact"
+            ? buildVisualCorrectionReason(visualCorrectionSignal)
+            : "Replay the strongest recent live shot exactly before widening.",
         anchorAttemptNumber: anchor.attemptNumber
       }
     }
@@ -437,7 +527,8 @@ function buildAnchorCandidates(input: {
   const pushMutation = (
     strategy: CatAndDogAttemptStrategy,
     changedKnob: RefinementKnob,
-    expectedMutationReason: string
+    expectedMutationReason: string,
+    triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel = "none"
   ) => {
     candidates.push({
       strategy,
@@ -445,11 +536,110 @@ function buildAnchorCandidates(input: {
         origin: "anchor-mutation",
         selectionMode: "one-knob-mutation",
         changedKnob,
+        triggeredByVisualOutcomeLabel,
         expectedMutationReason,
         anchorAttemptNumber: anchor.attemptNumber
       }
     });
   };
+
+  const pushVisualCorrectionMutation = (
+    strategy: CatAndDogAttemptStrategy,
+    changedKnob: RefinementKnob,
+    label: CatAndDogVisionShotOutcomeLabel
+  ) => {
+    const reason = buildVisualCorrectionReason(label);
+    if (!reason) {
+      return;
+    }
+
+    pushMutation(strategy, changedKnob, reason, label);
+  };
+
+  if (visualCorrectionSignal === "short") {
+    pushVisualCorrectionMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          powerTapCount: clampTapCount(base.powerTapCount + 1)
+        },
+        attemptNumber
+      ),
+      "powerTapCount",
+      "short"
+    );
+  }
+
+  if (visualCorrectionSignal === "long") {
+    pushVisualCorrectionMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          powerTapCount: clampTapCount(base.powerTapCount - 1)
+        },
+        attemptNumber
+      ),
+      "powerTapCount",
+      "long"
+    );
+  }
+
+  if (visualCorrectionSignal === "blocked") {
+    pushVisualCorrectionMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          angleTapCount: clampTapCount(base.angleTapCount + 2)
+        },
+        attemptNumber
+      ),
+      "angleTapCount",
+      "blocked"
+    );
+  }
+
+  if (visualCorrectionSignal === "near-target") {
+    pushVisualCorrectionMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          angleTapCount: clampTapCount(base.angleTapCount + 1)
+        },
+        attemptNumber
+      ),
+      "angleTapCount",
+      "near-target"
+    );
+  }
+
+  if (visualCorrectionSignal === "target-side-impact") {
+    pushVisualCorrectionMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          settleMs: clampSettleMs(base.settleMs + 40)
+        },
+        attemptNumber
+      ),
+      "settleMs",
+      "target-side-impact"
+    );
+  }
+
+  if (visualCorrectionSignal === "self-side-impact") {
+    pushVisualCorrectionMutation(
+      cloneStrategyWithAttemptNumber(
+        {
+          ...base,
+          angleDirection: "right",
+          angleTapCount: clampTapCount(base.angleTapCount + 2)
+        },
+        attemptNumber
+      ),
+      "angleTapCount",
+      "self-side-impact"
+    );
+  }
 
   const angleMinus = clampTapCount(base.angleTapCount - 1);
   if (angleMinus !== base.angleTapCount) {
@@ -635,6 +825,10 @@ function buildSelectionReason(input: {
     return "initial-candidate";
   }
 
+  if (selectedMeta.triggeredByVisualOutcomeLabel !== "none") {
+    return `visual-correction-${selectedMeta.triggeredByVisualOutcomeLabel}`;
+  }
+
   if (selectedMeta.selectionMode === "exact-replay") {
     return "anchor-exact-replay";
   }
@@ -695,6 +889,7 @@ export function selectCatAndDogAttemptStrategy(input: {
       origin: "catalog" as const,
       selectionMode: "catalog" as const,
       changedKnob: "none" as const,
+      triggeredByVisualOutcomeLabel: "none" as const,
       expectedMutationReason: null,
       anchorAttemptNumber: null
     }
@@ -717,6 +912,7 @@ export function selectCatAndDogAttemptStrategy(input: {
         topReferenceDistance: null,
         selectionMode: "initial",
         changedKnob: "none",
+        triggeredByVisualOutcomeLabel: "none",
         expectedMutationReason: null,
         rankedRecentAttempts: []
       }
@@ -729,6 +925,8 @@ export function selectCatAndDogAttemptStrategy(input: {
     topReference
       ? history.find((entry) => entry.attemptNumber === topReference.attemptNumber) ?? null
       : null;
+  const latestFeedback = history[history.length - 1] ?? null;
+  const visualCorrectionSignal = resolveVisualCorrectionSignal(latestFeedback);
   const weakFingerprintCounts = new Map<string, number>();
   for (const previous of history) {
     if (!isWeakAttempt(previous)) {
@@ -756,7 +954,8 @@ export function selectCatAndDogAttemptStrategy(input: {
       ? buildAnchorCandidates({
           anchor: anchorFeedback,
           attemptNumber: input.attemptNumber,
-          strategyMode
+          strategyMode,
+          visualCorrectionSignal
         })
       : [];
   const candidates = [
@@ -888,10 +1087,28 @@ export function selectCatAndDogAttemptStrategy(input: {
 
     if (candidate.meta.selectionMode === "exact-replay") {
       score += localFailureCount === 0 ? 360 : localFailureCount >= 2 ? 90 : 150;
+      if (
+        visualCorrectionSignal === "short" ||
+        visualCorrectionSignal === "long" ||
+        visualCorrectionSignal === "blocked" ||
+        visualCorrectionSignal === "self-side-impact"
+      ) {
+        score -= 180;
+      }
+
+      if (
+        visualCorrectionSignal === "near-target" ||
+        visualCorrectionSignal === "target-side-impact"
+      ) {
+        score += 110;
+      }
     }
 
     if (candidate.meta.selectionMode === "one-knob-mutation") {
       score += localFailureCount === 0 ? 100 : localFailureCount >= 2 ? 220 : 280;
+      if (candidate.meta.triggeredByVisualOutcomeLabel !== "none") {
+        score += 220;
+      }
     }
 
     if (
@@ -1009,6 +1226,7 @@ export function selectCatAndDogAttemptStrategy(input: {
           ? "wider-fallback"
           : best.meta.selectionMode,
       changedKnob: best.meta.changedKnob,
+      triggeredByVisualOutcomeLabel: best.meta.triggeredByVisualOutcomeLabel,
       expectedMutationReason: best.meta.expectedMutationReason,
       rankedRecentAttempts: rankedRecentMemory.map((entry) => ({
         attemptNumber: entry.attemptNumber,

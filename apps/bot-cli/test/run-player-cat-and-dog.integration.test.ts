@@ -78,6 +78,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.strategySelectionReason).toBe("initial-candidate");
         expect(result.attempts[1]?.strategySelectionReason).toContain("loss");
         expect(result.attempts[1]?.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
+        expect(result.attempts[1]?.strategySelectionDetails.changedKnob).toBeDefined();
+        expect(result.attempts[1]?.strategySelectionDetails.triggeredByVisualOutcomeLabel).toBeDefined();
         expect(result.attempts[0]?.diagnostics.gameplayEnteredObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.playerTurnReadyObserved).toBe(true);
         expect(result.attempts[0]?.diagnostics.shotsFired).toBeGreaterThan(0);
@@ -146,6 +148,10 @@ describe("runPlayerCatAndDog integration", () => {
         expect(attemptCompletedEvents[1]?.payload.diagnostics.endOverlayObserved).toBe(true);
         expect(attemptCompletedEvents[1]?.payload.assessment).toBe("won-round");
         expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
+        expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.changedKnob).toBeDefined();
+        expect(
+          attemptCompletedEvents[1]?.payload.strategySelectionDetails.triggeredByVisualOutcomeLabel
+        ).toBeDefined();
 
         const screenshotPaths = result.artifacts
           .filter((artifact) => artifact.kind === "screenshot")
@@ -171,6 +177,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
         expect(summaryJson.attempts[1].strategySelectionReason).toContain("loss");
         expect(summaryJson.attempts[1].strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
+        expect(summaryJson.attempts[1].strategySelectionDetails.changedKnob).toBeDefined();
+        expect(summaryJson.attempts[1].strategySelectionDetails.triggeredByVisualOutcomeLabel).toBeDefined();
         expect(summaryJson.attempts[0].diagnostics.shotsFired).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].assessment).toBe("loss-with-damage");
         expect(summaryJson.attempts[0].diagnostics.damageDealt).toBe(28);

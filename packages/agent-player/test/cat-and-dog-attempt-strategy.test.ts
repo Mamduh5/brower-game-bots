@@ -39,6 +39,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionShortShots: 0,
         visionLongShots: 0,
         visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "none",
         damageDealt: null,
         damageTaken: null
       }
@@ -55,7 +56,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
     expect(next.strategy.angleDirection).toBe("right");
   });
 
-  it("searches near a terminal loss instead of replaying the exact same candidate", () => {
+  it("uses target-side visual feedback to replay the strongest local region intentionally", () => {
     const initial = selectCatAndDogAttemptStrategy({
       attemptNumber: 1,
       strategyMode: "baseline"
@@ -90,6 +91,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionShortShots: 0,
         visionLongShots: 0,
         visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "target-side-impact",
         damageDealt: 28,
         damageTaken: 100
       }
@@ -101,17 +103,18 @@ describe("selectCatAndDogAttemptStrategy", () => {
       history: [lossAttempt]
     });
 
-    expect(next.selectionReason).toBe("anchor-exact-replay");
+    expect(next.selectionReason).toBe("visual-correction-target-side-impact");
     expect(next.strategy.turnResolutionWaitMs).toBe(initial.turnResolutionWaitMs);
     expect(next.strategy.powerDirection).toBe(initial.powerDirection);
     expect(next.selectionDetails.topReferenceAttemptNumber).toBe(1);
     expect(next.selectionDetails.topReferenceDistance).toBe(0);
     expect(next.selectionDetails.selectionMode).toBe("exact-replay");
     expect(next.selectionDetails.changedKnob).toBe("none");
+    expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("target-side-impact");
     expect(next.selectionDetails.rankedRecentAttempts[0]?.attemptNumber).toBe(1);
   });
 
-  it("prefers nearby variants after a non-terminal attempt that still showed damage progress", () => {
+  it("uses near-target visual feedback to stay in the same promising local region", () => {
     const initial = selectCatAndDogAttemptStrategy({
       attemptNumber: 1,
       strategyMode: "explore"
@@ -146,6 +149,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionShortShots: 0,
         visionLongShots: 0,
         visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "near-target",
         damageDealt: 44,
         damageTaken: 12
       }
@@ -157,10 +161,65 @@ describe("selectCatAndDogAttemptStrategy", () => {
       history: [progressAttempt]
     });
 
-    expect(next.selectionReason).toBe("anchor-exact-replay");
+    expect(next.selectionReason).toBe("visual-correction-near-target");
     expect(next.strategy.angleDirection).toBe(initial.angleDirection);
-    expect(next.selectionDetails.selectionMode).toBe("exact-replay");
+    expect(["exact-replay", "one-knob-mutation"]).toContain(next.selectionDetails.selectionMode);
+    expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("near-target");
     expect(next.selectionDetails.topReferenceScore).toBeGreaterThan(300);
+  });
+
+  it("nudges power upward after a visually short shot instead of replaying the same shot unchanged", () => {
+    const initial = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "baseline"
+    }).strategy;
+
+    const shortAttempt: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "UNKNOWN",
+      strategy: initial,
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: false,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 1,
+        wallHits: 0,
+        misses: 0,
+        healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 1,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 1,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "short",
+        damageDealt: 18,
+        damageTaken: 10
+      }
+    };
+
+    const next = selectCatAndDogAttemptStrategy({
+      attemptNumber: 2,
+      strategyMode: "baseline",
+      history: [shortAttempt]
+    });
+
+    expect(next.selectionReason).toBe("visual-correction-short");
+    expect(next.selectionDetails.selectionMode).toBe("one-knob-mutation");
+    expect(next.selectionDetails.changedKnob).toBe("powerTapCount");
+    expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("short");
+    expect(next.strategy.powerTapCount).toBeGreaterThan(initial.powerTapCount);
   });
 
   it("avoids returning to a clearly weak repeated variant when history already shows it underperforming", () => {
@@ -198,6 +257,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionShortShots: 0,
         visionLongShots: 0,
         visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "blocked",
         damageDealt: 0,
         damageTaken: 18
       }
@@ -248,6 +308,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionShortShots: 0,
         visionLongShots: 0,
         visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "target-side-impact",
         damageDealt: 28,
         damageTaken: 100
       }
@@ -285,6 +346,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
         visionShortShots: 0,
         visionLongShots: 0,
         visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "blocked",
         damageDealt: 0,
         damageTaken: 18
       }
