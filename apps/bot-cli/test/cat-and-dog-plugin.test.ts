@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PNG } from "pngjs";
 
 import type { ArtifactRef } from "@game-bots/contracts";
 import type {
@@ -142,6 +143,39 @@ function buildSnapshot(overrides: Partial<GameSnapshot> = {}): GameSnapshot {
     },
     ...overrides
   };
+}
+
+function buildCanvasFrameBase64(
+  painter: (png: PNG) => void,
+  width = 96,
+  height = 54
+): string {
+  const png = new PNG({
+    width,
+    height
+  });
+
+  for (let index = 0; index < png.data.length; index += 4) {
+    png.data[index] = 20;
+    png.data[index + 1] = 32;
+    png.data[index + 2] = 51;
+    png.data[index + 3] = 255;
+  }
+
+  painter(png);
+  return PNG.sync.write(png).toString("base64");
+}
+
+function fillRect(png: PNG, x: number, y: number, width: number, height: number, color: [number, number, number]) {
+  for (let row = y; row < y + height; row += 1) {
+    for (let column = x; column < x + width; column += 1) {
+      const index = (row * png.width + column) * 4;
+      png.data[index] = color[0];
+      png.data[index + 1] = color[1];
+      png.data[index + 2] = color[2];
+      png.data[index + 3] = 255;
+    }
+  }
 }
 
 const LANDING_DOM = `
@@ -685,6 +719,54 @@ describe("cat-and-dog plugin", () => {
       outcome: "win",
       shotResolved: true
     });
+  });
+
+  it("adds coarse canvas-diff vision signals for target-side activity without replacing DOM semantics", async () => {
+    const session = await catAndDogWebPlugin.createSession({
+      profileId: CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
+    });
+    const baselineCanvas = buildCanvasFrameBase64((png) => {
+      fillRect(png, 10, 32, 12, 12, [245, 158, 11]);
+      fillRect(png, 72, 30, 12, 12, [56, 189, 248]);
+    });
+    const impactCanvas = buildCanvasFrameBase64((png) => {
+      fillRect(png, 10, 32, 12, 12, [245, 158, 11]);
+      fillRect(png, 72, 30, 12, 12, [56, 189, 248]);
+      fillRect(png, 62, 20, 24, 24, [249, 115, 22]);
+    });
+
+    const baselineSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom", "screenshot"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_BATTLE_DOM,
+        primaryCanvasPngBase64: baselineCanvas
+      },
+      summary: "vision-baseline"
+    });
+    const impactSnapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom", "screenshot"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_BATTLE_DOM,
+        primaryCanvasPngBase64: impactCanvas
+      },
+      summary: "vision-impact"
+    });
+
+    expect(baselineSnapshot.semanticState).toMatchObject({
+      visionAvailable: true,
+      visionChangeStrength: "none",
+      visionImpactCategory: "none"
+    });
+    expect(impactSnapshot.semanticState.visionAvailable).toBe(true);
+    expect(impactSnapshot.semanticState.visionChangeRatio).toBeGreaterThan(0);
+    expect(impactSnapshot.semanticState.visionChangeStrength).toBe("strong");
+    expect(impactSnapshot.semanticState.visionChangeFocus).toBe("right");
+    expect(impactSnapshot.semanticState.visionImpactCategory).toBe("target-side-activity");
+    expect(impactSnapshot.semanticState.outcome).toBe("in-progress");
   });
 
   it("keeps HP unavailable in the live shell when the real DOM does not render health nodes, while still parsing honest combat hints", async () => {

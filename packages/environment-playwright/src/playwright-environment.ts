@@ -98,6 +98,31 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
       payload.domHtml = await page.content();
     }
 
+    if (request.modes.includes("screenshot")) {
+      const canvasLocator = page.locator("canvas").first();
+      const canvasCount = await page.locator("canvas").count();
+      payload.primaryCanvasAvailable = canvasCount > 0;
+
+      if (canvasCount > 0) {
+        try {
+          const canvasBuffer = Buffer.from(await canvasLocator.screenshot());
+          const bounds = await canvasLocator.boundingBox();
+          payload.primaryCanvasPngBase64 = canvasBuffer.toString("base64");
+          if (bounds) {
+            payload.primaryCanvasBounds = {
+              x: bounds.x,
+              y: bounds.y,
+              width: bounds.width,
+              height: bounds.height
+            };
+          }
+        } catch (error) {
+          payload.primaryCanvasCaptureError =
+            error instanceof Error ? error.message : "Primary canvas capture failed.";
+        }
+      }
+    }
+
     return {
       capturedAt: new Date().toISOString(),
       modes: [...request.modes],

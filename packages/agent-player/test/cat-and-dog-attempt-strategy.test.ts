@@ -29,6 +29,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         wallHits: 0,
         misses: 0,
         healsObserved: 0,
+        visionChangeSignals: 0,
+        visionStrongChangeSignals: 0,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
         damageDealt: null,
         damageTaken: null
       }
@@ -70,6 +75,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         wallHits: 0,
         misses: 0,
         healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 1,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
         damageDealt: 28,
         damageTaken: 100
       }
@@ -116,6 +126,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         wallHits: 0,
         misses: 0,
         healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 1,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
         damageDealt: 44,
         damageTaken: 12
       }
@@ -158,6 +173,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         wallHits: 1,
         misses: 0,
         healsObserved: 0,
+        visionChangeSignals: 0,
+        visionStrongChangeSignals: 0,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 1,
+        visionNoChangeShots: 1,
         damageDealt: 0,
         damageTaken: 18
       }
@@ -198,6 +218,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         wallHits: 0,
         misses: 0,
         healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 0,
+        visionTargetSideSignals: 1,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
         damageDealt: 28,
         damageTaken: 100
       }
@@ -225,6 +250,11 @@ describe("selectCatAndDogAttemptStrategy", () => {
         wallHits: 1,
         misses: 0,
         healsObserved: 0,
+        visionChangeSignals: 0,
+        visionStrongChangeSignals: 0,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 1,
+        visionNoChangeShots: 1,
         damageDealt: 0,
         damageTaken: 18
       }

@@ -54,6 +54,19 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   wallHits: number;
   misses: number;
   healsObserved: number;
+  visionAvailableObserved: boolean;
+  visionChangeSignals: number;
+  visionStrongChangeSignals: number;
+  visionTargetSideSignals: number;
+  visionTerrainSideSignals: number;
+  visionNoChangeShots: number;
+  lastVisionChangeStrength: "none" | "subtle" | "strong" | "unknown";
+  lastVisionImpactCategory:
+    | "none"
+    | "target-side-activity"
+    | "terrain-or-midfield-activity"
+    | "self-side-activity"
+    | "unknown";
   damageDealt: number | null;
   damageTaken: number | null;
   hpTrackingAvailable: boolean;
@@ -114,8 +127,11 @@ function buildObservationPayload(
   frame: { payload: JsonObject } & { summary?: string | undefined },
   snapshot: GameSnapshot
 ) {
+  const payload = { ...frame.payload };
+  delete payload.primaryCanvasPngBase64;
+
   return {
-    ...frame.payload,
+    ...payload,
     gameSnapshotTitle: snapshot.title,
     gameSnapshotTerminal: snapshot.isTerminal,
     gameSemanticState: snapshot.semanticState,
@@ -168,6 +184,11 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       wallHits: attempt.diagnostics.wallHits,
       misses: attempt.diagnostics.misses,
       healsObserved: attempt.diagnostics.healsObserved,
+      visionChangeSignals: attempt.diagnostics.visionChangeSignals,
+      visionStrongChangeSignals: attempt.diagnostics.visionStrongChangeSignals,
+      visionTargetSideSignals: attempt.diagnostics.visionTargetSideSignals,
+      visionTerrainSideSignals: attempt.diagnostics.visionTerrainSideSignals,
+      visionNoChangeShots: attempt.diagnostics.visionNoChangeShots,
       damageDealt: attempt.diagnostics.damageDealt,
       damageTaken: attempt.diagnostics.damageTaken
     }
@@ -269,6 +290,11 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     turnCounter: toJsonValue(snapshot.semanticState.turnCounter),
     shotResolutionCategory: toJsonValue(snapshot.semanticState.shotResolutionCategory),
     shotResolved: toJsonValue(snapshot.semanticState.shotResolved),
+    visionAvailable: toJsonValue(snapshot.semanticState.visionAvailable),
+    visionChangeRatio: toJsonValue(snapshot.semanticState.visionChangeRatio),
+    visionChangeStrength: toJsonValue(snapshot.semanticState.visionChangeStrength),
+    visionChangeFocus: toJsonValue(snapshot.semanticState.visionChangeFocus),
+    visionImpactCategory: toJsonValue(snapshot.semanticState.visionImpactCategory),
     endVisible: toJsonValue(snapshot.semanticState.endVisible),
     endTitleText: toJsonValue(snapshot.semanticState.endTitleText),
     endSubtitleText: toJsonValue(snapshot.semanticState.endSubtitleText),
@@ -332,6 +358,8 @@ function buildObservationFingerprint(snapshot: GameSnapshot): string {
     snapshot.semanticState.shotResolutionCategory ?? "",
     snapshot.semanticState.canvasHintCategory ?? "",
     snapshot.semanticState.canvasHintText ?? "",
+    snapshot.semanticState.visionChangeStrength ?? "",
+    snapshot.semanticState.visionImpactCategory ?? "",
     snapshot.semanticState.matchNoteText ?? "",
     snapshot.semanticState.outcome ?? "",
     snapshot.semanticState.endVisible === true ? "end" : "live"
@@ -356,6 +384,7 @@ function detectStallReason(input: {
   if (
     diagnostics.shotsFired > diagnostics.shotResolutionsObserved &&
     snapshot.semanticState.playerTurnReady !== true &&
+    snapshot.semanticState.visionChangeStrength !== "strong" &&
     unchangedObservationCycles >= 2
   ) {
     return "unresolved-shot-loop";
@@ -415,6 +444,14 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     wallHits: 0,
     misses: 0,
     healsObserved: 0,
+    visionAvailableObserved: false,
+    visionChangeSignals: 0,
+    visionStrongChangeSignals: 0,
+    visionTargetSideSignals: 0,
+    visionTerrainSideSignals: 0,
+    visionNoChangeShots: 0,
+    lastVisionChangeStrength: "unknown",
+    lastVisionImpactCategory: "unknown",
     damageDealt: null,
     damageTaken: null,
     hpTrackingAvailable: false,
@@ -467,6 +504,19 @@ function updateAttemptProgressFromSnapshot(
   const playerHpValue = readSemanticNumber(snapshot, "playerHpValue");
   const cpuHpValue = readSemanticNumber(snapshot, "cpuHpValue");
   const semanticProgressSignalSource = snapshot.semanticState.progressSignalSource;
+  const visionChangeStrength =
+    snapshot.semanticState.visionChangeStrength === "none" ||
+    snapshot.semanticState.visionChangeStrength === "subtle" ||
+    snapshot.semanticState.visionChangeStrength === "strong"
+      ? snapshot.semanticState.visionChangeStrength
+      : "unknown";
+  const visionImpactCategory =
+    snapshot.semanticState.visionImpactCategory === "none" ||
+    snapshot.semanticState.visionImpactCategory === "target-side-activity" ||
+    snapshot.semanticState.visionImpactCategory === "terrain-or-midfield-activity" ||
+    snapshot.semanticState.visionImpactCategory === "self-side-activity"
+      ? snapshot.semanticState.visionImpactCategory
+      : "unknown";
 
   if (nextDiagnostics.playerHpStart === null && playerHpValue !== null) {
     nextDiagnostics = {
@@ -528,6 +578,8 @@ function updateAttemptProgressFromSnapshot(
           : "unavailable";
   nextDiagnostics = {
     ...nextDiagnostics,
+    visionAvailableObserved:
+      nextDiagnostics.visionAvailableObserved || snapshot.semanticState.visionAvailable === true,
     hpTrackingAvailable,
     damageTrackingConfirmed,
     progressSignalSource
@@ -585,6 +637,34 @@ function updateAttemptProgressFromSnapshot(
       ...nextDiagnostics,
       lastCombatHintText:
         typeof snapshot.semanticState.canvasHintText === "string" ? snapshot.semanticState.canvasHintText : null
+    };
+  }
+
+  if (snapshot.semanticState.visionAvailable === true) {
+    nextDiagnostics = {
+      ...nextDiagnostics,
+      lastVisionChangeStrength: visionChangeStrength,
+      lastVisionImpactCategory: visionImpactCategory,
+      ...(visionChangeStrength === "subtle" || visionChangeStrength === "strong"
+        ? {
+            visionChangeSignals: nextDiagnostics.visionChangeSignals + 1
+          }
+        : {}),
+      ...(visionChangeStrength === "strong"
+        ? {
+            visionStrongChangeSignals: nextDiagnostics.visionStrongChangeSignals + 1
+          }
+        : {}),
+      ...(visionImpactCategory === "target-side-activity"
+        ? {
+            visionTargetSideSignals: nextDiagnostics.visionTargetSideSignals + 1
+          }
+        : {}),
+      ...(visionImpactCategory === "terrain-or-midfield-activity" || visionImpactCategory === "self-side-activity"
+        ? {
+            visionTerrainSideSignals: nextDiagnostics.visionTerrainSideSignals + 1
+          }
+        : {})
     };
   }
 
@@ -677,6 +757,22 @@ function buildPlayerSummaryJson(input: {
       }))
     }))
   };
+}
+
+function buildObservationModes(input: {
+  decisionActionId?: string;
+  snapshot?: GameSnapshot;
+}): Array<"dom" | "screenshot"> {
+  if (
+    input.decisionActionId === "start-cpu-match" ||
+    input.decisionActionId === "execute-planned-shot" ||
+    input.decisionActionId === "wait-for-turn-resolution" ||
+    input.snapshot?.semanticState.gameplayEntered === true
+  ) {
+    return ["dom", "screenshot"];
+  }
+
+  return ["dom"];
 }
 
 export async function runPlayerCatAndDog(
@@ -812,7 +908,7 @@ export async function runPlayerCatAndDog(
       await gameSession.bootstrap(environmentSession);
 
       const openingFrame = await environmentSession.observe({
-        modes: ["dom"]
+        modes: buildObservationModes({})
       });
       let currentSnapshot = await gameSession.translate(openingFrame);
       const openingObservationEvent: RunEvent = {
@@ -944,7 +1040,10 @@ export async function runPlayerCatAndDog(
         }
 
         const postActionFrame = await environmentSession.observe({
-          modes: ["dom"]
+          modes: buildObservationModes({
+            decisionActionId: decision.actionId,
+            snapshot: currentSnapshot
+          })
         });
         currentSnapshot = await gameSession.translate(postActionFrame);
         ({
@@ -970,6 +1069,16 @@ export async function runPlayerCatAndDog(
             unchangedObservationCycles
           )
         };
+        if (
+          decision.actionId === "execute-planned-shot" &&
+          currentSnapshot.semanticState.visionAvailable === true &&
+          currentSnapshot.semanticState.visionChangeStrength === "none"
+        ) {
+          diagnostics = {
+            ...diagnostics,
+            visionNoChangeShots: diagnostics.visionNoChangeShots + 1
+          };
+        }
         await container.runEngine.appendEvent({
           eventId: randomUUID(),
           runId: run.runId,

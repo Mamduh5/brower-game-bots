@@ -96,6 +96,8 @@
     </main>
     <script>
       const storageKey = "catdog-fixture-cpu-attempts";
+      const gameCanvas = document.getElementById("gameCanvas");
+      const gameContext = gameCanvas.getContext("2d");
       const modeLabel = document.getElementById("modeLabel");
       const menuOverlay = document.getElementById("menuOverlay");
       const difficultyPanel = document.getElementById("difficultyPanel");
@@ -120,6 +122,47 @@
       const difficultyButtons = Array.from(document.querySelectorAll("[data-difficulty]"));
       const weaponButtons = Array.from(document.querySelectorAll("[data-weapon-key]"));
       const state = { scene: "menu", mode: null, cpuDifficulty: "easy", attemptNumber: 0, selectedWeapon: "normal", aimDirection: "center", powerLevel: "medium", playerTurnReady: false, ended: false, playerHp: 100, cpuHp: 100, turnCount: 0 };
+      function drawScene() {
+        if (!gameContext) return;
+        gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+        gameContext.fillStyle = "#1e293b";
+        gameContext.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+        gameContext.fillStyle = "#0f766e";
+        gameContext.fillRect(0, gameCanvas.height - 130, gameCanvas.width, 130);
+        if (state.scene === "menu") {
+          gameContext.fillStyle = "#e2e8f0";
+          gameContext.font = "bold 34px sans-serif";
+          gameContext.fillText("Backyard Ballistics", 280, 140);
+          gameContext.font = "24px sans-serif";
+          gameContext.fillText("Choose a mode to start.", 345, 190);
+          return;
+        }
+        gameContext.fillStyle = "#f59e0b";
+        gameContext.beginPath();
+        gameContext.arc(180, 360, 26, 0, Math.PI * 2);
+        gameContext.fill();
+        gameContext.fillStyle = "#38bdf8";
+        gameContext.beginPath();
+        gameContext.arc(760, 340, 28, 0, Math.PI * 2);
+        gameContext.fill();
+        gameContext.fillStyle = "#fde047";
+        const aimOffset = state.aimDirection === "left" ? -40 : state.aimDirection === "right" ? 40 : 0;
+        gameContext.fillRect(170 + aimOffset, 310, 20, 6);
+        gameContext.fillStyle = "#ffffff";
+        gameContext.font = "20px sans-serif";
+        gameContext.fillText(`Turn ${state.turnCount}`, 430, 80);
+        if (state.ended && state.cpuHp === 0) {
+          gameContext.fillStyle = "#f97316";
+          gameContext.beginPath();
+          gameContext.arc(760, 340, 85, 0, Math.PI * 2);
+          gameContext.fill();
+        } else if (state.ended) {
+          gameContext.fillStyle = "#f97316";
+          gameContext.beginPath();
+          gameContext.arc(520, 360, 70, 0, Math.PI * 2);
+          gameContext.fill();
+        }
+      }
       function syncBattleStats() {
         playerHp.textContent = `P1 Cat HP: ${state.playerHp}/100`;
         cpuHp.textContent = `${state.mode === "cpu" ? "CPU Dog" : "P2 Dog"} HP: ${state.cpuHp}/100`;
@@ -150,6 +193,7 @@
         weaponBar.classList.toggle("is-hidden", !(state.scene === "battle" && state.playerTurnReady));
         endOverlay.classList.toggle("hidden", !state.ended);
         syncBattleStats();
+        drawScene();
       }
       function goToMenu() {
         state.scene = "menu";

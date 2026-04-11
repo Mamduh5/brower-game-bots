@@ -13,6 +13,11 @@ import { CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID } from "./profiles.js";
 import { CAT_AND_DOG_SMOKE_SCENARIO } from "./scenarios/smoke.scenario.js";
 import { CAT_AND_DOG_SELECTORS } from "./selectors.js";
 import { parseCatAndDogShell } from "./snapshot/parse-shell.js";
+import {
+  parseCatAndDogVisionFrame,
+  summarizeCatAndDogVision,
+  type CatAndDogVisionState
+} from "./vision/analyze-canvas.js";
 
 const DEFAULT_CAT_AND_DOG_URL = "https://cat-and-dog-p6qd.onrender.com/";
 
@@ -129,6 +134,7 @@ export class CatAndDogGameSession implements GameSession {
   private modeSelectionExecuted = false;
   private gameplayInteractionExecuted = false;
   private readonly isPlayerUntilWinProfile: boolean;
+  private previousVisionFrame: CatAndDogVisionState | null = null;
 
   constructor(private readonly context: { profileId?: string } = {}) {
     this.isPlayerUntilWinProfile = context.profileId === CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID;
@@ -148,6 +154,11 @@ export class CatAndDogGameSession implements GameSession {
 
   async translate(frame: ObservationFrame): Promise<GameSnapshot> {
     const shell = parseCatAndDogShell(frame);
+    const currentVisionFrame = parseCatAndDogVisionFrame(
+      typeof frame.payload.primaryCanvasPngBase64 === "string" ? frame.payload.primaryCanvasPngBase64 : null
+    );
+    const visionSummary = summarizeCatAndDogVision(currentVisionFrame, this.previousVisionFrame);
+    this.previousVisionFrame = currentVisionFrame ?? this.previousVisionFrame;
 
     return {
       title: "Cat and Dog",
@@ -198,6 +209,13 @@ export class CatAndDogGameSession implements GameSession {
         endVisible: shell.endVisible,
         endTitleText: shell.endTitleText,
         endSubtitleText: shell.endSubtitleText,
+        visionAvailable: visionSummary.visionAvailable,
+        visionChangeRatio: visionSummary.visionChangeRatio,
+        visionChangeStrength: visionSummary.visionChangeStrength,
+        visionChangeFocus: visionSummary.visionChangeFocus,
+        visionImpactCategory: visionSummary.visionImpactCategory,
+        visionFrameWidth: visionSummary.visionFrameWidth,
+        visionFrameHeight: visionSummary.visionFrameHeight,
         playerTurnReady: shell.playerTurnReady,
         outcome: shell.outcome,
         modeSelectionExecuted: this.modeSelectionExecuted,
@@ -224,6 +242,10 @@ export class CatAndDogGameSession implements GameSession {
         turnBannerVisible: shell.turnBannerVisible ? 1 : 0,
         shotResolved: shell.shotResolved ? 1 : 0,
         hpTrackingAvailable: shell.hpTrackingAvailable ? 1 : 0,
+        visionAvailable: visionSummary.visionAvailable ? 1 : 0,
+        visionChangeRatio: visionSummary.visionChangeRatio ?? 0,
+        visionStrongChange: visionSummary.visionChangeStrength === "strong" ? 1 : 0,
+        visionTargetSideActivity: visionSummary.visionImpactCategory === "target-side-activity" ? 1 : 0,
         playerHpValue: shell.playerHpValue ?? -1,
         cpuHpValue: shell.cpuHpValue ?? -1,
         turnCounter: shell.turnCounter ?? 0,

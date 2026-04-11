@@ -35,6 +35,11 @@ export const CatAndDogAttemptDiagnosticsSchema = z.object({
   wallHits: z.number().int().nonnegative(),
   misses: z.number().int().nonnegative(),
   healsObserved: z.number().int().nonnegative(),
+  visionChangeSignals: z.number().int().nonnegative(),
+  visionStrongChangeSignals: z.number().int().nonnegative(),
+  visionTargetSideSignals: z.number().int().nonnegative(),
+  visionTerrainSideSignals: z.number().int().nonnegative(),
+  visionNoChangeShots: z.number().int().nonnegative(),
   damageDealt: z.number().int().nonnegative().nullable(),
   damageTaken: z.number().int().nonnegative().nullable()
 });
@@ -335,6 +340,12 @@ export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback
   const damageDealt = feedback.diagnostics.damageDealt ?? 0;
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
   const unresolvedShots = Math.max(0, feedback.diagnostics.shotsFired - feedback.diagnostics.shotResolutionsObserved);
+  const visualProgressScore =
+    feedback.diagnostics.visionTargetSideSignals * 90 +
+    feedback.diagnostics.visionStrongChangeSignals * 35 +
+    feedback.diagnostics.visionChangeSignals * 20 -
+    feedback.diagnostics.visionTerrainSideSignals * 30 -
+    feedback.diagnostics.visionNoChangeShots * 55;
   const lowResolutionPenalty =
     unresolvedShots * 95 +
     (feedback.diagnostics.shotsFired > 0 && feedback.diagnostics.shotResolutionsObserved === 0 ? 140 : 0);
@@ -357,7 +368,8 @@ export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback
     feedback.diagnostics.directHits * 180 +
     feedback.diagnostics.splashHits * 95 -
     feedback.diagnostics.wallHits * 55 +
-    feedback.diagnostics.healsObserved * 10 -
+    feedback.diagnostics.healsObserved * 10 +
+    visualProgressScore -
     feedback.diagnostics.misses * 45 +
     feedback.diagnostics.shotResolutionsObserved * 28 +
     feedback.diagnostics.shotsFired * 4 +

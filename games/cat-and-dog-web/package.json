@@ -21,6 +21,7 @@
     "@game-bots/contracts": "workspace:*",
     "@game-bots/environment-sdk": "workspace:*",
     "@game-bots/game-sdk": "workspace:*",
-    "@game-bots/runtime-core": "workspace:*"
+    "@game-bots/runtime-core": "workspace:*",
+    "pngjs": "^7.0.0"
   }
 }
