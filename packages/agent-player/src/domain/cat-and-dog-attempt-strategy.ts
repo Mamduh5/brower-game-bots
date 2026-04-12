@@ -33,6 +33,24 @@ export const CatAndDogVisionShotOutcomeLabelSchema = z.enum([
 ]);
 export type CatAndDogVisionShotOutcomeLabel = z.infer<typeof CatAndDogVisionShotOutcomeLabelSchema>;
 
+export const CatAndDogShotFamilySchema = z.enum([
+  "high-arc-anti-headwind",
+  "medium-arc-default",
+  "flatter-tailwind-trim",
+  "blocked-terrain-escape",
+  "self-side-recovery",
+  "near-target-finisher"
+]);
+export type CatAndDogShotFamily = z.infer<typeof CatAndDogShotFamilySchema>;
+
+export const CatAndDogPlannerCategorySchema = z.enum([
+  "default-runtime",
+  "recovery",
+  "blocked-escape",
+  "finisher"
+]);
+export type CatAndDogPlannerCategory = z.infer<typeof CatAndDogPlannerCategorySchema>;
+
 export const CatAndDogAttemptDiagnosticsSchema = z.object({
   semanticActionCount: z.number().int().nonnegative(),
   shotsFired: z.number().int().nonnegative(),
@@ -84,7 +102,14 @@ export const CatAndDogAttemptFeedbackSchema = z.object({
   attemptNumber: z.number().int().positive(),
   outcome: CatAndDogAttemptOutcomeSchema,
   strategy: CatAndDogAttemptStrategySchema,
-  diagnostics: CatAndDogAttemptDiagnosticsSchema
+  diagnostics: CatAndDogAttemptDiagnosticsSchema,
+  planner: z
+    .object({
+      family: CatAndDogShotFamilySchema,
+      category: CatAndDogPlannerCategorySchema,
+      switchReason: z.string().nullable().default(null)
+    })
+    .optional()
 });
 export type CatAndDogAttemptFeedback = z.infer<typeof CatAndDogAttemptFeedbackSchema>;
 
@@ -129,6 +154,9 @@ export interface CatAndDogStrategySelectionDetails {
   changedKnob: "none" | "angleTapCount" | "powerTapCount" | "settleMs" | "turnResolutionWaitMs" | "weaponKey";
   triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
   plannerMode: "none" | "runtime-shot-planner";
+  plannerFamily: CatAndDogShotFamily | null;
+  plannerCategory: CatAndDogPlannerCategory | null;
+  plannerFamilySwitchReason: string | null;
   plannerReason: string | null;
   plannerInputs: CatAndDogPlannerInputs | null;
   plannerIntent: CatAndDogPlannerIntent | null;
@@ -301,6 +329,9 @@ interface CatAndDogCandidateMeta {
   changedKnob: RefinementKnob;
   triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
   plannerMode: CatAndDogStrategySelectionDetails["plannerMode"];
+  plannerFamily: CatAndDogShotFamily | null;
+  plannerCategory: CatAndDogPlannerCategory | null;
+  plannerFamilySwitchReason: string | null;
   plannerReason: string | null;
   plannerInputs: CatAndDogPlannerInputs | null;
   plannerIntent: CatAndDogPlannerIntent | null;
@@ -667,18 +698,335 @@ function buildPlannerIntent(strategy: CatAndDogAttemptStrategy): CatAndDogPlanne
   };
 }
 
+interface CatAndDogFamilyHistoryStats {
+  uses: number;
+  wins: number;
+  losses: number;
+  unknowns: number;
+  repeatedBlocked: number;
+  repeatedSelfSide: number;
+  repeatedNearTarget: number;
+  weakestRecentScore: number | null;
+}
+
+function toPlannerCategory(family: CatAndDogShotFamily): CatAndDogPlannerCategory {
+  switch (family) {
+    case "blocked-terrain-escape":
+      return "blocked-escape";
+    case "self-side-recovery":
+      return "recovery";
+    case "near-target-finisher":
+      return "finisher";
+    default:
+      return "default-runtime";
+  }
+}
+
+function inferShotFamilyFromFeedback(feedback: CatAndDogAttemptFeedback): CatAndDogShotFamily {
+  if (feedback.planner?.family) {
+    return feedback.planner.family;
+  }
+
+  const label = resolveVisualCorrectionSignal(feedback);
+  if (label === "self-side-impact") {
+    return "self-side-recovery";
+  }
+
+  if (label === "blocked") {
+    return "blocked-terrain-escape";
+  }
+
+  if (label === "near-target" || label === "target-side-impact") {
+    return "near-target-finisher";
+  }
+
+  if (
+    isHeadwindForAnchor(feedback) ||
+    (feedback.diagnostics.projectileGravityMultiplier ?? 1) >= 1.15 ||
+    (feedback.diagnostics.projectileWeight ?? 1) >= 1.35
+  ) {
+    return "high-arc-anti-headwind";
+  }
+
+  if (
+    isTailwindForAnchor(feedback) &&
+    Math.abs(feedback.diagnostics.windNormalized ?? 0) >= 0.45
+  ) {
+    return "flatter-tailwind-trim";
+  }
+
+  return "medium-arc-default";
+}
+
+function buildFamilyHistoryMap(
+  history: readonly CatAndDogAttemptFeedback[]
+): ReadonlyMap<CatAndDogShotFamily, CatAndDogFamilyHistoryStats> {
+  const recentHistory = history.slice(-6);
+  const map = new Map<CatAndDogShotFamily, CatAndDogFamilyHistoryStats>();
+
+  for (const feedback of recentHistory) {
+    const family = inferShotFamilyFromFeedback(feedback);
+    const existing = map.get(family) ?? {
+      uses: 0,
+      wins: 0,
+      losses: 0,
+      unknowns: 0,
+      repeatedBlocked: 0,
+      repeatedSelfSide: 0,
+      repeatedNearTarget: 0,
+      weakestRecentScore: null
+    };
+    const visualLabel = resolveVisualCorrectionSignal(feedback);
+    const score = scoreCatAndDogAttemptFeedback(feedback);
+
+    existing.uses += 1;
+    existing.wins += feedback.outcome === "WIN" ? 1 : 0;
+    existing.losses += feedback.outcome === "LOSS" ? 1 : 0;
+    existing.unknowns += feedback.outcome === "UNKNOWN" ? 1 : 0;
+    existing.repeatedBlocked += visualLabel === "blocked" ? 1 : 0;
+    existing.repeatedSelfSide += visualLabel === "self-side-impact" ? 1 : 0;
+    existing.repeatedNearTarget +=
+      visualLabel === "near-target" || visualLabel === "target-side-impact" ? 1 : 0;
+    existing.weakestRecentScore =
+      existing.weakestRecentScore === null ? score : Math.min(existing.weakestRecentScore, score);
+    map.set(family, existing);
+  }
+
+  return map;
+}
+
+function mapPreparedAngleToTapCount(preparedShotAngle: number | null): number | null {
+  if (preparedShotAngle === null) {
+    return null;
+  }
+
+  if (preparedShotAngle <= 35) {
+    return 1;
+  }
+
+  if (preparedShotAngle <= 45) {
+    return 2;
+  }
+
+  if (preparedShotAngle <= 55) {
+    return 3;
+  }
+
+  if (preparedShotAngle <= 65) {
+    return 4;
+  }
+
+  return 5;
+}
+
+function mapPreparedPowerToTapCount(preparedShotPower: number | null): number | null {
+  if (preparedShotPower === null) {
+    return null;
+  }
+
+  if (preparedShotPower <= 440) {
+    return 1;
+  }
+
+  if (preparedShotPower <= 560) {
+    return 2;
+  }
+
+  if (preparedShotPower <= 660) {
+    return 3;
+  }
+
+  if (preparedShotPower <= 760) {
+    return 4;
+  }
+
+  return 5;
+}
+
+function chooseBaseShotIntent(anchor: CatAndDogAttemptFeedback): {
+  angleTapCount: number;
+  powerTapCount: number;
+  settleMs: number;
+  turnResolutionWaitMs: number;
+} {
+  const preparedAngleTapCount = mapPreparedAngleToTapCount(anchor.diagnostics.preparedShotAngle);
+  const preparedPowerTapCount = mapPreparedPowerToTapCount(anchor.diagnostics.preparedShotPower);
+
+  return {
+    angleTapCount:
+      preparedAngleTapCount === null
+        ? anchor.strategy.angleTapCount
+        : clampTapCount(Math.round((anchor.strategy.angleTapCount + preparedAngleTapCount) / 2)),
+    powerTapCount:
+      preparedPowerTapCount === null
+        ? anchor.strategy.powerTapCount
+        : clampTapCount(Math.round((anchor.strategy.powerTapCount + preparedPowerTapCount) / 2)),
+    settleMs: anchor.strategy.settleMs,
+    turnResolutionWaitMs: anchor.strategy.turnResolutionWaitMs
+  };
+}
+
+function resolveBasePlannerFamily(input: {
+  anchor: CatAndDogAttemptFeedback;
+  visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel;
+}): CatAndDogShotFamily {
+  const { anchor, visualCorrectionSignal } = input;
+  const windMagnitude = Math.abs(anchor.diagnostics.windNormalized ?? 0);
+  const heavyProjectile = (anchor.diagnostics.projectileWeight ?? 1) >= 1.35;
+  const highGravityProjectile = (anchor.diagnostics.projectileGravityMultiplier ?? 1) >= 1.15;
+
+  if (visualCorrectionSignal === "self-side-impact") {
+    return "self-side-recovery";
+  }
+
+  if (visualCorrectionSignal === "blocked") {
+    return "blocked-terrain-escape";
+  }
+
+  if (visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact") {
+    return "near-target-finisher";
+  }
+
+  if (isHeadwindForAnchor(anchor) && windMagnitude >= 0.35) {
+    return "high-arc-anti-headwind";
+  }
+
+  if (heavyProjectile || highGravityProjectile) {
+    return "high-arc-anti-headwind";
+  }
+
+  if (isTailwindForAnchor(anchor) && windMagnitude >= 0.45) {
+    return "flatter-tailwind-trim";
+  }
+
+  return "medium-arc-default";
+}
+
+function resolvePlannerFamily(input: {
+  anchor: CatAndDogAttemptFeedback;
+  visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel;
+  familyHistory: ReadonlyMap<CatAndDogShotFamily, CatAndDogFamilyHistoryStats>;
+}): {
+  family: CatAndDogShotFamily;
+  switchReason: string | null;
+} {
+  const { anchor, visualCorrectionSignal, familyHistory } = input;
+  const baseFamily = resolveBasePlannerFamily({ anchor, visualCorrectionSignal });
+  const currentStats = familyHistory.get(baseFamily);
+  const repeatedSameFamilyFailures =
+    currentStats !== undefined &&
+    currentStats.wins === 0 &&
+    currentStats.uses >= 2 &&
+    (currentStats.losses + currentStats.unknowns) >= 2;
+
+  if (!repeatedSameFamilyFailures) {
+    return {
+      family: baseFamily,
+      switchReason: null
+    };
+  }
+
+  if (baseFamily === "self-side-recovery" && currentStats.repeatedSelfSide >= 2) {
+    return {
+      family: isHeadwindForAnchor(anchor) ? "high-arc-anti-headwind" : "medium-arc-default",
+      switchReason: "Repeated self-side recovery attempts failed, so switch to a higher-carry family."
+    };
+  }
+
+  if (baseFamily === "blocked-terrain-escape" && currentStats.repeatedBlocked >= 2) {
+    return {
+      family: "high-arc-anti-headwind",
+      switchReason: "Repeated blocked-terrain escapes failed, so switch to a higher-arc family."
+    };
+  }
+
+  if (baseFamily === "near-target-finisher" && currentStats.repeatedNearTarget >= 2) {
+    return {
+      family: "medium-arc-default",
+      switchReason: "Repeated finisher attempts failed to close the round, so switch back to a safer default family."
+    };
+  }
+
+  if (baseFamily === "medium-arc-default" && currentStats.repeatedBlocked >= 1) {
+    return {
+      family: "blocked-terrain-escape",
+      switchReason: "Default family kept colliding with terrain, so switch to blocked escape."
+    };
+  }
+
+  if (baseFamily === "medium-arc-default" && currentStats.repeatedSelfSide >= 1) {
+    return {
+      family: "self-side-recovery",
+      switchReason: "Default family kept landing on self side, so switch to recovery."
+    };
+  }
+
+  return {
+    family: baseFamily,
+    switchReason: null
+  };
+}
+
+function choosePlannerWeapon(input: {
+  anchor: CatAndDogAttemptFeedback;
+  family: CatAndDogShotFamily;
+}): CatAndDogAttemptStrategy["weaponKey"] {
+  const { anchor, family } = input;
+  const currentWeapon =
+    anchor.diagnostics.preparedShotKey === "normal" ||
+    anchor.diagnostics.preparedShotKey === "light" ||
+    anchor.diagnostics.preparedShotKey === "heavy" ||
+    anchor.diagnostics.preparedShotKey === "super" ||
+    anchor.diagnostics.preparedShotKey === "heal"
+      ? anchor.diagnostics.preparedShotKey
+      : anchor.strategy.weaponKey;
+  const windSensitive = (anchor.diagnostics.projectileWindInfluenceMultiplier ?? 1) >= 1.4;
+  const splashFriendly =
+    (anchor.diagnostics.projectileSplashRadius ?? 0) >= 60 &&
+    (anchor.diagnostics.projectileDamageMax ?? 0) >= 18;
+
+  if (family === "self-side-recovery") {
+    return "normal";
+  }
+
+  if (family === "blocked-terrain-escape") {
+    return splashFriendly && !windSensitive ? "heavy" : "normal";
+  }
+
+  if (family === "near-target-finisher") {
+    return splashFriendly && !windSensitive ? "heavy" : currentWeapon;
+  }
+
+  if ((family === "high-arc-anti-headwind" || family === "medium-arc-default") && windSensitive) {
+    return "normal";
+  }
+
+  if (family === "flatter-tailwind-trim" && currentWeapon === "heavy") {
+    return "normal";
+  }
+
+  return currentWeapon;
+}
+
 function buildRuntimePlannerCandidate(input: {
   anchor: CatAndDogAttemptFeedback;
   attemptNumber: number;
   visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel;
+  familyHistory: ReadonlyMap<CatAndDogShotFamily, CatAndDogFamilyHistoryStats>;
 }): { strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta } | null {
-  const { anchor, attemptNumber, visualCorrectionSignal } = input;
+  const { anchor, attemptNumber, visualCorrectionSignal, familyHistory } = input;
   if (!hasRuntimeShotPlannerContext(anchor)) {
     return null;
   }
 
   const base = cloneStrategyWithAttemptNumber(anchor.strategy, attemptNumber);
   const plannerInputs = buildPlannerInputs(anchor, visualCorrectionSignal);
+  const { family, switchReason } = resolvePlannerFamily({
+    anchor,
+    visualCorrectionSignal,
+    familyHistory
+  });
+  const plannerCategory = toPlannerCategory(family);
   const preparedShotAngle = anchor.diagnostics.preparedShotAngle;
   const preparedShotPower = anchor.diagnostics.preparedShotPower;
   const windMagnitude = Math.abs(anchor.diagnostics.windNormalized ?? 0);
@@ -687,97 +1035,109 @@ function buildRuntimePlannerCandidate(input: {
   const highGravityProjectile = (anchor.diagnostics.projectileGravityMultiplier ?? 1) >= 1.15;
   const lowLaunchSpeedProjectile = (anchor.diagnostics.projectileLaunchSpeedMultiplier ?? 1) <= 0.93;
   const highWindInfluenceProjectile = (anchor.diagnostics.projectileWindInfluenceMultiplier ?? 1) >= 1.4;
+  const baseIntent = chooseBaseShotIntent(anchor);
   const reasons: string[] = [];
 
-  let weaponKey = base.weaponKey;
+  let weaponKey = choosePlannerWeapon({
+    anchor,
+    family
+  });
   let angleDirection = base.angleDirection;
-  let angleDelta = 0;
-  let powerDelta = 0;
+  let angleTarget = baseIntent.angleTapCount;
+  let powerTarget = baseIntent.powerTapCount;
   let settleDelta = 0;
   let turnResolutionWaitDelta = 0;
 
-  if (isHeadwindForAnchor(anchor) && windMagnitude >= 0.45) {
-    powerDelta += highWindInfluenceProjectile ? 2 : 1;
-    if (heavyProjectile || highGravityProjectile || lowLaunchSpeedProjectile) {
-      angleDelta += 1;
-    }
-    reasons.push("Headwind compensation around the last live shot context.");
-  } else if (isTailwindForAnchor(anchor) && windMagnitude >= 0.45) {
-    powerDelta -= highWindInfluenceProjectile ? 2 : 1;
-    if (!heavyProjectile && (preparedShotAngle ?? 50) >= 58) {
-      angleDelta -= 1;
-    }
-    reasons.push("Tailwind trim around the last live shot context.");
-  }
-
-  if (heavyProjectile || highGravityProjectile) {
-    angleDelta += 1;
-    reasons.push("Projectile drop profile favors a slightly higher arc.");
+  switch (family) {
+    case "high-arc-anti-headwind":
+      angleTarget = Math.max(angleTarget, heavyProjectile || highGravityProjectile ? 4 : 3);
+      powerTarget = Math.max(powerTarget, highWindInfluenceProjectile || lowLaunchSpeedProjectile ? 4 : 3);
+      if (preparedShotAngle !== null && preparedShotAngle < 46) {
+        angleTarget = Math.max(angleTarget, 4);
+      }
+      reasons.push("Use a higher-arc family for headwind or heavier projectile behavior.");
+      break;
+    case "medium-arc-default":
+      angleTarget = clampTapCount(Math.max(2, Math.min(3, angleTarget)));
+      powerTarget = clampTapCount(Math.max(2, Math.min(3, powerTarget)));
+      reasons.push("Use the medium-arc default family as the safest runtime baseline.");
+      break;
+    case "flatter-tailwind-trim":
+      angleTarget = clampTapCount(Math.min(angleTarget, 2));
+      powerTarget = clampTapCount(Math.max(1, Math.min(3, powerTarget - (windMagnitude >= 0.65 ? 1 : 0))));
+      reasons.push("Use a flatter family to trim carry under tailwind.");
+      break;
+    case "blocked-terrain-escape":
+      angleTarget = Math.max(angleTarget, 4);
+      powerTarget = Math.max(powerTarget, 3);
+      if (heavyProjectile || highGravityProjectile) {
+        angleTarget = Math.max(angleTarget, 5);
+      }
+      turnResolutionWaitDelta += 180;
+      reasons.push("Use a blocked-terrain escape family to clear intervening cover.");
+      break;
+    case "self-side-recovery":
+      angleDirection = "right";
+      angleTarget = Math.max(angleTarget, 3);
+      powerTarget = Math.max(powerTarget, 3);
+      if (isHeadwindForAnchor(anchor) || highWindInfluenceProjectile) {
+        powerTarget = Math.max(powerTarget, 4);
+      }
+      settleDelta += 30;
+      reasons.push("Use a self-side recovery family to push the shot back into the battlefield.");
+      break;
+    case "near-target-finisher":
+      angleTarget = clampTapCount(
+        visualCorrectionSignal === "near-target"
+          ? Math.max(0, Math.min(5, angleTarget + (isHeadwindForAnchor(anchor) ? 1 : 0)))
+          : angleTarget
+      );
+      powerTarget = clampTapCount(
+        visualCorrectionSignal === "target-side-impact"
+          ? Math.max(0, Math.min(5, powerTarget + (isHeadwindForAnchor(anchor) ? 1 : 0)))
+          : powerTarget
+      );
+      settleDelta += 50;
+      turnResolutionWaitDelta += 120;
+      reasons.push("Use a finisher family to stay tight around a promising target-side shot.");
+      break;
   }
 
   switch (visualCorrectionSignal) {
     case "short":
-      powerDelta += highWindInfluenceProjectile || isHeadwindForAnchor(anchor) ? 2 : 1;
-      if (lowLaunchSpeedProjectile || highGravityProjectile || (preparedShotAngle ?? 50) <= 38) {
-        angleDelta += 1;
+      powerTarget = clampTapCount(powerTarget + (highWindInfluenceProjectile || isHeadwindForAnchor(anchor) ? 1 : 0));
+      if (lowLaunchSpeedProjectile || highGravityProjectile) {
+        angleTarget = clampTapCount(angleTarget + 1);
       }
-      reasons.push("Recent impact looked short, so extend carry.");
+      reasons.push("Recent visual feedback looked short, so add carry inside the chosen family.");
       break;
     case "long":
-      powerDelta -= isTailwindForAnchor(anchor) || highWindInfluenceProjectile ? 2 : 1;
+      powerTarget = clampTapCount(powerTarget - 1);
       if (!heavyProjectile && (preparedShotAngle ?? 50) >= 60) {
-        angleDelta -= 1;
+        angleTarget = clampTapCount(angleTarget - 1);
       }
-      reasons.push("Recent impact looked long, so trim carry.");
+      reasons.push("Recent visual feedback looked long, so trim carry inside the chosen family.");
       break;
     case "blocked":
-      angleDelta += heavyProjectile || highGravityProjectile ? 3 : 2;
-      if (isHeadwindForAnchor(anchor) && highWindInfluenceProjectile) {
-        powerDelta += 1;
-      }
-      reasons.push("Recent impact looked blocked, so raise the arc.");
-      break;
-    case "near-target":
-      settleDelta += 40;
-      turnResolutionWaitDelta += 120;
-      if (isHeadwindForAnchor(anchor)) {
-        powerDelta += 1;
-      } else if (isTailwindForAnchor(anchor)) {
-        powerDelta -= 1;
-      } else if ((preparedShotAngle ?? 50) <= 48) {
-        angleDelta += 1;
-      }
-      reasons.push("Recent impact was near target, so refine locally.");
-      break;
-    case "target-side-impact":
-      settleDelta += 50;
-      turnResolutionWaitDelta += 160;
-      if (isHeadwindForAnchor(anchor) && highWindInfluenceProjectile) {
-        powerDelta += 1;
-      } else if (isTailwindForAnchor(anchor) && windMagnitude >= 0.45) {
-        powerDelta -= 1;
-      }
-      reasons.push("Recent impact reached target side, so exploit the same region.");
+      angleTarget = clampTapCount(angleTarget + 1);
+      reasons.push("Recent visual feedback looked blocked, so bias higher inside the chosen family.");
       break;
     case "self-side-impact":
       angleDirection = "right";
-      angleDelta += heavyProjectile || highGravityProjectile ? 3 : 2;
-      if (isHeadwindForAnchor(anchor)) {
-        powerDelta += 1;
-      }
-      if (
-        base.weaponKey !== "normal" &&
-        strongWindEffect &&
-        (base.weaponKey === "light" || base.weaponKey === "super")
-      ) {
-        weaponKey = "normal";
-        reasons.push("Switch back to a steadier projectile after self-side impact.");
-      }
-      reasons.push("Recent impact stayed on self side, so recover with a safer launch.");
+      angleTarget = clampTapCount(Math.max(angleTarget, 4));
+      reasons.push("Recent visual feedback stayed on self side, so bias away from the player edge.");
+      break;
+    case "near-target":
+      settleDelta += 20;
+      reasons.push("Recent visual feedback landed near target, so keep the correction small.");
+      break;
+    case "target-side-impact":
+      turnResolutionWaitDelta += 80;
+      reasons.push("Recent visual feedback reached target side, so stay in the same high-value region.");
       break;
     default:
       if (preparedShotPower !== null && preparedShotPower < 420 && isHeadwindForAnchor(anchor)) {
-        powerDelta += 1;
+        powerTarget = clampTapCount(powerTarget + 1);
         reasons.push("Prepared power looked low for the current headwind.");
       }
       break;
@@ -788,10 +1148,10 @@ function buildRuntimePlannerCandidate(input: {
       ...base,
       weaponKey,
       angleDirection,
-      angleTapCount: clampTapCount(base.angleTapCount + angleDelta),
-      powerTapCount: clampTapCount(base.powerTapCount + powerDelta),
-      settleMs: clampSettleMs(base.settleMs + settleDelta),
-      turnResolutionWaitMs: clampTurnResolutionWaitMs(base.turnResolutionWaitMs + turnResolutionWaitDelta)
+      angleTapCount: clampTapCount(angleTarget),
+      powerTapCount: clampTapCount(powerTarget),
+      settleMs: clampSettleMs(baseIntent.settleMs + settleDelta),
+      turnResolutionWaitMs: clampTurnResolutionWaitMs(baseIntent.turnResolutionWaitMs + turnResolutionWaitDelta)
     },
     attemptNumber
   );
@@ -799,7 +1159,7 @@ function buildRuntimePlannerCandidate(input: {
   const plannerReason =
     reasons.length > 0
       ? reasons.join(" ")
-      : "Use wind, projectile behavior, and prepared-shot context to replay the strongest live shot intentionally.";
+      : "Use wind, projectile behavior, and prepared-shot context to choose a deliberate shot family.";
 
   return {
     strategy: planned,
@@ -810,6 +1170,9 @@ function buildRuntimePlannerCandidate(input: {
       triggeredByVisualOutcomeLabel:
         isMeaningfulVisualCorrectionSignal(visualCorrectionSignal) ? visualCorrectionSignal : "none",
       plannerMode: "runtime-shot-planner",
+      plannerFamily: family,
+      plannerCategory,
+      plannerFamilySwitchReason: switchReason,
       plannerReason,
       plannerInputs,
       plannerIntent: buildPlannerIntent(planned),
@@ -897,8 +1260,9 @@ function buildAnchorCandidates(input: {
   attemptNumber: number;
   strategyMode: CatAndDogStrategyMode;
   visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel;
+  familyHistory: ReadonlyMap<CatAndDogShotFamily, CatAndDogFamilyHistoryStats>;
 }): Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> {
-  const { anchor, attemptNumber, strategyMode, visualCorrectionSignal } = input;
+  const { anchor, attemptNumber, strategyMode, visualCorrectionSignal, familyHistory } = input;
   const base = cloneStrategyWithAttemptNumber(anchor.strategy, attemptNumber);
   const visualCorrectionMagnitude = resolveVisualCorrectionMagnitude({
     feedback: anchor,
@@ -908,7 +1272,8 @@ function buildAnchorCandidates(input: {
   const plannerCandidate = buildRuntimePlannerCandidate({
     anchor,
     attemptNumber,
-    visualCorrectionSignal
+    visualCorrectionSignal,
+    familyHistory
   });
 
   if (plannerCandidate) {
@@ -926,6 +1291,9 @@ function buildAnchorCandidates(input: {
           ? visualCorrectionSignal
           : "none",
       plannerMode: "none",
+      plannerFamily: null,
+      plannerCategory: null,
+      plannerFamilySwitchReason: null,
       plannerReason: null,
       plannerInputs: null,
       plannerIntent: null,
@@ -951,6 +1319,9 @@ function buildAnchorCandidates(input: {
         changedKnob,
         triggeredByVisualOutcomeLabel,
         plannerMode: "none",
+        plannerFamily: null,
+        plannerCategory: null,
+        plannerFamilySwitchReason: null,
         plannerReason: null,
         plannerInputs: null,
         plannerIntent: null,
@@ -1317,6 +1688,9 @@ export function selectCatAndDogAttemptStrategy(input: {
       changedKnob: "none" as const,
       triggeredByVisualOutcomeLabel: "none" as const,
       plannerMode: "none" as const,
+      plannerFamily: null,
+      plannerCategory: null,
+      plannerFamilySwitchReason: null,
       plannerReason: null,
       plannerInputs: null,
       plannerIntent: null,
@@ -1344,6 +1718,9 @@ export function selectCatAndDogAttemptStrategy(input: {
         changedKnob: "none",
         triggeredByVisualOutcomeLabel: "none",
         plannerMode: "none",
+        plannerFamily: null,
+        plannerCategory: null,
+        plannerFamilySwitchReason: null,
         plannerReason: null,
         plannerInputs: null,
         plannerIntent: null,
@@ -1353,6 +1730,7 @@ export function selectCatAndDogAttemptStrategy(input: {
     };
   }
 
+  const familyHistory = buildFamilyHistoryMap(history);
   const rankedRecentMemory = buildRankedRecentMemory(history);
   const topReference = rankedRecentMemory[0] ?? null;
   const anchorFeedback =
@@ -1393,7 +1771,8 @@ export function selectCatAndDogAttemptStrategy(input: {
           anchor: anchorFeedback,
           attemptNumber: input.attemptNumber,
           strategyMode,
-          visualCorrectionSignal
+          visualCorrectionSignal,
+          familyHistory
         })
       : [];
   const plannerCandidateAvailable = anchorCandidates.some(
@@ -1553,6 +1932,9 @@ export function selectCatAndDogAttemptStrategy(input: {
       if (candidate.meta.changedKnob !== "none") {
         score += 110;
       }
+      if (candidate.meta.plannerFamilySwitchReason) {
+        score += 90;
+      }
     }
 
     if (candidate.meta.selectionMode === "one-knob-mutation") {
@@ -1711,6 +2093,9 @@ export function selectCatAndDogAttemptStrategy(input: {
       changedKnob: best.meta.changedKnob,
       triggeredByVisualOutcomeLabel: best.meta.triggeredByVisualOutcomeLabel,
       plannerMode: best.meta.plannerMode,
+      plannerFamily: best.meta.plannerFamily,
+      plannerCategory: best.meta.plannerCategory,
+      plannerFamilySwitchReason: best.meta.plannerFamilySwitchReason,
       plannerReason: best.meta.plannerReason,
       plannerInputs: best.meta.plannerInputs,
       plannerIntent: best.meta.plannerIntent,

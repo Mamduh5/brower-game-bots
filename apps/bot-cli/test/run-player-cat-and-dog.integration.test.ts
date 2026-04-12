@@ -79,6 +79,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[1]?.strategySelectionReason).toBe("runtime-shot-planner");
         expect(result.attempts[1]?.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
         expect(result.attempts[1]?.strategySelectionDetails.plannerMode).toBe("runtime-shot-planner");
+        expect(result.attempts[1]?.strategySelectionDetails.plannerFamily).toBeTruthy();
+        expect(result.attempts[1]?.strategySelectionDetails.plannerCategory).toBeTruthy();
         expect(result.attempts[1]?.strategySelectionDetails.plannerInputs?.windDirection).toMatch(/left|right|calm/);
         expect(result.attempts[1]?.strategySelectionDetails.plannerIntent?.weaponKey).toBeDefined();
         expect(result.attempts[1]?.strategySelectionDetails.changedKnob).toBeDefined();
@@ -160,6 +162,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(attemptCompletedEvents[1]?.payload.strategySelectionReason).toBe("runtime-shot-planner");
         expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
         expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.plannerMode).toBe("runtime-shot-planner");
+        expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.plannerFamily).toBeTruthy();
+        expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.plannerCategory).toBeTruthy();
         expect(attemptCompletedEvents[1]?.payload.strategySelectionDetails.changedKnob).toBeDefined();
         expect(
           attemptCompletedEvents[1]?.payload.strategySelectionDetails.triggeredByVisualOutcomeLabel
@@ -190,6 +194,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.attempts[1].strategySelectionReason).toBe("runtime-shot-planner");
         expect(summaryJson.attempts[1].strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
         expect(summaryJson.attempts[1].strategySelectionDetails.plannerMode).toBe("runtime-shot-planner");
+        expect(summaryJson.attempts[1].strategySelectionDetails.plannerFamily).toBeTruthy();
+        expect(summaryJson.attempts[1].strategySelectionDetails.plannerCategory).toBeTruthy();
         expect(summaryJson.attempts[1].strategySelectionDetails.plannerInputs.windDirection).toMatch(/left|right|calm/);
         expect(summaryJson.attempts[1].strategySelectionDetails.plannerIntent.weaponKey).toBeDefined();
         expect(summaryJson.attempts[1].strategySelectionDetails.changedKnob).toBeDefined();

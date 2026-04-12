@@ -531,9 +531,12 @@ describe("selectCatAndDogAttemptStrategy", () => {
     expect(next.selectionDetails.plannerInputs?.projectileWindInfluenceMultiplier).toBe(2.1);
     expect(next.selectionDetails.plannerIntent?.powerTapCount).toBe(next.strategy.powerTapCount);
     expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("short");
-    expect(["powerTapCount", "angleTapCount"]).toContain(next.selectionDetails.changedKnob);
+    expect(["powerTapCount", "angleTapCount", "weaponKey"]).toContain(next.selectionDetails.changedKnob);
+    expect(next.selectionDetails.plannerFamily).toBe("high-arc-anti-headwind");
+    expect(next.selectionDetails.plannerCategory).toBe("default-runtime");
     expect(next.strategy.powerTapCount).toBeGreaterThanOrEqual(shortInHeadwind.strategy.powerTapCount + 2);
-    expect(next.selectionDetails.plannerReason).toContain("Headwind");
+    expect(next.selectionDetails.plannerReason?.toLowerCase()).toContain("headwind");
+    expect(next.strategy.weaponKey).toBe("normal");
   });
 
   it("changes the planned shot when the same recent visual outcome is paired with opposite wind context", () => {
@@ -621,7 +624,182 @@ describe("selectCatAndDogAttemptStrategy", () => {
 
     expect(headwindPlan.selectionDetails.plannerMode).toBe("runtime-shot-planner");
     expect(tailwindPlan.selectionDetails.plannerMode).toBe("runtime-shot-planner");
+    expect(headwindPlan.selectionDetails.plannerFamily).toBe("high-arc-anti-headwind");
+    expect(tailwindPlan.selectionDetails.plannerFamily).toBe("flatter-tailwind-trim");
     expect(headwindPlan.strategy.powerTapCount).toBeGreaterThan(tailwindPlan.strategy.powerTapCount);
     expect(headwindPlan.selectionDetails.plannerReason).not.toBe(tailwindPlan.selectionDetails.plannerReason);
+  });
+
+  it("switches away from a repeatedly failing self-side recovery family instead of replaying it again", () => {
+    const base = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "baseline"
+    }).strategy;
+
+    const firstRecovery: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "UNKNOWN",
+      strategy: {
+        ...base,
+        angleDirection: "right",
+        angleTapCount: 4,
+        powerTapCount: 4
+      },
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: true,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 0,
+        wallHits: 0,
+        misses: 1,
+        healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 1,
+        visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 1,
+        lastVisionShotOutcomeLabel: "self-side-impact",
+        damageDealt: 0,
+        damageTaken: 18,
+        runtimeStateAvailable: true,
+        windValue: 20,
+        windNormalized: 0.12,
+        windDirection: "right",
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1,
+        projectileGravityMultiplier: 1,
+        projectileWindInfluenceMultiplier: 1.1,
+        projectileSplashRadius: 22,
+        projectileDamageMin: 7,
+        projectileDamageMax: 12,
+        projectileWindupSeconds: 0.18,
+        preparedShotAngle: 52,
+        preparedShotPower: 620,
+        preparedShotKey: "normal"
+      },
+      planner: {
+        family: "self-side-recovery",
+        category: "recovery",
+        switchReason: null
+      }
+    };
+
+    const secondRecovery: CatAndDogAttemptFeedback = {
+      ...firstRecovery,
+      attemptNumber: 2,
+      strategy: {
+        ...firstRecovery.strategy,
+        attemptNumber: 2
+      },
+      diagnostics: {
+        ...firstRecovery.diagnostics,
+        damageTaken: 20
+      },
+      planner: {
+        family: "self-side-recovery",
+        category: "recovery",
+        switchReason: null
+      }
+    };
+
+    const next = selectCatAndDogAttemptStrategy({
+      attemptNumber: 3,
+      strategyMode: "baseline",
+      history: [firstRecovery, secondRecovery]
+    });
+
+    expect(next.selectionReason).toBe("runtime-shot-planner");
+    expect(next.selectionDetails.plannerFamily).toBe("medium-arc-default");
+    expect(next.selectionDetails.plannerCategory).toBe("default-runtime");
+    expect(next.selectionDetails.plannerFamilySwitchReason).toContain("Repeated self-side recovery");
+  });
+
+  it("uses a blocked-terrain escape family and can upgrade to heavy when splash makes that family safer", () => {
+    const base = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "baseline"
+    }).strategy;
+
+    const blockedAttempt: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "UNKNOWN",
+      strategy: {
+        ...base,
+        weaponKey: "normal",
+        angleDirection: "right",
+        angleTapCount: 2,
+        powerTapCount: 3
+      },
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: false,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 0,
+        wallHits: 1,
+        misses: 0,
+        healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 0,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 1,
+        visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 1,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "blocked",
+        damageDealt: 0,
+        damageTaken: 10,
+        runtimeStateAvailable: true,
+        windValue: 18,
+        windNormalized: 0.08,
+        windDirection: "right",
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1,
+        projectileGravityMultiplier: 1,
+        projectileWindInfluenceMultiplier: 1.05,
+        projectileSplashRadius: 72,
+        projectileDamageMin: 10,
+        projectileDamageMax: 24,
+        projectileWindupSeconds: 0.22,
+        preparedShotAngle: 44,
+        preparedShotPower: 560,
+        preparedShotKey: "normal"
+      }
+    };
+
+    const next = selectCatAndDogAttemptStrategy({
+      attemptNumber: 2,
+      strategyMode: "baseline",
+      history: [blockedAttempt]
+    });
+
+    expect(next.selectionReason).toBe("runtime-shot-planner");
+    expect(next.selectionDetails.plannerFamily).toBe("blocked-terrain-escape");
+    expect(next.selectionDetails.plannerCategory).toBe("blocked-escape");
+    expect(next.strategy.weaponKey).toBe("heavy");
+    expect(next.selectionDetails.changedKnob).toBe("weaponKey");
   });
 });

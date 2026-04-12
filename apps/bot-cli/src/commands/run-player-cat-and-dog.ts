@@ -252,7 +252,16 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       preparedShotAngle: attempt.diagnostics.preparedShotAngle,
       preparedShotPower: attempt.diagnostics.preparedShotPower,
       preparedShotKey: attempt.diagnostics.preparedShotKey
-    }
+    },
+    ...(attempt.strategySelectionDetails.plannerFamily && attempt.strategySelectionDetails.plannerCategory
+      ? {
+          planner: {
+            family: attempt.strategySelectionDetails.plannerFamily,
+            category: attempt.strategySelectionDetails.plannerCategory,
+            switchReason: attempt.strategySelectionDetails.plannerFamilySwitchReason
+          }
+        }
+      : {})
   };
 }
 
@@ -1025,10 +1034,16 @@ export async function runPlayerCatAndDog(
   const capturedArtifacts: ArtifactRef[] = [];
   const attempts: CatAndDogPlayerAttemptRecord[] = [];
   let report: RunReport | null = null;
+  let recentEvents: readonly RunEvent[] = [];
+
+  const appendTrackedEvent = async (event: RunEvent): Promise<void> => {
+    await container.runEngine.appendEvent(event);
+    recentEvents = [...recentEvents, event];
+  };
 
   const storeArtifactEvent = async (artifact: ArtifactRef): Promise<void> => {
     capturedArtifacts.push(artifact);
-    await container.runEngine.appendEvent({
+    await appendTrackedEvent({
       eventId: randomUUID(),
       runId: run.runId,
       sequence: await container.runEngine.nextSequence(run.runId),
@@ -1070,6 +1085,7 @@ export async function runPlayerCatAndDog(
 
     run = await container.runEngine.transitionPhase(run, "game_bootstrap");
     run = await container.runEngine.transitionPhase(run, "executing");
+    recentEvents = await container.runEngine.listEvents(run.runId);
 
     for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
       const strategySelection = selectCatAndDogAttemptStrategy({
@@ -1099,7 +1115,7 @@ export async function runPlayerCatAndDog(
           : {}
       );
 
-      await container.runEngine.appendEvent({
+      await appendTrackedEvent({
         eventId: randomUUID(),
         runId: run.runId,
         sequence: await container.runEngine.nextSequence(run.runId),
@@ -1130,7 +1146,7 @@ export async function runPlayerCatAndDog(
         summary: `Attempt ${attemptNumber} opening state.`,
         payload: buildObservationPayload(openingFrame, currentSnapshot)
       };
-      await container.runEngine.appendEvent(openingObservationEvent);
+      await appendTrackedEvent(openingObservationEvent);
 
       attemptArtifacts.push(
         await captureAttemptArtifact(attemptNumber, 10, "pre-gameplay-screen", "screenshot")
@@ -1179,7 +1195,7 @@ export async function runPlayerCatAndDog(
             ...currentSnapshot.semanticState
           },
           availableActions,
-          recentEvents: await container.runEngine.listEvents(run.runId)
+          recentEvents
         });
 
         if (decision.type === "complete") {
@@ -1230,7 +1246,7 @@ export async function runPlayerCatAndDog(
           }
 
           const actionResult = await environmentSession.execute(environmentAction);
-          await container.runEngine.appendEvent({
+          await appendTrackedEvent({
             eventId: randomUUID(),
             runId: run.runId,
             sequence: await container.runEngine.nextSequence(run.runId),
@@ -1288,7 +1304,7 @@ export async function runPlayerCatAndDog(
             visionNoChangeShots: diagnostics.visionNoChangeShots + 1
           };
         }
-        await container.runEngine.appendEvent({
+        await appendTrackedEvent({
           eventId: randomUUID(),
           runId: run.runId,
           sequence: await container.runEngine.nextSequence(run.runId),
@@ -1429,7 +1445,7 @@ export async function runPlayerCatAndDog(
       };
       attempts.push(attemptRecord);
 
-      await container.runEngine.appendEvent({
+      await appendTrackedEvent({
         eventId: randomUUID(),
         runId: run.runId,
         sequence: await container.runEngine.nextSequence(run.runId),
@@ -1537,7 +1553,7 @@ export async function runPlayerCatAndDog(
     await storeArtifactEvent(artifactIndex);
 
     const sortedArtifacts = [...capturedArtifacts].sort(byArtifactPath);
-    await container.runEngine.appendEvent({
+    await appendTrackedEvent({
       eventId: randomUUID(),
       runId: run.runId,
       sequence: await container.runEngine.nextSequence(run.runId),
