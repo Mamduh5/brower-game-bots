@@ -359,6 +359,28 @@ function buildHintSignature(snapshot: GameSnapshot): string | null {
   ].join("|");
 }
 
+function hasTriedFallbackFamily(shotHistory: readonly CatAndDogShotRecord[]): boolean {
+  return new Set(shotHistory.map((shot) => shot.family)).size >= 2;
+}
+
+function isResolvedFailureShot(shot: CatAndDogShotRecord): boolean {
+  const visualOutcomeLabel = shot.feedback.visualOutcomeLabel;
+  const shotResolutionCategory = shot.feedback.shotResolutionCategory;
+
+  return (
+    shot.feedback.familyFailed === true &&
+    (
+      shot.feedback.shotResolved === true ||
+      visualOutcomeLabel === "blocked" ||
+      visualOutcomeLabel === "self-side-impact" ||
+      visualOutcomeLabel === "short" ||
+      visualOutcomeLabel === "long" ||
+      shotResolutionCategory === "wall-hit" ||
+      shotResolutionCategory === "miss"
+    )
+  );
+}
+
 function detectAttemptOutcome(snapshot: GameSnapshot): AttemptOutcome | null {
   const outcome = snapshot.semanticState.outcome;
   if (outcome === "win") {
@@ -581,6 +603,18 @@ function detectStallReason(input: {
   shotHistory: readonly CatAndDogShotRecord[];
 }): string | null {
   const { snapshot, diagnostics, decisionActionId, unchangedObservationCycles, shotHistory } = input;
+  const fallbackFamilyTried = hasTriedFallbackFamily(shotHistory);
+  const recentShots = shotHistory.slice(-4);
+  const recentResolvedFailures = recentShots.filter((shot) => isResolvedFailureShot(shot));
+  const sameFamilyResolvedFailures =
+    recentResolvedFailures.length >= 3 &&
+    recentResolvedFailures.every((shot) => shot.family === recentResolvedFailures[0]?.family);
+  const repeatedBlockedOrSelfFailures =
+    recentResolvedFailures.filter(
+      (shot) =>
+        shot.feedback.visualOutcomeLabel === "blocked" || shot.feedback.visualOutcomeLabel === "self-side-impact"
+    ).length >= 2;
+
   if (
     snapshot.semanticState.endVisible === true ||
     snapshot.semanticState.outcome === "win" ||
@@ -591,34 +625,27 @@ function detectStallReason(input: {
 
   if (
     diagnostics.shotsFired > diagnostics.shotResolutionsObserved &&
+    decisionActionId === "wait-for-turn-resolution" &&
     snapshot.semanticState.playerTurnReady !== true &&
     snapshot.semanticState.visionChangeStrength !== "strong" &&
-    unchangedObservationCycles >= 2
+    (
+      snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
+      snapshot.semanticState.canvasHintCategory === "turn-status" ||
+      snapshot.semanticState.canvasHintCategory === "instructional" ||
+      snapshot.semanticState.shotResolutionCategory === "turn-start" ||
+      snapshot.semanticState.shotResolutionCategory === "aiming" ||
+      snapshot.semanticState.shotResolutionCategory === "windup"
+    ) &&
+    unchangedObservationCycles >= (fallbackFamilyTried ? 4 : 5)
   ) {
     return "unresolved-shot-loop";
   }
 
   if (
-    diagnostics.shotsFired > 0 &&
-    diagnostics.shotResolutionsObserved === 0 &&
-    snapshot.semanticState.playerTurnReady !== true &&
-    (
-      snapshot.semanticState.canvasHintCategory === "instructional" ||
-      snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
-      snapshot.semanticState.canvasHintCategory === "turn-status" ||
-      snapshot.semanticState.shotResolutionCategory === "turn-start" ||
-      snapshot.semanticState.shotResolutionCategory === "aiming" ||
-      snapshot.semanticState.shotResolutionCategory === "windup"
-    ) &&
-    unchangedObservationCycles >= 2
-  ) {
-    return "instructional-resolution-loop";
-  }
-
-  if (
     decisionActionId === "wait-for-turn-resolution" &&
+    fallbackFamilyTried &&
     snapshot.semanticState.playerTurnReady !== true &&
-    unchangedObservationCycles >= 3 &&
+    unchangedObservationCycles >= 5 &&
     (
       snapshot.semanticState.turnBannerVisible === true ||
       snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
@@ -630,32 +657,19 @@ function detectStallReason(input: {
   }
 
   if (
-    isTrue(snapshot.semanticState.gameplayEntered) &&
-    !isTrue(snapshot.semanticState.playerTurnReady) &&
-    !isTrue(snapshot.semanticState.turnBannerVisible) &&
-    !isTrue(snapshot.semanticState.endVisible) &&
-    (
-      snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
-      snapshot.semanticState.canvasHintCategory === "instructional"
-    ) &&
-    unchangedObservationCycles >= 2
+    fallbackFamilyTried &&
+    recentResolvedFailures.length >= 3 &&
+    sameFamilyResolvedFailures &&
+    recentResolvedFailures.every((shot) => shot.feedback.meaningfulProgress !== true)
   ) {
-    return "non-actionable-battle-state";
-  }
-
-  const recentShots = shotHistory.slice(-3);
-  if (
-    recentShots.length >= 3 &&
-    recentShots.every((shot) => shot.feedback.familyFailed === true) &&
-    recentShots.every((shot) => shot.family === recentShots[0]?.family)
-  ) {
-    return `family-exhausted:${recentShots[0]?.family ?? "unknown"}`;
+    return `family-exhausted:${recentResolvedFailures[0]?.family ?? "unknown"}`;
   }
 
   if (
-    recentShots.length >= 3 &&
-    recentShots.every((shot) => shot.feedback.familyFailed === true) &&
-    recentShots.every((shot) => shot.feedback.meaningfulProgress !== true)
+    fallbackFamilyTried &&
+    recentResolvedFailures.length >= 3 &&
+    recentResolvedFailures.every((shot) => shot.feedback.meaningfulProgress !== true) &&
+    repeatedBlockedOrSelfFailures
   ) {
     return "dead-shot-sequence";
   }

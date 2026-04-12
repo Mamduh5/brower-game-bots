@@ -262,6 +262,98 @@ describe("runPlayerCatAndDog integration", () => {
   );
 
   it(
+    "does not abort early on instructional or aiming-heavy sequences that still reach a terminal state",
+    async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "game-bots-player-cat-dog-instructional-"));
+      const sqlitePath = path.join(tempDir, "run.sqlite");
+      const artifactsPath = path.join(tempDir, "artifacts");
+      const overrideConfigPath = path.join(tempDir, "integration.override.yaml");
+      const fixturePath = path.join(repoRoot, "games", "cat-and-dog-web", "fixtures", "cat-and-dog-fixture.html");
+      const fixtureHtml = await readFile(fixturePath, "utf8");
+      const noisyTerminalFixtureHtml = fixtureHtml.replace(
+        "window.setTimeout(resolveShotOutcome, 150);",
+        [
+          "window.setTimeout(() => {",
+          "  state.phase = 'aiming';",
+          "  matchNote.textContent = 'CPU Dog sizes up the next shot.';",
+          "  canvasHint.textContent = 'Adjust angle, power, and projectile, then throw.';",
+          "  syncUi();",
+          "  window.setTimeout(resolveShotOutcome, 250);",
+          "}, 150);"
+        ].join("\n")
+      );
+
+      await writeFile(
+        overrideConfigPath,
+        [
+          "logging:",
+          "  level: debug",
+          "persistence:",
+          "  sqlite:",
+          `    filename: ${JSON.stringify(sqlitePath)}`,
+          "artifacts:",
+          `  rootDir: ${JSON.stringify(artifactsPath)}`
+        ].join("\n"),
+        "utf8"
+      );
+
+      const previousUrl = process.env.GAME_BOTS_CAT_AND_DOG_URL;
+      const server = createServer((_request, response) => {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(noisyTerminalFixtureHtml);
+      });
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+      });
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Failed to bind noisy terminal fixture server.");
+      }
+
+      process.env.GAME_BOTS_CAT_AND_DOG_URL = `http://127.0.0.1:${address.port}/play/desktop/`;
+
+      try {
+        const container = await createContainer({
+          cwd: repoRoot,
+          configPaths: [path.join(repoRoot, "config", "default.yaml"), overrideConfigPath]
+        });
+
+        const result = await runPlayerCatAndDog(container, {
+          maxAttempts: 1,
+          stopOnWin: true,
+          strategyMode: "baseline",
+          maxStepsPerAttempt: 12
+        });
+
+        expect(result.attempts).toHaveLength(1);
+        expect(result.attempts[0]?.outcome).toBe("LOSS");
+        expect(result.attempts[0]?.assessment).toBe("loss-with-damage");
+        expect(result.attempts[0]?.diagnostics.deadPathAbortReason).toBeNull();
+        expect(result.attempts[0]?.diagnostics.stalledLoopDetected).toBe(false);
+        expect(result.attempts[0]?.diagnostics.unknownTerminationKind).toBe("none");
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+
+            resolve();
+          });
+        });
+
+        if (previousUrl === undefined) {
+          delete process.env.GAME_BOTS_CAT_AND_DOG_URL;
+        } else {
+          process.env.GAME_BOTS_CAT_AND_DOG_URL = previousUrl;
+        }
+      }
+    },
+    45_000
+  );
+
+  it(
     "terminates a visibly stalled CPU turn loop early instead of spending the whole step budget",
     async () => {
       const tempDir = await mkdtemp(path.join(os.tmpdir(), "game-bots-player-cat-dog-stall-"));
@@ -334,7 +426,7 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.deadPathAbortReason).toBe("unresolved-shot-loop");
         expect(result.attempts[0]?.diagnostics.unknownTerminationKind).toBe("dead-path-protection");
         expect(result.attempts[0]?.diagnostics.stepBudgetReached).toBe(false);
-        expect(result.attempts[0]?.diagnostics.maxUnchangedObservationCycles).toBeGreaterThanOrEqual(2);
+        expect(result.attempts[0]?.diagnostics.maxUnchangedObservationCycles).toBeGreaterThanOrEqual(4);
         expect(result.attempts[0]?.diagnostics.observationCount).toBeGreaterThan(0);
         expect(result.attempts[0]?.finalState.endVisible).toBe(false);
         expect(result.attempts[0]?.finalState.endTitleText).toBeNull();
