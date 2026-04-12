@@ -426,9 +426,9 @@ describe("selectCatAndDogAttemptStrategy", () => {
         turnsObserved: 1,
         shotResolutionsObserved: 1,
         directHits: 0,
-        splashHits: 0,
+        splashHits: 1,
         wallHits: 0,
-        misses: 1,
+        misses: 0,
         healsObserved: 0,
         visionChangeSignals: 0,
         visionStrongChangeSignals: 0,
@@ -455,5 +455,80 @@ describe("selectCatAndDogAttemptStrategy", () => {
     expect(next.selectionReason).toBe("visual-correction-blocked");
     expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("blocked");
     expect(next.selectionDetails.changedKnob).toBe("angleTapCount");
+  });
+
+  it("uses wind plus projectile context to make a larger short-shot power correction when the current projectile is wind-sensitive", () => {
+    const initial = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "explore"
+    }).strategy;
+
+    const shortInHeadwind: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "UNKNOWN",
+      strategy: {
+        ...initial,
+        weaponKey: "light",
+        angleDirection: "right",
+        powerTapCount: 2
+      },
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: false,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 0,
+        wallHits: 0,
+        misses: 1,
+        healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 1,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "short",
+        damageDealt: 18,
+        damageTaken: 12,
+        runtimeStateAvailable: true,
+        windValue: -120,
+        windNormalized: -0.85,
+        windDirection: "left",
+        projectileLabel: "Light",
+        projectileWeight: 0.66,
+        projectileLaunchSpeedMultiplier: 1.08,
+        projectileGravityMultiplier: 0.84,
+        projectileWindInfluenceMultiplier: 2.1,
+        projectileSplashRadius: 32,
+        projectileDamageMin: 3,
+        projectileDamageMax: 8,
+        projectileWindupSeconds: 0.12,
+        preparedShotAngle: 48,
+        preparedShotPower: 520,
+        preparedShotKey: "light"
+      }
+    };
+
+    const next = selectCatAndDogAttemptStrategy({
+      attemptNumber: 2,
+      strategyMode: "explore",
+      history: [shortInHeadwind]
+    });
+
+    expect(next.selectionReason).toBe("visual-correction-short");
+    expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("short");
+    expect(next.selectionDetails.changedKnob).toBe("powerTapCount");
+    expect(next.strategy.powerTapCount).toBeGreaterThanOrEqual(shortInHeadwind.strategy.powerTapCount + 2);
+    expect(next.selectionDetails.expectedMutationReason).toContain("Headwind");
   });
 });

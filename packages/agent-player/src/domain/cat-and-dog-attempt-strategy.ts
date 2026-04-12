@@ -60,7 +60,23 @@ export const CatAndDogAttemptDiagnosticsSchema = z.object({
   visionSelfSideShots: z.number().int().nonnegative(),
   lastVisionShotOutcomeLabel: CatAndDogVisionShotOutcomeLabelSchema,
   damageDealt: z.number().int().nonnegative().nullable(),
-  damageTaken: z.number().int().nonnegative().nullable()
+  damageTaken: z.number().int().nonnegative().nullable(),
+  runtimeStateAvailable: z.boolean().default(false),
+  windValue: z.number().nullable().default(null),
+  windNormalized: z.number().nullable().default(null),
+  windDirection: z.enum(["left", "right", "calm", "unknown"]).default("unknown"),
+  projectileLabel: z.string().nullable().default(null),
+  projectileWeight: z.number().nullable().default(null),
+  projectileLaunchSpeedMultiplier: z.number().nullable().default(null),
+  projectileGravityMultiplier: z.number().nullable().default(null),
+  projectileWindInfluenceMultiplier: z.number().nullable().default(null),
+  projectileSplashRadius: z.number().nullable().default(null),
+  projectileDamageMin: z.number().nullable().default(null),
+  projectileDamageMax: z.number().nullable().default(null),
+  projectileWindupSeconds: z.number().nullable().default(null),
+  preparedShotAngle: z.number().nullable().default(null),
+  preparedShotPower: z.number().nullable().default(null),
+  preparedShotKey: z.string().nullable().default(null)
 });
 export type CatAndDogAttemptDiagnostics = z.infer<typeof CatAndDogAttemptDiagnosticsSchema>;
 
@@ -467,6 +483,85 @@ function buildVisualCorrectionReason(label: CatAndDogVisionShotOutcomeLabel): st
   }
 }
 
+function isTailwindForAnchor(feedback: CatAndDogAttemptFeedback): boolean {
+  return feedback.strategy.angleDirection === "right" && feedback.diagnostics.windDirection === "right";
+}
+
+function isHeadwindForAnchor(feedback: CatAndDogAttemptFeedback): boolean {
+  return feedback.strategy.angleDirection === "right" && feedback.diagnostics.windDirection === "left";
+}
+
+function hasStrongWindEffect(feedback: CatAndDogAttemptFeedback): boolean {
+  const windMagnitude = Math.abs(feedback.diagnostics.windNormalized ?? 0);
+  const influence = feedback.diagnostics.projectileWindInfluenceMultiplier ?? 1;
+  return windMagnitude * influence >= 0.75;
+}
+
+function resolveVisualCorrectionMagnitude(input: {
+  feedback: CatAndDogAttemptFeedback;
+  label: CatAndDogVisionShotOutcomeLabel;
+}): number {
+  const { feedback, label } = input;
+  const strongWindEffect = hasStrongWindEffect(feedback);
+  const heavyProjectile = (feedback.diagnostics.projectileWeight ?? 1) >= 1.35;
+  const highGravityProjectile = (feedback.diagnostics.projectileGravityMultiplier ?? 1) >= 1.15;
+  const lowLaunchSpeedProjectile = (feedback.diagnostics.projectileLaunchSpeedMultiplier ?? 1) <= 0.93;
+  const selfSideRecovery = label === "self-side-impact";
+
+  if (label === "short") {
+    if (isHeadwindForAnchor(feedback) && strongWindEffect) {
+      return 2;
+    }
+
+    return heavyProjectile || highGravityProjectile || lowLaunchSpeedProjectile ? 2 : 1;
+  }
+
+  if (label === "long") {
+    if (isTailwindForAnchor(feedback) && strongWindEffect) {
+      return 2;
+    }
+
+    return strongWindEffect && !heavyProjectile ? 2 : 1;
+  }
+
+  if (label === "blocked") {
+    return heavyProjectile || highGravityProjectile || isHeadwindForAnchor(feedback) ? 3 : 2;
+  }
+
+  if (selfSideRecovery) {
+    return strongWindEffect || heavyProjectile ? 3 : 2;
+  }
+
+  return 1;
+}
+
+function buildRuntimeCorrectionSuffix(
+  feedback: CatAndDogAttemptFeedback,
+  magnitude: number
+): string | null {
+  if (magnitude <= 1) {
+    return null;
+  }
+
+  if (isHeadwindForAnchor(feedback) && hasStrongWindEffect(feedback)) {
+    return " Headwind plus current projectile wind response justify a larger correction.";
+  }
+
+  if (isTailwindForAnchor(feedback) && hasStrongWindEffect(feedback)) {
+    return " Tailwind plus current projectile wind response justify a larger correction.";
+  }
+
+  if ((feedback.diagnostics.projectileWeight ?? 1) >= 1.35) {
+    return " Heavy projectile behavior justifies a larger correction.";
+  }
+
+  if ((feedback.diagnostics.projectileGravityMultiplier ?? 1) >= 1.15) {
+    return " Higher projectile drop justifies a larger correction.";
+  }
+
+  return " Current projectile behavior justifies a larger correction.";
+}
+
 export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback): number {
   const damageDealt = feedback.diagnostics.damageDealt ?? 0;
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
@@ -548,6 +643,10 @@ function buildAnchorCandidates(input: {
 }): Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> {
   const { anchor, attemptNumber, strategyMode, visualCorrectionSignal } = input;
   const base = cloneStrategyWithAttemptNumber(anchor.strategy, attemptNumber);
+  const visualCorrectionMagnitude = resolveVisualCorrectionMagnitude({
+    feedback: anchor,
+    label: visualCorrectionSignal
+  });
   const candidates: Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> = [
     {
       strategy: base,
@@ -597,7 +696,12 @@ function buildAnchorCandidates(input: {
       return;
     }
 
-    pushMutation(strategy, changedKnob, reason, label);
+    pushMutation(
+      strategy,
+      changedKnob,
+      `${reason}${buildRuntimeCorrectionSuffix(anchor, visualCorrectionMagnitude) ?? ""}`,
+      label
+    );
   };
 
   if (visualCorrectionSignal === "short") {
@@ -605,7 +709,7 @@ function buildAnchorCandidates(input: {
       cloneStrategyWithAttemptNumber(
         {
           ...base,
-          powerTapCount: clampTapCount(base.powerTapCount + 1)
+          powerTapCount: clampTapCount(base.powerTapCount + visualCorrectionMagnitude)
         },
         attemptNumber
       ),
@@ -619,7 +723,7 @@ function buildAnchorCandidates(input: {
       cloneStrategyWithAttemptNumber(
         {
           ...base,
-          powerTapCount: clampTapCount(base.powerTapCount - 1)
+          powerTapCount: clampTapCount(base.powerTapCount - visualCorrectionMagnitude)
         },
         attemptNumber
       ),
@@ -633,7 +737,7 @@ function buildAnchorCandidates(input: {
       cloneStrategyWithAttemptNumber(
         {
           ...base,
-          angleTapCount: clampTapCount(base.angleTapCount + 2)
+          angleTapCount: clampTapCount(base.angleTapCount + visualCorrectionMagnitude)
         },
         attemptNumber
       ),
@@ -676,7 +780,7 @@ function buildAnchorCandidates(input: {
         {
           ...base,
           angleDirection: "right",
-          angleTapCount: clampTapCount(base.angleTapCount + 2)
+          angleTapCount: clampTapCount(base.angleTapCount + visualCorrectionMagnitude)
         },
         attemptNumber
       ),

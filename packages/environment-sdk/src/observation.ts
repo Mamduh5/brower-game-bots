@@ -14,7 +14,13 @@ export type ObservationMode = z.infer<typeof ObservationModeSchema>;
 
 export const ObservationRequestSchema = z.object({
   modes: z.array(ObservationModeSchema).min(1),
-  correlationId: z.string().min(1).optional()
+  correlationId: z.string().min(1).optional(),
+  runtimeProbe: z
+    .object({
+      id: z.string().min(1),
+      script: z.string().min(1)
+    })
+    .optional()
 });
 export type ObservationRequest = z.infer<typeof ObservationRequestSchema>;
 

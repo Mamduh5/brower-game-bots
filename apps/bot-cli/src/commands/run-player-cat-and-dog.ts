@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
 import type { ArtifactRef, JsonObject, JsonValue, RunEvent, RunRecord, RunReport, RunRequest } from "@game-bots/contracts";
+import type { ObservationRequest } from "@game-bots/environment-sdk";
 import {
   type CatAndDogAttemptDiagnostics,
   type CatAndDogAttemptFeedback,
@@ -14,7 +15,10 @@ import {
 } from "@game-bots/agent-player";
 import { PlaywrightEnvironmentPort } from "@game-bots/environment-playwright";
 import type { GameSnapshot } from "@game-bots/game-sdk";
-import { CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID } from "@game-bots/cat-and-dog-web";
+import {
+  buildCatAndDogObservationRequest,
+  CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
+} from "@game-bots/cat-and-dog-web";
 import { toJsonReport } from "@game-bots/reporting";
 import { SystemClock } from "@game-bots/runtime-core";
 
@@ -99,6 +103,23 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   playerHpEnd: number | null;
   cpuHpStart: number | null;
   cpuHpEnd: number | null;
+  runtimeStateAvailable: boolean;
+  runtimeStateSource: "fixture-hook" | "game-instance" | "error" | "unavailable";
+  windValue: number | null;
+  windNormalized: number | null;
+  windDirection: "left" | "right" | "calm" | "unknown";
+  projectileLabel: string | null;
+  projectileWeight: number | null;
+  projectileLaunchSpeedMultiplier: number | null;
+  projectileGravityMultiplier: number | null;
+  projectileWindInfluenceMultiplier: number | null;
+  projectileSplashRadius: number | null;
+  projectileDamageMin: number | null;
+  projectileDamageMax: number | null;
+  projectileWindupSeconds: number | null;
+  preparedShotAngle: number | null;
+  preparedShotPower: number | null;
+  preparedShotKey: string | null;
 }
 
 export interface CatAndDogPlayerAttemptRecord {
@@ -214,7 +235,23 @@ function buildAttemptFeedback(attempt: CatAndDogPlayerAttemptRecord): CatAndDogA
       visionSelfSideShots: attempt.diagnostics.visionSelfSideShots,
       lastVisionShotOutcomeLabel: attempt.diagnostics.lastVisionShotOutcomeLabel,
       damageDealt: attempt.diagnostics.damageDealt,
-      damageTaken: attempt.diagnostics.damageTaken
+      damageTaken: attempt.diagnostics.damageTaken,
+      runtimeStateAvailable: attempt.diagnostics.runtimeStateAvailable,
+      windValue: attempt.diagnostics.windValue,
+      windNormalized: attempt.diagnostics.windNormalized,
+      windDirection: attempt.diagnostics.windDirection,
+      projectileLabel: attempt.diagnostics.projectileLabel,
+      projectileWeight: attempt.diagnostics.projectileWeight,
+      projectileLaunchSpeedMultiplier: attempt.diagnostics.projectileLaunchSpeedMultiplier,
+      projectileGravityMultiplier: attempt.diagnostics.projectileGravityMultiplier,
+      projectileWindInfluenceMultiplier: attempt.diagnostics.projectileWindInfluenceMultiplier,
+      projectileSplashRadius: attempt.diagnostics.projectileSplashRadius,
+      projectileDamageMin: attempt.diagnostics.projectileDamageMin,
+      projectileDamageMax: attempt.diagnostics.projectileDamageMax,
+      projectileWindupSeconds: attempt.diagnostics.projectileWindupSeconds,
+      preparedShotAngle: attempt.diagnostics.preparedShotAngle,
+      preparedShotPower: attempt.diagnostics.preparedShotPower,
+      preparedShotKey: attempt.diagnostics.preparedShotKey
     }
   };
 }
@@ -311,6 +348,23 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     cpuHpMax: toJsonValue(snapshot.semanticState.cpuHpMax),
     hpTrackingAvailable: toJsonValue(snapshot.semanticState.hpTrackingAvailable),
     progressSignalSource: toJsonValue(snapshot.semanticState.progressSignalSource),
+    runtimeStateAvailable: toJsonValue(snapshot.semanticState.runtimeStateAvailable),
+    runtimeStateSource: toJsonValue(snapshot.semanticState.runtimeStateSource),
+    windValue: toJsonValue(snapshot.semanticState.windValue),
+    windNormalized: toJsonValue(snapshot.semanticState.windNormalized),
+    windDirection: toJsonValue(snapshot.semanticState.windDirection),
+    projectileLabel: toJsonValue(snapshot.semanticState.projectileLabel),
+    projectileWeight: toJsonValue(snapshot.semanticState.projectileWeight),
+    projectileLaunchSpeedMultiplier: toJsonValue(snapshot.semanticState.projectileLaunchSpeedMultiplier),
+    projectileGravityMultiplier: toJsonValue(snapshot.semanticState.projectileGravityMultiplier),
+    projectileWindInfluenceMultiplier: toJsonValue(snapshot.semanticState.projectileWindInfluenceMultiplier),
+    projectileSplashRadius: toJsonValue(snapshot.semanticState.projectileSplashRadius),
+    projectileDamageMin: toJsonValue(snapshot.semanticState.projectileDamageMin),
+    projectileDamageMax: toJsonValue(snapshot.semanticState.projectileDamageMax),
+    projectileWindupSeconds: toJsonValue(snapshot.semanticState.projectileWindupSeconds),
+    preparedShotAngle: toJsonValue(snapshot.semanticState.preparedShotAngle),
+    preparedShotPower: toJsonValue(snapshot.semanticState.preparedShotPower),
+    preparedShotKey: toJsonValue(snapshot.semanticState.preparedShotKey),
     turnCounter: toJsonValue(snapshot.semanticState.turnCounter),
     shotResolutionCategory: toJsonValue(snapshot.semanticState.shotResolutionCategory),
     shotResolved: toJsonValue(snapshot.semanticState.shotResolved),
@@ -510,7 +564,24 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     playerHpStart: null,
     playerHpEnd: null,
     cpuHpStart: null,
-    cpuHpEnd: null
+    cpuHpEnd: null,
+    runtimeStateAvailable: false,
+    runtimeStateSource: "unavailable",
+    windValue: null,
+    windNormalized: null,
+    windDirection: "unknown",
+    projectileLabel: null,
+    projectileWeight: null,
+    projectileLaunchSpeedMultiplier: null,
+    projectileGravityMultiplier: null,
+    projectileWindInfluenceMultiplier: null,
+    projectileSplashRadius: null,
+    projectileDamageMin: null,
+    projectileDamageMax: null,
+    projectileWindupSeconds: null,
+    preparedShotAngle: null,
+    preparedShotPower: null,
+    preparedShotKey: null
   };
 }
 
@@ -548,6 +619,35 @@ function updateAttemptProgressFromSnapshot(
   let nextDiagnostics = updateAttemptDiagnostics(diagnostics, snapshot);
   const playerHpValue = readSemanticNumber(snapshot, "playerHpValue");
   const cpuHpValue = readSemanticNumber(snapshot, "cpuHpValue");
+  const windValue = readSemanticNumber(snapshot, "windValue");
+  const windNormalized = readSemanticNumber(snapshot, "windNormalized");
+  const projectileWeight = readSemanticNumber(snapshot, "projectileWeight");
+  const projectileLaunchSpeedMultiplier = readSemanticNumber(snapshot, "projectileLaunchSpeedMultiplier");
+  const projectileGravityMultiplier = readSemanticNumber(snapshot, "projectileGravityMultiplier");
+  const projectileWindInfluenceMultiplier = readSemanticNumber(snapshot, "projectileWindInfluenceMultiplier");
+  const projectileSplashRadius = readSemanticNumber(snapshot, "projectileSplashRadius");
+  const projectileDamageMin = readSemanticNumber(snapshot, "projectileDamageMin");
+  const projectileDamageMax = readSemanticNumber(snapshot, "projectileDamageMax");
+  const projectileWindupSeconds = readSemanticNumber(snapshot, "projectileWindupSeconds");
+  const preparedShotAngle = readSemanticNumber(snapshot, "preparedShotAngle");
+  const preparedShotPower = readSemanticNumber(snapshot, "preparedShotPower");
+  const runtimeStateAvailable = snapshot.semanticState.runtimeStateAvailable === true;
+  const runtimeStateSource =
+    snapshot.semanticState.runtimeStateSource === "fixture-hook" ||
+    snapshot.semanticState.runtimeStateSource === "game-instance" ||
+    snapshot.semanticState.runtimeStateSource === "error"
+      ? snapshot.semanticState.runtimeStateSource
+      : "unavailable";
+  const windDirection =
+    snapshot.semanticState.windDirection === "left" ||
+    snapshot.semanticState.windDirection === "right" ||
+    snapshot.semanticState.windDirection === "calm"
+      ? snapshot.semanticState.windDirection
+      : "unknown";
+  const projectileLabel =
+    typeof snapshot.semanticState.projectileLabel === "string" ? snapshot.semanticState.projectileLabel : null;
+  const preparedShotKey =
+    typeof snapshot.semanticState.preparedShotKey === "string" ? snapshot.semanticState.preparedShotKey : null;
   const semanticProgressSignalSource = snapshot.semanticState.progressSignalSource;
   const visionChangeStrength =
     snapshot.semanticState.visionChangeStrength === "none" ||
@@ -648,7 +748,27 @@ function updateAttemptProgressFromSnapshot(
       nextDiagnostics.visionAvailableObserved || snapshot.semanticState.visionAvailable === true,
     hpTrackingAvailable,
     damageTrackingConfirmed,
-    progressSignalSource
+    progressSignalSource,
+    runtimeStateAvailable: nextDiagnostics.runtimeStateAvailable || runtimeStateAvailable,
+    runtimeStateSource: runtimeStateAvailable ? runtimeStateSource : nextDiagnostics.runtimeStateSource,
+    windValue: windValue ?? nextDiagnostics.windValue,
+    windNormalized: windNormalized ?? nextDiagnostics.windNormalized,
+    windDirection: runtimeStateAvailable ? windDirection : nextDiagnostics.windDirection,
+    projectileLabel: projectileLabel ?? nextDiagnostics.projectileLabel,
+    projectileWeight: projectileWeight ?? nextDiagnostics.projectileWeight,
+    projectileLaunchSpeedMultiplier:
+      projectileLaunchSpeedMultiplier ?? nextDiagnostics.projectileLaunchSpeedMultiplier,
+    projectileGravityMultiplier:
+      projectileGravityMultiplier ?? nextDiagnostics.projectileGravityMultiplier,
+    projectileWindInfluenceMultiplier:
+      projectileWindInfluenceMultiplier ?? nextDiagnostics.projectileWindInfluenceMultiplier,
+    projectileSplashRadius: projectileSplashRadius ?? nextDiagnostics.projectileSplashRadius,
+    projectileDamageMin: projectileDamageMin ?? nextDiagnostics.projectileDamageMin,
+    projectileDamageMax: projectileDamageMax ?? nextDiagnostics.projectileDamageMax,
+    projectileWindupSeconds: projectileWindupSeconds ?? nextDiagnostics.projectileWindupSeconds,
+    preparedShotAngle: preparedShotAngle ?? nextDiagnostics.preparedShotAngle,
+    preparedShotPower: preparedShotPower ?? nextDiagnostics.preparedShotPower,
+    preparedShotKey: preparedShotKey ?? nextDiagnostics.preparedShotKey
   };
 
   if (snapshot.semanticState.playerTurnReady === true && input.previousPlayerTurnReady !== true) {
@@ -859,20 +979,11 @@ function buildPlayerSummaryJson(input: {
   };
 }
 
-function buildObservationModes(input: {
+function buildObservationRequest(input: {
   decisionActionId?: string;
   snapshot?: GameSnapshot;
-}): Array<"dom" | "screenshot"> {
-  if (
-    input.decisionActionId === "start-cpu-match" ||
-    input.decisionActionId === "execute-planned-shot" ||
-    input.decisionActionId === "wait-for-turn-resolution" ||
-    input.snapshot?.semanticState.gameplayEntered === true
-  ) {
-    return ["dom", "screenshot"];
-  }
-
-  return ["dom"];
+}): ObservationRequest {
+  return buildCatAndDogObservationRequest(input);
 }
 
 export async function runPlayerCatAndDog(
@@ -1007,9 +1118,7 @@ export async function runPlayerCatAndDog(
 
       await gameSession.bootstrap(environmentSession);
 
-      const openingFrame = await environmentSession.observe({
-        modes: buildObservationModes({})
-      });
+      const openingFrame = await environmentSession.observe(buildObservationRequest({}));
       let currentSnapshot = await gameSession.translate(openingFrame);
       const openingObservationEvent: RunEvent = {
         eventId: randomUUID(),
@@ -1139,12 +1248,12 @@ export async function runPlayerCatAndDog(
           });
         }
 
-        const postActionFrame = await environmentSession.observe({
-          modes: buildObservationModes({
+        const postActionFrame = await environmentSession.observe(
+          buildObservationRequest({
             decisionActionId: decision.actionId,
             snapshot: currentSnapshot
           })
-        });
+        );
         currentSnapshot = await gameSession.translate(postActionFrame);
         ({
           diagnostics,

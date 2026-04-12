@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import type { JsonObject } from "@game-bots/contracts";
+import type { JsonObject, JsonValue } from "@game-bots/contracts";
 import type {
   ActionResult,
   CaptureRequest,
@@ -120,6 +120,27 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
           payload.primaryCanvasCaptureError =
             error instanceof Error ? error.message : "Primary canvas capture failed.";
         }
+      }
+    }
+
+    if (request.runtimeProbe) {
+      try {
+        const runtimeProbeValue = await page.evaluate(async ({ script }) => {
+          const evaluator = new Function(script) as () => unknown;
+          return await evaluator();
+        }, {
+          script: request.runtimeProbe.script
+        });
+
+        payload.runtimeProbe = {
+          id: request.runtimeProbe.id,
+          value: (runtimeProbeValue ?? null) as JsonValue
+        };
+      } catch (error) {
+        payload.runtimeProbe = {
+          id: request.runtimeProbe.id,
+          error: error instanceof Error ? error.message : "Runtime probe evaluation failed."
+        };
       }
     }
 

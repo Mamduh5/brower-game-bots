@@ -10,6 +10,7 @@ import type { Evaluator } from "@game-bots/runtime-core";
 
 import { MissingShellEvaluator } from "./evaluators/missing-shell-evaluator.js";
 import { CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID } from "./profiles.js";
+import { parseCatAndDogRuntimeState } from "./runtime-probe.js";
 import { CAT_AND_DOG_SMOKE_SCENARIO } from "./scenarios/smoke.scenario.js";
 import { CAT_AND_DOG_SELECTORS } from "./selectors.js";
 import { parseCatAndDogShell } from "./snapshot/parse-shell.js";
@@ -154,6 +155,7 @@ export class CatAndDogGameSession implements GameSession {
 
   async translate(frame: ObservationFrame): Promise<GameSnapshot> {
     const shell = parseCatAndDogShell(frame);
+    const runtime = parseCatAndDogRuntimeState(frame);
     const currentVisionFrame = parseCatAndDogVisionFrame(
       typeof frame.payload.primaryCanvasPngBase64 === "string" ? frame.payload.primaryCanvasPngBase64 : null
     );
@@ -206,6 +208,32 @@ export class CatAndDogGameSession implements GameSession {
         progressSignalSource: shell.progressSignalSource,
         shotResolutionCategory: shell.shotResolutionCategory,
         shotResolved: shell.shotResolved,
+        runtimeStateAvailable: runtime.runtimeStateAvailable,
+        runtimeStateSource: runtime.runtimeStateSource,
+        runtimeStateError: runtime.runtimeStateError,
+        runtimeScene: runtime.runtimeScene,
+        runtimePhase: runtime.runtimePhase,
+        runtimeMode: runtime.runtimeMode,
+        currentPlayerIndex: runtime.currentPlayerIndex,
+        currentPlayerName: runtime.currentPlayerName,
+        cpuDifficulty: runtime.cpuDifficulty,
+        windValue: runtime.windValue,
+        windNormalized: runtime.windNormalized,
+        windDirection: runtime.windDirection,
+        windMax: runtime.windMax,
+        preparedShotAngle: runtime.preparedShotAngle,
+        preparedShotPower: runtime.preparedShotPower,
+        preparedShotKey: runtime.preparedShotKey,
+        preparedShotBossEcho: runtime.preparedShotBossEcho,
+        projectileLabel: runtime.projectileLabel,
+        projectileWeight: runtime.projectileWeight,
+        projectileLaunchSpeedMultiplier: runtime.projectileLaunchSpeedMultiplier,
+        projectileGravityMultiplier: runtime.projectileGravityMultiplier,
+        projectileWindInfluenceMultiplier: runtime.projectileWindInfluenceMultiplier,
+        projectileSplashRadius: runtime.projectileSplashRadius,
+        projectileDamageMin: runtime.projectileDamageMin,
+        projectileDamageMax: runtime.projectileDamageMax,
+        projectileWindupSeconds: runtime.projectileWindupSeconds,
         endVisible: shell.endVisible,
         endTitleText: shell.endTitleText,
         endSubtitleText: shell.endSubtitleText,
@@ -254,6 +282,11 @@ export class CatAndDogGameSession implements GameSession {
         turnBannerVisible: shell.turnBannerVisible ? 1 : 0,
         shotResolved: shell.shotResolved ? 1 : 0,
         hpTrackingAvailable: shell.hpTrackingAvailable ? 1 : 0,
+        runtimeStateAvailable: runtime.runtimeStateAvailable ? 1 : 0,
+        windValue: runtime.windValue ?? 0,
+        windNormalized: runtime.windNormalized ?? 0,
+        projectileWeight: runtime.projectileWeight ?? 0,
+        projectileWindInfluenceMultiplier: runtime.projectileWindInfluenceMultiplier ?? 0,
         visionAvailable: visionSummary.visionAvailable ? 1 : 0,
         visionChangeRatio: visionSummary.visionChangeRatio ?? 0,
         visionStrongChange: visionSummary.visionChangeStrength === "strong" ? 1 : 0,

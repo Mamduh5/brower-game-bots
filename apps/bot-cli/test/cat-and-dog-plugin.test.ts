@@ -588,7 +588,33 @@ describe("cat-and-dog plugin", () => {
       modes: ["dom"],
       payload: {
         url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
-        domHtml: CPU_BATTLE_DOM
+        domHtml: CPU_BATTLE_DOM,
+        runtimeProbe: {
+          id: "cat-and-dog-shot-context",
+          value: {
+            available: true,
+            source: "fixture-hook",
+            scene: "battle",
+            phase: "aiming",
+            mode: "cpu",
+            currentPlayerIndex: 0,
+            currentPlayerName: "P1 Cat",
+            cpuDifficulty: "easy",
+            windValue: -72,
+            windMax: 190,
+            projectileConfig: {
+              label: "Normal",
+              weight: 1,
+              launchSpeedMultiplier: 1.01,
+              gravityMultiplier: 1.04,
+              windInfluenceMultiplier: 1.22,
+              splashRadius: 64,
+              damageMin: 9,
+              damageMax: 23,
+              windup: 0.17
+            }
+          }
+        }
       },
       summary: "battle"
     });
@@ -604,7 +630,15 @@ describe("cat-and-dog plugin", () => {
       cpuHpValue: 100,
       turnCounter: 1,
       shotResolutionCategory: "aiming",
-      shotResolved: false
+      shotResolved: false,
+      runtimeStateAvailable: true,
+      runtimeStateSource: "fixture-hook",
+      windValue: -72,
+      windNormalized: -0.379,
+      windDirection: "left",
+      projectileLabel: "Normal",
+      projectileWeight: 1,
+      projectileWindInfluenceMultiplier: 1.22
     });
     expect((await session.actions(battleSnapshot)).map((action) => action.actionId)).toEqual(["execute-planned-shot"]);
 
@@ -884,6 +918,75 @@ describe("cat-and-dog plugin", () => {
       progressSignalSource: "unavailable",
       shotResolutionCategory: "aiming",
       shotResolved: false
+    });
+  });
+
+  it("parses prepared-shot runtime context when the live game exposes it through the runtime probe", async () => {
+    const session = await catAndDogWebPlugin.createSession({
+      profileId: CAT_AND_DOG_PLAYER_UNTIL_WIN_PROFILE_ID
+    });
+
+    const snapshot = await session.translate({
+      capturedAt: new Date().toISOString(),
+      modes: ["dom"],
+      payload: {
+        url: "https://cat-and-dog-p6qd.onrender.com/play/desktop/",
+        domHtml: CPU_BATTLE_DOM,
+        runtimeProbe: {
+          id: "cat-and-dog-shot-context",
+          value: {
+            available: true,
+            source: "game-instance",
+            scene: "battle",
+            phase: "windup",
+            mode: "cpu",
+            currentPlayerIndex: 0,
+            currentPlayerName: "P1 Cat",
+            cpuDifficulty: "easy",
+            windValue: 96,
+            windMax: 190,
+            preparedThrow: {
+              playerIndex: 0,
+              angle: 48,
+              power: 720,
+              shotKey: "normal",
+              bossEcho: false
+            },
+            projectileConfig: {
+              label: "Normal",
+              weight: 1,
+              launchSpeedMultiplier: 1.01,
+              gravityMultiplier: 1.04,
+              windInfluenceMultiplier: 1.22,
+              splashRadius: 64,
+              damageMin: 9,
+              damageMax: 23,
+              windup: 0.17
+            }
+          }
+        }
+      },
+      summary: "runtime-shot-context"
+    });
+
+    expect(snapshot.semanticState).toMatchObject({
+      runtimeStateAvailable: true,
+      runtimeStateSource: "game-instance",
+      runtimeScene: "battle",
+      runtimePhase: "windup",
+      currentPlayerIndex: 0,
+      currentPlayerName: "P1 Cat",
+      cpuDifficulty: "easy",
+      windValue: 96,
+      windNormalized: 0.505,
+      windDirection: "right",
+      preparedShotAngle: 48,
+      preparedShotPower: 720,
+      preparedShotKey: "normal",
+      projectileWeight: 1,
+      projectileLaunchSpeedMultiplier: 1.01,
+      projectileGravityMultiplier: 1.04,
+      projectileWindInfluenceMultiplier: 1.22
     });
   });
 });
