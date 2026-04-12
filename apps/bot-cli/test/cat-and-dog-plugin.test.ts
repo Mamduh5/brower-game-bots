@@ -768,6 +768,10 @@ describe("cat-and-dog plugin", () => {
     expect(impactSnapshot.semanticState.visionChangeFocus).toBe("right");
     expect(impactSnapshot.semanticState.visionPlayerAnchorXRatio).toBeGreaterThan(0.08);
     expect(impactSnapshot.semanticState.visionEnemyAnchorXRatio).toBeGreaterThan(0.7);
+    expect(impactSnapshot.semanticState.visionImpactXRatio).toBeGreaterThan(0.55);
+    expect(impactSnapshot.semanticState.visionImpactXRatio).not.toBeNull();
+    expect(impactSnapshot.semanticState.visionImpactYRatio).toBeGreaterThan(0.3);
+    expect(impactSnapshot.semanticState.visionImpactYRatio).not.toBeNull();
     expect(["target-approach", "target-side"]).toContain(impactSnapshot.semanticState.visionImpactRegion);
     expect(["near-target", "target-side-impact", "long"]).toContain(
       impactSnapshot.semanticState.visionShotOutcomeLabel

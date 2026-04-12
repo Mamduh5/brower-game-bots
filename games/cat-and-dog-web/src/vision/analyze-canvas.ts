@@ -168,6 +168,7 @@ function summarizeDiffEnvelope(
 ): DiffEnvelope {
   let sampleCount = 0;
   let changedCount = 0;
+  let totalChangeWeight = 0;
   let weightedX = 0;
   let weightedY = 0;
   let selfSideWeight = 0;
@@ -191,6 +192,7 @@ function summarizeDiffEnvelope(
 
       const changeWeight = redDelta + greenDelta + blueDelta;
       changedCount += 1;
+      totalChangeWeight += changeWeight;
       weightedX += x * changeWeight;
       weightedY += y * changeWeight;
       const xRatio = x / current.width;
@@ -237,8 +239,8 @@ function summarizeDiffEnvelope(
   return {
     changeRatio,
     changedCount,
-    centroidXRatio: Number(clampRatio(weightedX / changedCount / current.width).toFixed(4)),
-    centroidYRatio: Number(clampRatio(weightedY / changedCount / current.height).toFixed(4)),
+    centroidXRatio: Number(clampRatio(weightedX / totalChangeWeight / current.width).toFixed(4)),
+    centroidYRatio: Number(clampRatio(weightedY / totalChangeWeight / current.height).toFixed(4)),
     dominantRegion,
   };
 }
@@ -318,7 +320,10 @@ function classifyShotOutcome(input: {
     usingAnchorAssist && input.changeStrength === "strong" ? "medium" : "low";
   const source = usingAnchorAssist ? "anchor-assisted" : "diff-only";
 
-  if (input.diff.dominantRegion === "self-side" || impactPoint.xRatio <= input.playerAnchor.xRatio + 0.12) {
+  if (
+    input.diff.dominantRegion === "self-side" ||
+    impactPoint.xRatio <= Math.min(0.3, input.playerAnchor.xRatio + 0.08)
+  ) {
     return {
       label: "self-side-impact",
       confidence,

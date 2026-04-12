@@ -404,6 +404,50 @@ function resolveVisualCorrectionSignal(
   return "none";
 }
 
+function isMeaningfulVisualCorrectionSignal(
+  label: CatAndDogVisionShotOutcomeLabel
+): boolean {
+  return (
+    label !== "none" &&
+    label !== "unknown" &&
+    label !== "no-meaningful-visual-change"
+  );
+}
+
+function resolveRecentLocalVisualCorrectionContext(input: {
+  history: readonly CatAndDogAttemptFeedback[];
+  anchorFeedback: CatAndDogAttemptFeedback | null;
+}): {
+  signal: CatAndDogVisionShotOutcomeLabel;
+  sourceAttemptNumber: number | null;
+} {
+  const { history, anchorFeedback } = input;
+
+  for (const feedback of [...history].reverse()) {
+    const signal = resolveVisualCorrectionSignal(feedback);
+    if (!isMeaningfulVisualCorrectionSignal(signal)) {
+      continue;
+    }
+
+    if (
+      anchorFeedback &&
+      strategyDistance(feedback.strategy, anchorFeedback.strategy) > 1
+    ) {
+      continue;
+    }
+
+    return {
+      signal,
+      sourceAttemptNumber: feedback.attemptNumber
+    };
+  }
+
+  return {
+    signal: "none",
+    sourceAttemptNumber: null
+  };
+}
+
 function buildVisualCorrectionReason(label: CatAndDogVisionShotOutcomeLabel): string | null {
   switch (label) {
     case "short":
@@ -925,8 +969,11 @@ export function selectCatAndDogAttemptStrategy(input: {
     topReference
       ? history.find((entry) => entry.attemptNumber === topReference.attemptNumber) ?? null
       : null;
-  const latestFeedback = history[history.length - 1] ?? null;
-  const visualCorrectionSignal = resolveVisualCorrectionSignal(latestFeedback);
+  const { signal: visualCorrectionSignal, sourceAttemptNumber: visualCorrectionSourceAttemptNumber } =
+    resolveRecentLocalVisualCorrectionContext({
+      history,
+      anchorFeedback
+    });
   const weakFingerprintCounts = new Map<string, number>();
   for (const previous of history) {
     if (!isWeakAttempt(previous)) {
@@ -1107,7 +1154,29 @@ export function selectCatAndDogAttemptStrategy(input: {
     if (candidate.meta.selectionMode === "one-knob-mutation") {
       score += localFailureCount === 0 ? 100 : localFailureCount >= 2 ? 220 : 280;
       if (candidate.meta.triggeredByVisualOutcomeLabel !== "none") {
-        score += 220;
+        score += 360;
+      }
+    }
+
+    if (isMeaningfulVisualCorrectionSignal(visualCorrectionSignal)) {
+      if (candidate.meta.triggeredByVisualOutcomeLabel === visualCorrectionSignal) {
+        score += localFailureCount >= 2 ? 180 : 340;
+      } else if (
+        candidate.meta.origin === "anchor-mutation" &&
+        candidate.meta.changedKnob !== "none"
+      ) {
+        score -= 120;
+      } else if (candidate.meta.origin === "catalog") {
+        score -= localFailureCount >= 2 ? 80 : 220;
+      }
+
+      if (
+        anchorFeedback &&
+        candidate.meta.origin === "catalog" &&
+        anchorDistance !== null &&
+        anchorDistance > 1
+      ) {
+        score -= 120;
       }
     }
 
@@ -1227,7 +1296,13 @@ export function selectCatAndDogAttemptStrategy(input: {
           : best.meta.selectionMode,
       changedKnob: best.meta.changedKnob,
       triggeredByVisualOutcomeLabel: best.meta.triggeredByVisualOutcomeLabel,
-      expectedMutationReason: best.meta.expectedMutationReason,
+      expectedMutationReason:
+        best.meta.expectedMutationReason ??
+        (
+          visualCorrectionSourceAttemptNumber !== null && isMeaningfulVisualCorrectionSignal(visualCorrectionSignal)
+            ? `Derived from visual outcome on attempt ${visualCorrectionSourceAttemptNumber}.`
+            : null
+        ),
       rankedRecentAttempts: rankedRecentMemory.map((entry) => ({
         attemptNumber: entry.attemptNumber,
         outcome: entry.outcome,

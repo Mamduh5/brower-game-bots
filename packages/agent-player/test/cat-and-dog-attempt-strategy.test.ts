@@ -273,7 +273,7 @@ describe("selectCatAndDogAttemptStrategy", () => {
     expect(next.selectionDetails.selectedFingerprint).not.toBe(next.selectionDetails.rankedRecentAttempts[0]?.fingerprint);
   });
 
-  it("switches to a one-knob local mutation after repeated local failures around the same anchor attempt", () => {
+  it("switches to a visually guided one-knob local mutation after repeated local failures around the same anchor attempt", () => {
     const anchor = selectCatAndDogAttemptStrategy({
       attemptNumber: 1,
       strategyMode: "baseline"
@@ -358,10 +358,102 @@ describe("selectCatAndDogAttemptStrategy", () => {
       history: [anchorLoss, repeatedLocalUnknown]
     });
 
-    expect(next.selectionReason.startsWith("anchor-one-knob-")).toBe(true);
+    expect(next.selectionReason).toBe("visual-correction-blocked");
     expect(next.selectionDetails.selectionMode).toBe("one-knob-mutation");
     expect(next.selectionDetails.topReferenceAttemptNumber).toBe(1);
-    expect(next.selectionDetails.changedKnob).not.toBe("none");
-    expect(next.selectionDetails.topReferenceDistance).toBe(1);
+    expect(next.selectionDetails.changedKnob).toBe("angleTapCount");
+    expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("blocked");
+    expect(next.selectionDetails.topReferenceDistance).toBe(2);
+  });
+
+  it("keeps using the latest meaningful local visual label even if the most recent nearby attempt had no useful visual trigger", () => {
+    const anchor = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "baseline"
+    }).strategy;
+
+    const meaningfulAttempt: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "UNKNOWN",
+      strategy: anchor,
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: false,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 1,
+        wallHits: 0,
+        misses: 0,
+        healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 1,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "blocked",
+        damageDealt: 12,
+        damageTaken: 8
+      }
+    };
+
+    const weakerNearbyAttempt: CatAndDogAttemptFeedback = {
+      attemptNumber: 2,
+      outcome: "UNKNOWN",
+      strategy: {
+        ...anchor,
+        attemptNumber: 2,
+        angleTapCount: Math.min(anchor.angleTapCount + 1, 5)
+      },
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: true,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 0,
+        wallHits: 0,
+        misses: 1,
+        healsObserved: 0,
+        visionChangeSignals: 0,
+        visionStrongChangeSignals: 0,
+        visionTargetSideSignals: 0,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 1,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 0,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "none",
+        damageDealt: 0,
+        damageTaken: 18
+      }
+    };
+
+    const next = selectCatAndDogAttemptStrategy({
+      attemptNumber: 3,
+      strategyMode: "baseline",
+      history: [meaningfulAttempt, weakerNearbyAttempt]
+    });
+
+    expect(next.selectionReason).toBe("visual-correction-blocked");
+    expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("blocked");
+    expect(next.selectionDetails.changedKnob).toBe("angleTapCount");
   });
 });
