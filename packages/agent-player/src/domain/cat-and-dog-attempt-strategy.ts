@@ -95,15 +95,43 @@ export interface CatAndDogRankedAttemptMemoryEntry {
   fingerprint: string;
 }
 
+export interface CatAndDogPlannerInputs {
+  windDirection: CatAndDogAttemptDiagnostics["windDirection"];
+  windNormalized: number | null;
+  projectileLabel: string | null;
+  projectileWeight: number | null;
+  projectileLaunchSpeedMultiplier: number | null;
+  projectileGravityMultiplier: number | null;
+  projectileWindInfluenceMultiplier: number | null;
+  preparedShotAngle: number | null;
+  preparedShotPower: number | null;
+  preparedShotKey: string | null;
+  recentVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
+}
+
+export interface CatAndDogPlannerIntent {
+  weaponKey: CatAndDogAttemptStrategy["weaponKey"];
+  angleDirection: CatAndDogAttemptStrategy["angleDirection"];
+  angleTapCount: number;
+  powerDirection: CatAndDogAttemptStrategy["powerDirection"];
+  powerTapCount: number;
+  settleMs: number;
+  turnResolutionWaitMs: number;
+}
+
 export interface CatAndDogStrategySelectionDetails {
   selectedFingerprint: string;
   exactUseCount: number;
   topReferenceAttemptNumber: number | null;
   topReferenceScore: number | null;
   topReferenceDistance: number | null;
-  selectionMode: "initial" | "catalog" | "exact-replay" | "one-knob-mutation" | "wider-fallback";
+  selectionMode: "initial" | "catalog" | "exact-replay" | "one-knob-mutation" | "runtime-planned" | "wider-fallback";
   changedKnob: "none" | "angleTapCount" | "powerTapCount" | "settleMs" | "turnResolutionWaitMs" | "weaponKey";
   triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
+  plannerMode: "none" | "runtime-shot-planner";
+  plannerReason: string | null;
+  plannerInputs: CatAndDogPlannerInputs | null;
+  plannerIntent: CatAndDogPlannerIntent | null;
   expectedMutationReason: string | null;
   rankedRecentAttempts: readonly CatAndDogRankedAttemptMemoryEntry[];
 }
@@ -268,15 +296,23 @@ type CatAndDogStrategyVariant = (typeof BASELINE_VARIANTS)[number] | (typeof EXP
 type RefinementKnob = CatAndDogStrategySelectionDetails["changedKnob"];
 
 interface CatAndDogCandidateMeta {
-  origin: "catalog" | "anchor-exact" | "anchor-mutation";
+  origin: "catalog" | "anchor-exact" | "anchor-mutation" | "planner";
   selectionMode: Exclude<CatAndDogStrategySelectionDetails["selectionMode"], "initial">;
   changedKnob: RefinementKnob;
   triggeredByVisualOutcomeLabel: CatAndDogVisionShotOutcomeLabel;
+  plannerMode: CatAndDogStrategySelectionDetails["plannerMode"];
+  plannerReason: string | null;
+  plannerInputs: CatAndDogPlannerInputs | null;
+  plannerIntent: CatAndDogPlannerIntent | null;
   expectedMutationReason: string | null;
   anchorAttemptNumber: number | null;
 }
 
 function getCandidateOriginPriority(meta: CatAndDogCandidateMeta): number {
+  if (meta.origin === "planner") {
+    return 4;
+  }
+
   if (meta.origin === "anchor-exact") {
     return 3;
   }
@@ -562,6 +598,227 @@ function buildRuntimeCorrectionSuffix(
   return " Current projectile behavior justifies a larger correction.";
 }
 
+function hasRuntimeShotPlannerContext(feedback: CatAndDogAttemptFeedback): boolean {
+  const diagnostics = feedback.diagnostics;
+  return (
+    diagnostics.runtimeStateAvailable === true &&
+    (
+      diagnostics.windNormalized !== null ||
+      diagnostics.projectileWeight !== null ||
+      diagnostics.projectileLaunchSpeedMultiplier !== null ||
+      diagnostics.projectileGravityMultiplier !== null ||
+      diagnostics.projectileWindInfluenceMultiplier !== null ||
+      diagnostics.preparedShotAngle !== null ||
+      diagnostics.preparedShotPower !== null ||
+      diagnostics.preparedShotKey !== null
+    )
+  );
+}
+
+function buildPlannerInputs(
+  feedback: CatAndDogAttemptFeedback,
+  visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel
+): CatAndDogPlannerInputs {
+  return {
+    windDirection: feedback.diagnostics.windDirection,
+    windNormalized: feedback.diagnostics.windNormalized,
+    projectileLabel: feedback.diagnostics.projectileLabel,
+    projectileWeight: feedback.diagnostics.projectileWeight,
+    projectileLaunchSpeedMultiplier: feedback.diagnostics.projectileLaunchSpeedMultiplier,
+    projectileGravityMultiplier: feedback.diagnostics.projectileGravityMultiplier,
+    projectileWindInfluenceMultiplier: feedback.diagnostics.projectileWindInfluenceMultiplier,
+    preparedShotAngle: feedback.diagnostics.preparedShotAngle,
+    preparedShotPower: feedback.diagnostics.preparedShotPower,
+    preparedShotKey: feedback.diagnostics.preparedShotKey,
+    recentVisualOutcomeLabel: visualCorrectionSignal
+  };
+}
+
+function resolveDominantChangedKnob(
+  base: CatAndDogAttemptStrategy,
+  planned: CatAndDogAttemptStrategy
+): RefinementKnob {
+  if (base.weaponKey !== planned.weaponKey) {
+    return "weaponKey";
+  }
+
+  const deltas: Array<{ knob: RefinementKnob; distance: number }> = [
+    { knob: "angleTapCount", distance: Math.abs(base.angleTapCount - planned.angleTapCount) },
+    { knob: "powerTapCount", distance: Math.abs(base.powerTapCount - planned.powerTapCount) },
+    { knob: "settleMs", distance: Math.abs(base.settleMs - planned.settleMs) },
+    {
+      knob: "turnResolutionWaitMs",
+      distance: Math.abs(base.turnResolutionWaitMs - planned.turnResolutionWaitMs)
+    }
+  ];
+  deltas.sort((left, right) => right.distance - left.distance);
+  return deltas[0]?.distance ? deltas[0].knob : "none";
+}
+
+function buildPlannerIntent(strategy: CatAndDogAttemptStrategy): CatAndDogPlannerIntent {
+  return {
+    weaponKey: strategy.weaponKey,
+    angleDirection: strategy.angleDirection,
+    angleTapCount: strategy.angleTapCount,
+    powerDirection: strategy.powerDirection,
+    powerTapCount: strategy.powerTapCount,
+    settleMs: strategy.settleMs,
+    turnResolutionWaitMs: strategy.turnResolutionWaitMs
+  };
+}
+
+function buildRuntimePlannerCandidate(input: {
+  anchor: CatAndDogAttemptFeedback;
+  attemptNumber: number;
+  visualCorrectionSignal: CatAndDogVisionShotOutcomeLabel;
+}): { strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta } | null {
+  const { anchor, attemptNumber, visualCorrectionSignal } = input;
+  if (!hasRuntimeShotPlannerContext(anchor)) {
+    return null;
+  }
+
+  const base = cloneStrategyWithAttemptNumber(anchor.strategy, attemptNumber);
+  const plannerInputs = buildPlannerInputs(anchor, visualCorrectionSignal);
+  const preparedShotAngle = anchor.diagnostics.preparedShotAngle;
+  const preparedShotPower = anchor.diagnostics.preparedShotPower;
+  const windMagnitude = Math.abs(anchor.diagnostics.windNormalized ?? 0);
+  const strongWindEffect = hasStrongWindEffect(anchor);
+  const heavyProjectile = (anchor.diagnostics.projectileWeight ?? 1) >= 1.35;
+  const highGravityProjectile = (anchor.diagnostics.projectileGravityMultiplier ?? 1) >= 1.15;
+  const lowLaunchSpeedProjectile = (anchor.diagnostics.projectileLaunchSpeedMultiplier ?? 1) <= 0.93;
+  const highWindInfluenceProjectile = (anchor.diagnostics.projectileWindInfluenceMultiplier ?? 1) >= 1.4;
+  const reasons: string[] = [];
+
+  let weaponKey = base.weaponKey;
+  let angleDirection = base.angleDirection;
+  let angleDelta = 0;
+  let powerDelta = 0;
+  let settleDelta = 0;
+  let turnResolutionWaitDelta = 0;
+
+  if (isHeadwindForAnchor(anchor) && windMagnitude >= 0.45) {
+    powerDelta += highWindInfluenceProjectile ? 2 : 1;
+    if (heavyProjectile || highGravityProjectile || lowLaunchSpeedProjectile) {
+      angleDelta += 1;
+    }
+    reasons.push("Headwind compensation around the last live shot context.");
+  } else if (isTailwindForAnchor(anchor) && windMagnitude >= 0.45) {
+    powerDelta -= highWindInfluenceProjectile ? 2 : 1;
+    if (!heavyProjectile && (preparedShotAngle ?? 50) >= 58) {
+      angleDelta -= 1;
+    }
+    reasons.push("Tailwind trim around the last live shot context.");
+  }
+
+  if (heavyProjectile || highGravityProjectile) {
+    angleDelta += 1;
+    reasons.push("Projectile drop profile favors a slightly higher arc.");
+  }
+
+  switch (visualCorrectionSignal) {
+    case "short":
+      powerDelta += highWindInfluenceProjectile || isHeadwindForAnchor(anchor) ? 2 : 1;
+      if (lowLaunchSpeedProjectile || highGravityProjectile || (preparedShotAngle ?? 50) <= 38) {
+        angleDelta += 1;
+      }
+      reasons.push("Recent impact looked short, so extend carry.");
+      break;
+    case "long":
+      powerDelta -= isTailwindForAnchor(anchor) || highWindInfluenceProjectile ? 2 : 1;
+      if (!heavyProjectile && (preparedShotAngle ?? 50) >= 60) {
+        angleDelta -= 1;
+      }
+      reasons.push("Recent impact looked long, so trim carry.");
+      break;
+    case "blocked":
+      angleDelta += heavyProjectile || highGravityProjectile ? 3 : 2;
+      if (isHeadwindForAnchor(anchor) && highWindInfluenceProjectile) {
+        powerDelta += 1;
+      }
+      reasons.push("Recent impact looked blocked, so raise the arc.");
+      break;
+    case "near-target":
+      settleDelta += 40;
+      turnResolutionWaitDelta += 120;
+      if (isHeadwindForAnchor(anchor)) {
+        powerDelta += 1;
+      } else if (isTailwindForAnchor(anchor)) {
+        powerDelta -= 1;
+      } else if ((preparedShotAngle ?? 50) <= 48) {
+        angleDelta += 1;
+      }
+      reasons.push("Recent impact was near target, so refine locally.");
+      break;
+    case "target-side-impact":
+      settleDelta += 50;
+      turnResolutionWaitDelta += 160;
+      if (isHeadwindForAnchor(anchor) && highWindInfluenceProjectile) {
+        powerDelta += 1;
+      } else if (isTailwindForAnchor(anchor) && windMagnitude >= 0.45) {
+        powerDelta -= 1;
+      }
+      reasons.push("Recent impact reached target side, so exploit the same region.");
+      break;
+    case "self-side-impact":
+      angleDirection = "right";
+      angleDelta += heavyProjectile || highGravityProjectile ? 3 : 2;
+      if (isHeadwindForAnchor(anchor)) {
+        powerDelta += 1;
+      }
+      if (
+        base.weaponKey !== "normal" &&
+        strongWindEffect &&
+        (base.weaponKey === "light" || base.weaponKey === "super")
+      ) {
+        weaponKey = "normal";
+        reasons.push("Switch back to a steadier projectile after self-side impact.");
+      }
+      reasons.push("Recent impact stayed on self side, so recover with a safer launch.");
+      break;
+    default:
+      if (preparedShotPower !== null && preparedShotPower < 420 && isHeadwindForAnchor(anchor)) {
+        powerDelta += 1;
+        reasons.push("Prepared power looked low for the current headwind.");
+      }
+      break;
+  }
+
+  const planned = cloneStrategyWithAttemptNumber(
+    {
+      ...base,
+      weaponKey,
+      angleDirection,
+      angleTapCount: clampTapCount(base.angleTapCount + angleDelta),
+      powerTapCount: clampTapCount(base.powerTapCount + powerDelta),
+      settleMs: clampSettleMs(base.settleMs + settleDelta),
+      turnResolutionWaitMs: clampTurnResolutionWaitMs(base.turnResolutionWaitMs + turnResolutionWaitDelta)
+    },
+    attemptNumber
+  );
+  const changedKnob = resolveDominantChangedKnob(base, planned);
+  const plannerReason =
+    reasons.length > 0
+      ? reasons.join(" ")
+      : "Use wind, projectile behavior, and prepared-shot context to replay the strongest live shot intentionally.";
+
+  return {
+    strategy: planned,
+    meta: {
+      origin: "planner",
+      selectionMode: "runtime-planned",
+      changedKnob,
+      triggeredByVisualOutcomeLabel:
+        isMeaningfulVisualCorrectionSignal(visualCorrectionSignal) ? visualCorrectionSignal : "none",
+      plannerMode: "runtime-shot-planner",
+      plannerReason,
+      plannerInputs,
+      plannerIntent: buildPlannerIntent(planned),
+      expectedMutationReason: plannerReason,
+      anchorAttemptNumber: anchor.attemptNumber
+    }
+  };
+}
+
 export function scoreCatAndDogAttemptFeedback(feedback: CatAndDogAttemptFeedback): number {
   const damageDealt = feedback.diagnostics.damageDealt ?? 0;
   const damageTaken = feedback.diagnostics.damageTaken ?? 0;
@@ -647,25 +904,38 @@ function buildAnchorCandidates(input: {
     feedback: anchor,
     label: visualCorrectionSignal
   });
-  const candidates: Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> = [
-    {
-      strategy: base,
-      meta: {
-        origin: "anchor-exact",
-        selectionMode: "exact-replay",
-        changedKnob: "none",
-        triggeredByVisualOutcomeLabel:
-          visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact"
-            ? visualCorrectionSignal
-            : "none",
-        expectedMutationReason:
-          visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact"
-            ? buildVisualCorrectionReason(visualCorrectionSignal)
-            : "Replay the strongest recent live shot exactly before widening.",
-        anchorAttemptNumber: anchor.attemptNumber
-      }
+  const candidates: Array<{ strategy: CatAndDogAttemptStrategy; meta: CatAndDogCandidateMeta }> = [];
+  const plannerCandidate = buildRuntimePlannerCandidate({
+    anchor,
+    attemptNumber,
+    visualCorrectionSignal
+  });
+
+  if (plannerCandidate) {
+    candidates.push(plannerCandidate);
+  }
+
+  candidates.push({
+    strategy: base,
+    meta: {
+      origin: "anchor-exact",
+      selectionMode: "exact-replay",
+      changedKnob: "none",
+      triggeredByVisualOutcomeLabel:
+        visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact"
+          ? visualCorrectionSignal
+          : "none",
+      plannerMode: "none",
+      plannerReason: null,
+      plannerInputs: null,
+      plannerIntent: null,
+      expectedMutationReason:
+        visualCorrectionSignal === "near-target" || visualCorrectionSignal === "target-side-impact"
+          ? buildVisualCorrectionReason(visualCorrectionSignal)
+          : "Replay the strongest recent live shot exactly before widening.",
+      anchorAttemptNumber: anchor.attemptNumber
     }
-  ];
+  });
 
   const pushMutation = (
     strategy: CatAndDogAttemptStrategy,
@@ -680,6 +950,10 @@ function buildAnchorCandidates(input: {
         selectionMode: "one-knob-mutation",
         changedKnob,
         triggeredByVisualOutcomeLabel,
+        plannerMode: "none",
+        plannerReason: null,
+        plannerInputs: null,
+        plannerIntent: null,
         expectedMutationReason,
         anchorAttemptNumber: anchor.attemptNumber
       }
@@ -973,6 +1247,10 @@ function buildSelectionReason(input: {
     return "initial-candidate";
   }
 
+  if (selectedMeta.plannerMode !== "none") {
+    return "runtime-shot-planner";
+  }
+
   if (selectedMeta.triggeredByVisualOutcomeLabel !== "none") {
     return `visual-correction-${selectedMeta.triggeredByVisualOutcomeLabel}`;
   }
@@ -1038,6 +1316,10 @@ export function selectCatAndDogAttemptStrategy(input: {
       selectionMode: "catalog" as const,
       changedKnob: "none" as const,
       triggeredByVisualOutcomeLabel: "none" as const,
+      plannerMode: "none" as const,
+      plannerReason: null,
+      plannerInputs: null,
+      plannerIntent: null,
       expectedMutationReason: null,
       anchorAttemptNumber: null
     }
@@ -1061,6 +1343,10 @@ export function selectCatAndDogAttemptStrategy(input: {
         selectionMode: "initial",
         changedKnob: "none",
         triggeredByVisualOutcomeLabel: "none",
+        plannerMode: "none",
+        plannerReason: null,
+        plannerInputs: null,
+        plannerIntent: null,
         expectedMutationReason: null,
         rankedRecentAttempts: []
       }
@@ -1100,8 +1386,9 @@ export function selectCatAndDogAttemptStrategy(input: {
               scoreCatAndDogAttemptFeedback(entry) <= scoreCatAndDogAttemptFeedback(anchorFeedback)
           ).length
       : 0;
+  const canUseRuntimePlanner = anchorFeedback && hasRuntimeShotPlannerContext(anchorFeedback);
   const anchorCandidates =
-    anchorFeedback && topReference && topReference.score >= 220
+    anchorFeedback && topReference && (topReference.score >= 220 || canUseRuntimePlanner)
       ? buildAnchorCandidates({
           anchor: anchorFeedback,
           attemptNumber: input.attemptNumber,
@@ -1109,6 +1396,9 @@ export function selectCatAndDogAttemptStrategy(input: {
           visualCorrectionSignal
         })
       : [];
+  const plannerCandidateAvailable = anchorCandidates.some(
+    (candidate) => candidate.meta.plannerMode === "runtime-shot-planner"
+  );
   const candidates = [
     ...anchorCandidates.map((candidate, index) => ({
       index,
@@ -1255,6 +1545,16 @@ export function selectCatAndDogAttemptStrategy(input: {
       }
     }
 
+    if (candidate.meta.selectionMode === "runtime-planned") {
+      score += topReference && topReference.score >= 260 ? 980 : 840;
+      if (candidate.meta.triggeredByVisualOutcomeLabel !== "none") {
+        score += 240;
+      }
+      if (candidate.meta.changedKnob !== "none") {
+        score += 110;
+      }
+    }
+
     if (candidate.meta.selectionMode === "one-knob-mutation") {
       score += localFailureCount === 0 ? 100 : localFailureCount >= 2 ? 220 : 280;
       if (candidate.meta.triggeredByVisualOutcomeLabel !== "none") {
@@ -1281,6 +1581,16 @@ export function selectCatAndDogAttemptStrategy(input: {
         anchorDistance > 1
       ) {
         score -= 120;
+      }
+    }
+
+    if (plannerCandidateAvailable && candidate.meta.plannerMode === "none") {
+      if (candidate.meta.origin === "catalog") {
+        score -= 420;
+      } else if (candidate.meta.selectionMode === "exact-replay") {
+        score -= 180;
+      } else if (candidate.meta.selectionMode === "one-knob-mutation") {
+        score -= 140;
       }
     }
 
@@ -1400,6 +1710,10 @@ export function selectCatAndDogAttemptStrategy(input: {
           : best.meta.selectionMode,
       changedKnob: best.meta.changedKnob,
       triggeredByVisualOutcomeLabel: best.meta.triggeredByVisualOutcomeLabel,
+      plannerMode: best.meta.plannerMode,
+      plannerReason: best.meta.plannerReason,
+      plannerInputs: best.meta.plannerInputs,
+      plannerIntent: best.meta.plannerIntent,
       expectedMutationReason:
         best.meta.expectedMutationReason ??
         (

@@ -525,10 +525,103 @@ describe("selectCatAndDogAttemptStrategy", () => {
       history: [shortInHeadwind]
     });
 
-    expect(next.selectionReason).toBe("visual-correction-short");
+    expect(next.selectionReason).toBe("runtime-shot-planner");
+    expect(next.selectionDetails.plannerMode).toBe("runtime-shot-planner");
+    expect(next.selectionDetails.plannerInputs?.windDirection).toBe("left");
+    expect(next.selectionDetails.plannerInputs?.projectileWindInfluenceMultiplier).toBe(2.1);
+    expect(next.selectionDetails.plannerIntent?.powerTapCount).toBe(next.strategy.powerTapCount);
     expect(next.selectionDetails.triggeredByVisualOutcomeLabel).toBe("short");
-    expect(next.selectionDetails.changedKnob).toBe("powerTapCount");
+    expect(["powerTapCount", "angleTapCount"]).toContain(next.selectionDetails.changedKnob);
     expect(next.strategy.powerTapCount).toBeGreaterThanOrEqual(shortInHeadwind.strategy.powerTapCount + 2);
-    expect(next.selectionDetails.expectedMutationReason).toContain("Headwind");
+    expect(next.selectionDetails.plannerReason).toContain("Headwind");
+  });
+
+  it("changes the planned shot when the same recent visual outcome is paired with opposite wind context", () => {
+    const base = selectCatAndDogAttemptStrategy({
+      attemptNumber: 1,
+      strategyMode: "baseline"
+    }).strategy;
+
+    const headwindFeedback: CatAndDogAttemptFeedback = {
+      attemptNumber: 1,
+      outcome: "UNKNOWN",
+      strategy: {
+        ...base,
+        angleDirection: "right",
+        powerTapCount: 2
+      },
+      diagnostics: {
+        semanticActionCount: 5,
+        shotsFired: 1,
+        waitActions: 1,
+        gameplayEnteredObserved: true,
+        playerTurnReadyObserved: true,
+        endOverlayObserved: false,
+        stepBudgetReached: false,
+        turnsObserved: 1,
+        shotResolutionsObserved: 1,
+        directHits: 0,
+        splashHits: 1,
+        wallHits: 0,
+        misses: 0,
+        healsObserved: 0,
+        visionChangeSignals: 1,
+        visionStrongChangeSignals: 1,
+        visionTargetSideSignals: 1,
+        visionTerrainSideSignals: 0,
+        visionNoChangeShots: 0,
+        visionNearTargetShots: 0,
+        visionBlockedShots: 0,
+        visionShortShots: 1,
+        visionLongShots: 0,
+        visionSelfSideShots: 0,
+        lastVisionShotOutcomeLabel: "short",
+        damageDealt: 16,
+        damageTaken: 12,
+        runtimeStateAvailable: true,
+        windValue: -90,
+        windNormalized: -0.72,
+        windDirection: "left",
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1,
+        projectileGravityMultiplier: 1,
+        projectileWindInfluenceMultiplier: 1.8,
+        projectileSplashRadius: 18,
+        projectileDamageMin: 8,
+        projectileDamageMax: 14,
+        projectileWindupSeconds: 0.18,
+        preparedShotAngle: 40,
+        preparedShotPower: 460,
+        preparedShotKey: "normal"
+      }
+    };
+
+    const tailwindFeedback: CatAndDogAttemptFeedback = {
+      ...headwindFeedback,
+      attemptNumber: 2,
+      diagnostics: {
+        ...headwindFeedback.diagnostics,
+        windValue: 90,
+        windNormalized: 0.72,
+        windDirection: "right"
+      }
+    };
+
+    const headwindPlan = selectCatAndDogAttemptStrategy({
+      attemptNumber: 3,
+      strategyMode: "baseline",
+      history: [headwindFeedback]
+    });
+    const tailwindPlan = selectCatAndDogAttemptStrategy({
+      attemptNumber: 3,
+      strategyMode: "baseline",
+      history: [tailwindFeedback]
+    });
+
+    expect(headwindPlan.selectionDetails.plannerMode).toBe("runtime-shot-planner");
+    expect(tailwindPlan.selectionDetails.plannerMode).toBe("runtime-shot-planner");
+    expect(headwindPlan.strategy.powerTapCount).toBeGreaterThan(tailwindPlan.strategy.powerTapCount);
+    expect(headwindPlan.selectionDetails.plannerReason).not.toBe(tailwindPlan.selectionDetails.plannerReason);
   });
 });
