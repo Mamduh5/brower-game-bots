@@ -116,6 +116,9 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.waitHeavyRatio).toBeGreaterThan(0);
         expect(result.attempts[0]?.diagnostics.nonWaitOverheadMs).toBeGreaterThanOrEqual(0);
         expect(result.attempts[0]?.diagnostics.observationCount).toBeGreaterThan(0);
+        expect(result.attempts[0]?.shotHistory.length).toBeGreaterThan(0);
+        expect(result.attempts[0]?.diagnostics.plannedShots).toBe(result.attempts[0]?.shotHistory.length);
+        expect(result.attempts[0]?.diagnostics.uniqueShotFingerprints).toBeGreaterThan(0);
         expect(result.attempts[1]?.diagnostics.endOverlayObserved).toBe(true);
         expect(result.attempts[1]?.diagnostics.damageDealt).toBe(100);
         expect(result.attempts[1]?.diagnostics.damageTaken).toBe(22);
@@ -190,6 +193,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.summary.mostProgressiveAttemptAssessment).toBe("won-round");
         expect(summaryJson.summary.mostProgressiveAttemptScore).toBeGreaterThan(500);
         expect(summaryJson.summary.winningStrategy).toBeUndefined();
+        expect(summaryJson.strategyInsights.strongestFailedFamily).toBeTruthy();
+        expect(summaryJson.strategyInsights.lossesWithMeaningfulAdaptation).toBeGreaterThanOrEqual(0);
         expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
         expect(summaryJson.attempts[1].strategySelectionReason).toBe("runtime-shot-planner");
         expect(summaryJson.attempts[1].strategySelectionDetails.topReferenceAttemptNumber).toBe(1);
@@ -219,6 +224,9 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.attempts[0].diagnostics.elapsedMs).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.waitHeavyRatio).toBeGreaterThan(0);
         expect(summaryJson.attempts[0].diagnostics.nonWaitOverheadMs).toBeGreaterThanOrEqual(0);
+        expect(summaryJson.attempts[0].diagnostics.plannedShots).toBeGreaterThan(0);
+        expect(summaryJson.attempts[0].shotHistory.length).toBeGreaterThan(0);
+        expect(summaryJson.attempts[0].shotHistory[0].family).toBeTruthy();
         expect(summaryJson.attempts[1].diagnostics.damageDealt).toBe(100);
         expect(summaryJson.attempts[1].finalState.windDirection).toMatch(/left|right|calm/);
         expect(summaryJson.attempts[1].finalState.visionImpactCategory).not.toBe("none");

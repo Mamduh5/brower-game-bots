@@ -6,6 +6,9 @@ import type { ObservationRequest } from "@game-bots/environment-sdk";
 import {
   type CatAndDogAttemptDiagnostics,
   type CatAndDogAttemptFeedback,
+  type CatAndDogShotExecutionPlan,
+  type CatAndDogShotFeedbackRecord,
+  planCatAndDogShotExecution,
   type CatAndDogStrategySelectionDetails,
   scoreCatAndDogAttemptFeedback,
   selectCatAndDogAttemptStrategy,
@@ -57,6 +60,10 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   resolutionWaitMs: number;
   waitHeavyRatio: number;
   nonWaitOverheadMs: number;
+  observationCaptureMs: number;
+  snapshotTranslationMs: number;
+  actionExecutionMs: number;
+  artifactCaptureMs: number;
   observationCount: number;
   maxUnchangedObservationCycles: number;
   stalledLoopDetected: boolean;
@@ -120,6 +127,31 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   preparedShotAngle: number | null;
   preparedShotPower: number | null;
   preparedShotKey: string | null;
+  plannedShots: number;
+  uniqueShotFingerprints: number;
+  repeatedShotPlans: number;
+  shotFamilySwitches: number;
+  meaningfulShotFeedbacks: number;
+  nonProductiveShots: number;
+  strongestFailedFamily: string | null;
+  strongestFailedShotSequence: string | null;
+  meaningfulAdaptationObserved: boolean;
+}
+
+export interface CatAndDogShotRecord {
+  shotNumber: number;
+  plannedAt: string;
+  resolvedAt: string;
+  family: string;
+  category: string;
+  source: string;
+  fingerprint: string;
+  familySwitchReason: string | null;
+  projectilePolicyReason: string | null;
+  adaptationReason: string | null;
+  inputsUsed: readonly string[];
+  strategy: JsonObject;
+  feedback: JsonObject;
 }
 
 export interface CatAndDogPlayerAttemptRecord {
@@ -134,6 +166,7 @@ export interface CatAndDogPlayerAttemptRecord {
   strategySelectionDetails: CatAndDogStrategySelectionDetails;
   diagnostics: CatAndDogAttemptRunDiagnostics;
   actionHistory: readonly JsonObject[];
+  shotHistory: readonly CatAndDogShotRecord[];
   finalState: JsonObject;
   artifacts: readonly ArtifactRef[];
 }
@@ -533,6 +566,10 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     resolutionWaitMs: 0,
     waitHeavyRatio: 0,
     nonWaitOverheadMs: 0,
+    observationCaptureMs: 0,
+    snapshotTranslationMs: 0,
+    actionExecutionMs: 0,
+    artifactCaptureMs: 0,
     observationCount: 0,
     maxUnchangedObservationCycles: 0,
     stalledLoopDetected: false,
@@ -590,7 +627,16 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     projectileWindupSeconds: null,
     preparedShotAngle: null,
     preparedShotPower: null,
-    preparedShotKey: null
+    preparedShotKey: null,
+    plannedShots: 0,
+    uniqueShotFingerprints: 0,
+    repeatedShotPlans: 0,
+    shotFamilySwitches: 0,
+    meaningfulShotFeedbacks: 0,
+    nonProductiveShots: 0,
+    strongestFailedFamily: null,
+    strongestFailedShotSequence: null,
+    meaningfulAdaptationObserved: false
   };
 }
 
@@ -934,6 +980,11 @@ function buildPlayerSummaryJson(input: {
       strategySelectionReason: attempt.strategySelectionReason,
       strategy: toJsonValue(attempt.strategy)
     }));
+  const strongestFailedAttempt =
+    [...input.attempts]
+      .filter((attempt) => attempt.outcome !== "WIN" && attempt.diagnostics.strongestFailedFamily)
+      .sort((left, right) => scoreAttemptRecord(right) - scoreAttemptRecord(left) || right.attemptNumber - left.attemptNumber)[0] ??
+    null;
 
   return {
     run: {
@@ -959,11 +1010,22 @@ function buildPlayerSummaryJson(input: {
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptStrategy: toJsonValue(mostProgressiveAttempt.strategy) } : {}),
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptAssessment: mostProgressiveAttempt.assessment } : {}),
       ...(mostProgressiveAttempt ? { mostProgressiveAttemptScore: scoreAttemptRecord(mostProgressiveAttempt) } : {}),
+      ...(strongestFailedAttempt
+        ? {
+            strongestFailedFamily: strongestFailedAttempt.diagnostics.strongestFailedFamily,
+            strongestFailedShotSequence: strongestFailedAttempt.diagnostics.strongestFailedShotSequence
+          }
+        : {}),
       reportId: input.report.reportId,
       artifactCount: input.artifacts.length
     },
     strategyInsights: {
-      rankedAttemptVariants
+      rankedAttemptVariants,
+      strongestFailedFamily: strongestFailedAttempt?.diagnostics.strongestFailedFamily ?? null,
+      strongestFailedShotSequence: strongestFailedAttempt?.diagnostics.strongestFailedShotSequence ?? null,
+      lossesWithMeaningfulAdaptation: input.attempts.filter(
+        (attempt) => attempt.outcome !== "WIN" && attempt.diagnostics.meaningfulAdaptationObserved
+      ).length
     },
     attempts: input.attempts.map((attempt) => ({
       attemptNumber: attempt.attemptNumber,
@@ -977,6 +1039,7 @@ function buildPlayerSummaryJson(input: {
       strategySelectionDetails: toJsonValue(attempt.strategySelectionDetails),
       diagnostics: toJsonValue(attempt.diagnostics),
       actionHistory: toJsonValue(attempt.actionHistory),
+      shotHistory: toJsonValue(attempt.shotHistory),
       finalState: toJsonValue(attempt.finalState),
       artifacts: attempt.artifacts.map((artifact) => ({
         artifactId: artifact.artifactId,
@@ -991,8 +1054,277 @@ function buildPlayerSummaryJson(input: {
 function buildObservationRequest(input: {
   decisionActionId?: string;
   snapshot?: GameSnapshot;
+  includeVision?: boolean;
+  includeRuntimeProbe?: boolean;
 }): ObservationRequest {
   return buildCatAndDogObservationRequest(input);
+}
+
+interface PendingShotPlan {
+  plan: CatAndDogShotExecutionPlan;
+  plannedAt: string;
+  prePlayerHp: number | null;
+  preCpuHp: number | null;
+  preTurnCounter: number | null;
+}
+
+function isWeaponKey(value: unknown): value is CatAndDogAttemptStrategy["weaponKey"] {
+  return value === "normal" || value === "light" || value === "heavy" || value === "super" || value === "heal";
+}
+
+function buildShotPlanFromSnapshot(input: {
+  strategy: CatAndDogAttemptStrategy;
+  selectionDetails: CatAndDogStrategySelectionDetails;
+  snapshot: GameSnapshot;
+  shotHistory: readonly CatAndDogShotFeedbackRecord[];
+}): CatAndDogShotExecutionPlan {
+  return planCatAndDogShotExecution({
+    attemptStrategy: input.strategy,
+    selectionDetails: input.selectionDetails,
+    runtime: {
+      windDirection:
+        input.snapshot.semanticState.windDirection === "left" ||
+        input.snapshot.semanticState.windDirection === "right" ||
+        input.snapshot.semanticState.windDirection === "calm"
+          ? input.snapshot.semanticState.windDirection
+          : "unknown",
+      windNormalized: readSemanticNumber(input.snapshot, "windNormalized"),
+      projectileLabel:
+        typeof input.snapshot.semanticState.projectileLabel === "string"
+          ? input.snapshot.semanticState.projectileLabel
+          : null,
+      projectileWeight: readSemanticNumber(input.snapshot, "projectileWeight"),
+      projectileLaunchSpeedMultiplier: readSemanticNumber(input.snapshot, "projectileLaunchSpeedMultiplier"),
+      projectileGravityMultiplier: readSemanticNumber(input.snapshot, "projectileGravityMultiplier"),
+      projectileWindInfluenceMultiplier: readSemanticNumber(
+        input.snapshot,
+        "projectileWindInfluenceMultiplier"
+      ),
+      projectileSplashRadius: readSemanticNumber(input.snapshot, "projectileSplashRadius"),
+      projectileDamageMin: readSemanticNumber(input.snapshot, "projectileDamageMin"),
+      projectileDamageMax: readSemanticNumber(input.snapshot, "projectileDamageMax"),
+      projectileWindupSeconds: readSemanticNumber(input.snapshot, "projectileWindupSeconds"),
+      preparedShotAngle: readSemanticNumber(input.snapshot, "preparedShotAngle"),
+      preparedShotPower: readSemanticNumber(input.snapshot, "preparedShotPower"),
+      preparedShotKey:
+        typeof input.snapshot.semanticState.preparedShotKey === "string"
+          ? input.snapshot.semanticState.preparedShotKey
+          : null,
+      selectedWeaponKey:
+        typeof input.snapshot.semanticState.selectedWeaponKey === "string"
+          ? input.snapshot.semanticState.selectedWeaponKey
+          : null
+    },
+    shotHistory: input.shotHistory
+  });
+}
+
+function shouldFinalizePendingShot(snapshot: GameSnapshot, pendingShot: PendingShotPlan): boolean {
+  const turnCounter = readSemanticNumber(snapshot, "turnCounter");
+  const meaningfulVisualOutcome =
+    snapshot.semanticState.visionShotOutcomeLabel === "short" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "long" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "blocked" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "near-target" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "target-side-impact" ||
+    snapshot.semanticState.visionShotOutcomeLabel === "self-side-impact";
+  return (
+    snapshot.semanticState.shotResolved === true ||
+    (snapshot.semanticState.playerTurnReady === true &&
+      (
+        pendingShot.preTurnCounter === null ||
+        turnCounter === null ||
+        turnCounter > pendingShot.preTurnCounter ||
+        meaningfulVisualOutcome
+      )) ||
+    snapshot.semanticState.endVisible === true ||
+    snapshot.semanticState.outcome === "win" ||
+    snapshot.semanticState.outcome === "loss"
+  );
+}
+
+function buildShotFeedbackRecord(input: {
+  pendingShot: PendingShotPlan;
+  snapshot: GameSnapshot;
+  resolvedAt: string;
+}): CatAndDogShotRecord {
+  const playerHp = readSemanticNumber(input.snapshot, "playerHpValue");
+  const cpuHp = readSemanticNumber(input.snapshot, "cpuHpValue");
+  const damageTakenDelta =
+    input.pendingShot.prePlayerHp !== null && playerHp !== null
+      ? Math.max(0, input.pendingShot.prePlayerHp - playerHp)
+      : null;
+  const damageDealtDelta =
+    input.pendingShot.preCpuHp !== null && cpuHp !== null
+      ? Math.max(0, input.pendingShot.preCpuHp - cpuHp)
+      : null;
+  const visualOutcomeLabel =
+    input.snapshot.semanticState.visionShotOutcomeLabel === "none" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "no-meaningful-visual-change" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "self-side-impact" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "short" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "blocked" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "near-target" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "target-side-impact" ||
+    input.snapshot.semanticState.visionShotOutcomeLabel === "long"
+      ? input.snapshot.semanticState.visionShotOutcomeLabel
+      : "unknown";
+  const shotResolutionCategory =
+    typeof input.snapshot.semanticState.shotResolutionCategory === "string"
+      ? input.snapshot.semanticState.shotResolutionCategory
+      : null;
+  const hintCategory =
+    typeof input.snapshot.semanticState.canvasHintCategory === "string"
+      ? input.snapshot.semanticState.canvasHintCategory
+      : null;
+  const hintText =
+    typeof input.snapshot.semanticState.canvasHintText === "string"
+      ? input.snapshot.semanticState.canvasHintText
+      : null;
+  const meaningfulProgress =
+    visualOutcomeLabel === "near-target" ||
+    visualOutcomeLabel === "target-side-impact" ||
+    shotResolutionCategory === "direct-hit" ||
+    shotResolutionCategory === "splash-hit" ||
+    (damageDealtDelta ?? 0) > 0;
+  const familyFailed =
+    input.snapshot.semanticState.outcome !== "win" &&
+    (
+      visualOutcomeLabel === "self-side-impact" ||
+      visualOutcomeLabel === "blocked" ||
+      visualOutcomeLabel === "short" ||
+      visualOutcomeLabel === "no-meaningful-visual-change" ||
+      shotResolutionCategory === "wall-hit" ||
+      shotResolutionCategory === "miss" ||
+      meaningfulProgress !== true
+    );
+
+  return {
+    shotNumber: input.pendingShot.plan.shotNumber,
+    plannedAt: input.pendingShot.plannedAt,
+    resolvedAt: input.resolvedAt,
+    family: input.pendingShot.plan.family,
+    category: input.pendingShot.plan.category,
+    source: input.pendingShot.plan.source,
+    fingerprint: input.pendingShot.plan.fingerprint,
+    familySwitchReason: input.pendingShot.plan.familySwitchReason,
+    projectilePolicyReason: input.pendingShot.plan.projectilePolicyReason,
+    adaptationReason: input.pendingShot.plan.adaptationReason,
+    inputsUsed: input.pendingShot.plan.inputsUsed,
+    strategy: toJsonValue(input.pendingShot.plan.strategy) as JsonObject,
+    feedback: {
+      visualOutcomeLabel,
+      shotResolutionCategory,
+      hintCategory,
+      hintText,
+      damageDealtDelta,
+      damageTakenDelta,
+      shotResolved: input.snapshot.semanticState.shotResolved === true,
+      playerTurnReadyAfter: input.snapshot.semanticState.playerTurnReady === true,
+      turnCounterAfter: toJsonValue(input.snapshot.semanticState.turnCounter),
+      outcomeAfterShot:
+        input.snapshot.semanticState.outcome === "win" ||
+        input.snapshot.semanticState.outcome === "loss"
+          ? input.snapshot.semanticState.outcome
+          : null,
+      meaningfulProgress,
+      familyFailed
+    }
+  };
+}
+
+function toShotPlannerFeedback(record: CatAndDogShotRecord): CatAndDogShotFeedbackRecord {
+  return {
+    shotNumber: record.shotNumber,
+    family: record.family as CatAndDogShotFeedbackRecord["family"],
+    category: record.category as CatAndDogShotFeedbackRecord["category"],
+    fingerprint: record.fingerprint,
+    weaponKey: isWeaponKey(record.strategy.weaponKey) ? record.strategy.weaponKey : "normal",
+    angleDirection: record.strategy.angleDirection === "left" ? "left" : "right",
+    angleTapCount: typeof record.strategy.angleTapCount === "number" ? record.strategy.angleTapCount : 0,
+    powerDirection: record.strategy.powerDirection === "down" ? "down" : "up",
+    powerTapCount: typeof record.strategy.powerTapCount === "number" ? record.strategy.powerTapCount : 0,
+    visualOutcomeLabel:
+      record.feedback.visualOutcomeLabel === "none" ||
+      record.feedback.visualOutcomeLabel === "no-meaningful-visual-change" ||
+      record.feedback.visualOutcomeLabel === "self-side-impact" ||
+      record.feedback.visualOutcomeLabel === "short" ||
+      record.feedback.visualOutcomeLabel === "blocked" ||
+      record.feedback.visualOutcomeLabel === "near-target" ||
+      record.feedback.visualOutcomeLabel === "target-side-impact" ||
+      record.feedback.visualOutcomeLabel === "long"
+        ? record.feedback.visualOutcomeLabel
+        : "unknown",
+    shotResolutionCategory:
+      typeof record.feedback.shotResolutionCategory === "string" ? record.feedback.shotResolutionCategory : null,
+    hintCategory: typeof record.feedback.hintCategory === "string" ? record.feedback.hintCategory : null,
+    hintText: typeof record.feedback.hintText === "string" ? record.feedback.hintText : null,
+    damageDealtDelta:
+      typeof record.feedback.damageDealtDelta === "number" ? record.feedback.damageDealtDelta : null,
+    damageTakenDelta:
+      typeof record.feedback.damageTakenDelta === "number" ? record.feedback.damageTakenDelta : null,
+    shotResolved: record.feedback.shotResolved === true,
+    playerTurnReadyAfter: record.feedback.playerTurnReadyAfter === true,
+    turnCounterAfter:
+      typeof record.feedback.turnCounterAfter === "number" ? record.feedback.turnCounterAfter : null,
+    outcomeAfterShot:
+      record.feedback.outcomeAfterShot === "WIN" ||
+      record.feedback.outcomeAfterShot === "LOSS" ||
+      record.feedback.outcomeAfterShot === "UNKNOWN"
+        ? record.feedback.outcomeAfterShot
+        : record.feedback.outcomeAfterShot === "win"
+          ? "WIN"
+          : record.feedback.outcomeAfterShot === "loss"
+            ? "LOSS"
+            : null,
+    meaningfulProgress: record.feedback.meaningfulProgress === true,
+    familyFailed: record.feedback.familyFailed === true
+  };
+}
+
+function buildShotHistoryDiagnostics(
+  shotHistory: readonly CatAndDogShotRecord[]
+): Pick<
+  CatAndDogAttemptRunDiagnostics,
+  | "plannedShots"
+  | "uniqueShotFingerprints"
+  | "repeatedShotPlans"
+  | "shotFamilySwitches"
+  | "meaningfulShotFeedbacks"
+  | "nonProductiveShots"
+  | "strongestFailedFamily"
+  | "strongestFailedShotSequence"
+  | "meaningfulAdaptationObserved"
+> {
+  const uniqueFingerprints = new Set(shotHistory.map((shot) => shot.fingerprint));
+  const failedShots = shotHistory.filter((shot) => shot.feedback.familyFailed === true);
+  const familyCounts = new Map<string, number>();
+  for (const shot of failedShots) {
+    familyCounts.set(shot.family, (familyCounts.get(shot.family) ?? 0) + 1);
+  }
+  const strongestFailedFamily =
+    [...familyCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+  const strongestFailedShotSequence =
+    failedShots.length > 0
+      ? failedShots
+          .slice(-3)
+          .map((shot) => `${shot.family}:${String(shot.feedback.visualOutcomeLabel ?? "unknown")}`)
+          .join(" -> ")
+      : null;
+
+  return {
+    plannedShots: shotHistory.length,
+    uniqueShotFingerprints: uniqueFingerprints.size,
+    repeatedShotPlans: Math.max(0, shotHistory.length - uniqueFingerprints.size),
+    shotFamilySwitches: shotHistory.filter((shot) => typeof shot.familySwitchReason === "string").length,
+    meaningfulShotFeedbacks: shotHistory.filter((shot) => shot.feedback.meaningfulProgress === true).length,
+    nonProductiveShots: shotHistory.filter((shot) => shot.feedback.familyFailed === true).length,
+    strongestFailedFamily,
+    strongestFailedShotSequence,
+    meaningfulAdaptationObserved:
+      uniqueFingerprints.size > 1 ||
+      shotHistory.some((shot) => typeof shot.familySwitchReason === "string" || typeof shot.adaptationReason === "string")
+  };
 }
 
 export async function runPlayerCatAndDog(
@@ -1133,9 +1465,39 @@ export async function runPlayerCatAndDog(
       });
 
       await gameSession.bootstrap(environmentSession);
+      let maxStepsBudget = maxStepsPerAttempt;
 
-      const openingFrame = await environmentSession.observe(buildObservationRequest({}));
+      const openingObserveStartedAt = Date.now();
+      const openingFrame = await environmentSession.observe(
+        buildObservationRequest({
+          includeVision: false,
+          includeRuntimeProbe: false
+        })
+      );
+      let diagnostics = createAttemptDiagnostics(maxStepsBudget);
+      diagnostics = {
+        ...diagnostics,
+        observationCaptureMs: diagnostics.observationCaptureMs + (Date.now() - openingObserveStartedAt)
+      };
+      const openingTranslateStartedAt = Date.now();
       let currentSnapshot = await gameSession.translate(openingFrame);
+      diagnostics = {
+        ...diagnostics,
+        snapshotTranslationMs: diagnostics.snapshotTranslationMs + (Date.now() - openingTranslateStartedAt)
+      };
+      const captureAttemptArtifactWithTiming = async (
+        step: number,
+        label: string,
+        kind: "screenshot" | "dom-snapshot"
+      ): Promise<ArtifactRef> => {
+        const startedAt = Date.now();
+        const artifact = await captureAttemptArtifact(attemptNumber, step, label, kind);
+        diagnostics = {
+          ...diagnostics,
+          artifactCaptureMs: diagnostics.artifactCaptureMs + (Date.now() - startedAt)
+        };
+        return artifact;
+      };
       const openingObservationEvent: RunEvent = {
         eventId: randomUUID(),
         runId: run.runId,
@@ -1149,16 +1511,16 @@ export async function runPlayerCatAndDog(
       await appendTrackedEvent(openingObservationEvent);
 
       attemptArtifacts.push(
-        await captureAttemptArtifact(attemptNumber, 10, "pre-gameplay-screen", "screenshot")
+        await captureAttemptArtifactWithTiming(10, "pre-gameplay-screen", "screenshot")
       );
 
       const actionHistory: JsonObject[] = [];
+      const shotHistory: CatAndDogShotRecord[] = [];
+      let pendingShot: PendingShotPlan | null = null;
       let postEntryCaptured = false;
       let endStateCaptured = false;
       let outcome: AttemptOutcome = "UNKNOWN";
       let note = `Attempt ${attemptNumber} reached the step budget without a terminal outcome.`;
-      let maxStepsBudget = maxStepsPerAttempt;
-      let diagnostics = createAttemptDiagnostics(maxStepsBudget);
       let lastResolutionSignature: string | null = null;
       let lastHintSignature: string | null = null;
       let lastCombatHintSignature: string | null = null;
@@ -1207,27 +1569,79 @@ export async function runPlayerCatAndDog(
           throw new Error(`Expected a semantic game action, received ${decision.type}.`);
         }
 
+        let semanticActionId = decision.actionId;
+        let semanticActionParams = decision.params;
+        if (semanticActionId === "execute-planned-shot") {
+          if (pendingShot) {
+            shotHistory.push(
+              buildShotFeedbackRecord({
+                pendingShot,
+                snapshot: currentSnapshot,
+                resolvedAt: clock.now().toISOString()
+              })
+            );
+            pendingShot = null;
+          }
+
+          const plannedShot = buildShotPlanFromSnapshot({
+            strategy,
+            selectionDetails: strategySelectionDetails,
+            snapshot: currentSnapshot,
+            shotHistory: shotHistory.map((entry) => toShotPlannerFeedback(entry))
+          });
+          semanticActionParams = {
+            weaponKey: plannedShot.strategy.weaponKey,
+            angleDirection: plannedShot.strategy.angleDirection,
+            angleTapCount: plannedShot.strategy.angleTapCount,
+            powerDirection: plannedShot.strategy.powerDirection,
+            powerTapCount: plannedShot.strategy.powerTapCount,
+            settleMs: plannedShot.strategy.settleMs,
+            turnResolutionWaitMs: plannedShot.strategy.turnResolutionWaitMs
+          };
+          pendingShot = {
+            plan: plannedShot,
+            plannedAt: clock.now().toISOString(),
+            prePlayerHp: readSemanticNumber(currentSnapshot, "playerHpValue"),
+            preCpuHp: readSemanticNumber(currentSnapshot, "cpuHpValue"),
+            preTurnCounter: readSemanticNumber(currentSnapshot, "turnCounter")
+          };
+        }
+
         diagnostics = {
           ...diagnostics,
           semanticActionCount: diagnostics.semanticActionCount + 1,
-          ...(decision.actionId === "execute-planned-shot"
+          ...(semanticActionId === "execute-planned-shot"
             ? { shotsFired: diagnostics.shotsFired + 1 }
             : {}),
-          ...(decision.actionId === "wait-for-turn-resolution"
+          ...(semanticActionId === "wait-for-turn-resolution"
             ? { waitActions: diagnostics.waitActions + 1 }
             : {})
         };
 
         actionHistory.push({
           step,
-          actionId: decision.actionId,
-          ...(decision.params ? { params: toJsonValue(decision.params) } : {})
+          actionId: semanticActionId,
+          ...(semanticActionParams ? { params: toJsonValue(semanticActionParams) } : {}),
+          ...(semanticActionId === "execute-planned-shot" && pendingShot
+            ? {
+                shotPlan: toJsonValue({
+                  family: pendingShot.plan.family,
+                  category: pendingShot.plan.category,
+                  source: pendingShot.plan.source,
+                  fingerprint: pendingShot.plan.fingerprint,
+                  familySwitchReason: pendingShot.plan.familySwitchReason,
+                  projectilePolicyReason: pendingShot.plan.projectilePolicyReason,
+                  adaptationReason: pendingShot.plan.adaptationReason,
+                  inputsUsed: pendingShot.plan.inputsUsed
+                })
+              }
+            : {})
         });
 
         const environmentActions = await gameSession.resolveAction(
           {
-            actionId: decision.actionId,
-            params: decision.params
+            actionId: semanticActionId,
+            params: semanticActionParams
           },
           currentSnapshot
         );
@@ -1237,7 +1651,7 @@ export async function runPlayerCatAndDog(
             diagnostics = {
               ...diagnostics,
               totalWaitMs: diagnostics.totalWaitMs + environmentAction.durationMs,
-              ...(decision.actionId === "wait-for-turn-resolution"
+              ...(semanticActionId === "wait-for-turn-resolution"
                 ? {
                     resolutionWaitMs: diagnostics.resolutionWaitMs + environmentAction.durationMs
                   }
@@ -1245,7 +1659,12 @@ export async function runPlayerCatAndDog(
             };
           }
 
+          const actionExecutionStartedAt = Date.now();
           const actionResult = await environmentSession.execute(environmentAction);
+          diagnostics = {
+            ...diagnostics,
+            actionExecutionMs: diagnostics.actionExecutionMs + (Date.now() - actionExecutionStartedAt)
+          };
           await appendTrackedEvent({
             eventId: randomUUID(),
             runId: run.runId,
@@ -1257,20 +1676,36 @@ export async function runPlayerCatAndDog(
             summary: actionResult.detail,
             payload: {
               action: environmentAction.kind,
-              semanticActionId: decision.actionId,
-              ...(decision.params ? { semanticActionParams: toJsonValue(decision.params) } : {}),
+              semanticActionId,
+              ...(semanticActionParams ? { semanticActionParams: toJsonValue(semanticActionParams) } : {}),
               ...actionResult.payload
             }
           });
         }
 
+        const shouldIncludeVision =
+          semanticActionId === "execute-planned-shot" || semanticActionId === "start-cpu-match";
+        const shouldIncludeRuntimeProbe =
+          semanticActionId === "execute-planned-shot" || semanticActionId === "start-cpu-match";
+        const postActionObserveStartedAt = Date.now();
         const postActionFrame = await environmentSession.observe(
           buildObservationRequest({
-            decisionActionId: decision.actionId,
-            snapshot: currentSnapshot
+            decisionActionId: semanticActionId,
+            snapshot: currentSnapshot,
+            includeVision: shouldIncludeVision,
+            includeRuntimeProbe: shouldIncludeRuntimeProbe
           })
         );
+        diagnostics = {
+          ...diagnostics,
+          observationCaptureMs: diagnostics.observationCaptureMs + (Date.now() - postActionObserveStartedAt)
+        };
+        const postActionTranslateStartedAt = Date.now();
         currentSnapshot = await gameSession.translate(postActionFrame);
+        diagnostics = {
+          ...diagnostics,
+          snapshotTranslationMs: diagnostics.snapshotTranslationMs + (Date.now() - postActionTranslateStartedAt)
+        };
         ({
           diagnostics,
           lastResolutionSignature,
@@ -1295,7 +1730,7 @@ export async function runPlayerCatAndDog(
           )
         };
         if (
-          decision.actionId === "execute-planned-shot" &&
+          semanticActionId === "execute-planned-shot" &&
           currentSnapshot.semanticState.visionAvailable === true &&
           currentSnapshot.semanticState.visionChangeStrength === "none"
         ) {
@@ -1303,6 +1738,16 @@ export async function runPlayerCatAndDog(
             ...diagnostics,
             visionNoChangeShots: diagnostics.visionNoChangeShots + 1
           };
+        }
+        if (pendingShot && shouldFinalizePendingShot(currentSnapshot, pendingShot)) {
+          shotHistory.push(
+            buildShotFeedbackRecord({
+              pendingShot,
+              snapshot: currentSnapshot,
+              resolvedAt: clock.now().toISOString()
+            })
+          );
+          pendingShot = null;
         }
         await appendTrackedEvent({
           eventId: randomUUID(),
@@ -1317,7 +1762,7 @@ export async function runPlayerCatAndDog(
 
         if (!postEntryCaptured && currentSnapshot.semanticState.gameplayEntered === true) {
           attemptArtifacts.push(
-            await captureAttemptArtifact(attemptNumber, 20, "post-entry-screen", "screenshot")
+            await captureAttemptArtifactWithTiming(20, "post-entry-screen", "screenshot")
           );
           postEntryCaptured = true;
           maxStepsBudget = Math.max(maxStepsBudget, maxStepsPerAttempt + GAMEPLAY_PROGRESS_EXTENSION_STEPS);
@@ -1338,11 +1783,11 @@ export async function runPlayerCatAndDog(
         const postActionOutcome = detectAttemptOutcome(currentSnapshot);
         if (postActionOutcome && !endStateCaptured) {
           attemptArtifacts.push(
-            await captureAttemptArtifact(attemptNumber, 30, "end-state-screen", "screenshot")
+            await captureAttemptArtifactWithTiming(30, "end-state-screen", "screenshot")
           );
           if (postActionOutcome === "WIN" || postActionOutcome === "LOSS") {
             attemptArtifacts.push(
-              await captureAttemptArtifact(attemptNumber, 40, "outcome-screen", "screenshot")
+              await captureAttemptArtifactWithTiming(40, "outcome-screen", "screenshot")
             );
           }
           endStateCaptured = true;
@@ -1376,23 +1821,23 @@ export async function runPlayerCatAndDog(
 
       if (!postEntryCaptured && currentSnapshot.semanticState.gameplayEntered === true) {
         attemptArtifacts.push(
-          await captureAttemptArtifact(attemptNumber, 20, "post-entry-screen", "screenshot")
+          await captureAttemptArtifactWithTiming(20, "post-entry-screen", "screenshot")
         );
       }
 
       if (!endStateCaptured) {
         attemptArtifacts.push(
-          await captureAttemptArtifact(attemptNumber, 30, "end-state-screen", "screenshot")
+          await captureAttemptArtifactWithTiming(30, "end-state-screen", "screenshot")
         );
         if (outcome === "WIN" || outcome === "LOSS") {
           attemptArtifacts.push(
-            await captureAttemptArtifact(attemptNumber, 40, "outcome-screen", "screenshot")
+            await captureAttemptArtifactWithTiming(40, "outcome-screen", "screenshot")
           );
         }
       }
 
       attemptArtifacts.push(
-        await captureAttemptArtifact(attemptNumber, 50, "final-state-dom", "dom-snapshot")
+        await captureAttemptArtifactWithTiming(50, "final-state-dom", "dom-snapshot")
       );
 
       ({
@@ -1415,11 +1860,22 @@ export async function runPlayerCatAndDog(
       }
 
       const attemptEndedAt = clock.now().toISOString();
+      if (pendingShot) {
+        shotHistory.push(
+          buildShotFeedbackRecord({
+            pendingShot,
+            snapshot: currentSnapshot,
+            resolvedAt: attemptEndedAt
+          })
+        );
+        pendingShot = null;
+      }
       const elapsedMs = Math.max(
         0,
         Number.isFinite(attemptStartedAtMs) ? Date.parse(attemptEndedAt) - attemptStartedAtMs : 0
       );
       const assessment = buildAttemptAssessment(outcome, diagnostics);
+      const shotHistoryDiagnostics = buildShotHistoryDiagnostics(shotHistory);
       const attemptRecord: CatAndDogPlayerAttemptRecord = {
         attemptNumber,
         startedAt: attemptStartedAt,
@@ -1432,6 +1888,7 @@ export async function runPlayerCatAndDog(
         strategySelectionDetails,
         diagnostics: {
           ...diagnostics,
+          ...shotHistoryDiagnostics,
           elapsedMs,
           nonWaitOverheadMs: Math.max(0, elapsedMs - diagnostics.totalWaitMs),
           waitHeavyRatio:
@@ -1440,6 +1897,7 @@ export async function runPlayerCatAndDog(
               : 0
         },
         actionHistory,
+        shotHistory,
         finalState: summarizeFinalState(currentSnapshot),
         artifacts: [...attemptArtifacts].sort(byArtifactPath)
       };
@@ -1465,6 +1923,7 @@ export async function runPlayerCatAndDog(
           strategySelectionDetails: toJsonValue(strategySelectionDetails),
           diagnostics: toJsonValue(attemptRecord.diagnostics),
           actionHistory: toJsonValue(actionHistory),
+          shotHistory: toJsonValue(shotHistory),
           finalState: summarizeFinalState(currentSnapshot),
           artifacts: attemptRecord.artifacts.map((artifact) => ({
             artifactId: artifact.artifactId,

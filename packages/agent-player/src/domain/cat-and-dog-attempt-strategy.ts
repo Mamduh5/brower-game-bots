@@ -1764,6 +1764,17 @@ export function selectCatAndDogAttemptStrategy(input: {
               scoreCatAndDogAttemptFeedback(entry) <= scoreCatAndDogAttemptFeedback(anchorFeedback)
           ).length
       : 0;
+  const anchorFamily = anchorFeedback ? inferShotFamilyFromFeedback(anchorFeedback) : null;
+  const anchorFamilyStats = anchorFamily ? familyHistory.get(anchorFamily) ?? null : null;
+  const shouldAbandonAnchorFamily =
+    anchorFamilyStats !== null &&
+    anchorFamilyStats.wins === 0 &&
+    anchorFamilyStats.uses >= 2 &&
+    (
+      anchorFamilyStats.repeatedSelfSide >= 2 ||
+      anchorFamilyStats.repeatedBlocked >= 2 ||
+      anchorFamilyStats.unknowns >= 2
+    );
   const canUseRuntimePlanner = anchorFeedback && hasRuntimeShotPlannerContext(anchorFeedback);
   const anchorCandidates =
     anchorFeedback && topReference && (topReference.score >= 220 || canUseRuntimePlanner)
@@ -1933,7 +1944,25 @@ export function selectCatAndDogAttemptStrategy(input: {
         score += 110;
       }
       if (candidate.meta.plannerFamilySwitchReason) {
-        score += 90;
+        score += shouldAbandonAnchorFamily ? 240 : 90;
+      }
+    }
+
+    if (shouldAbandonAnchorFamily && anchorFeedback) {
+      if (candidate.meta.plannerMode === "runtime-shot-planner" && candidate.meta.plannerFamilySwitchReason) {
+        score += 160;
+      }
+
+      if (candidate.meta.origin === "anchor-exact") {
+        score -= 320;
+      }
+
+      if (candidate.meta.origin === "anchor-mutation" && anchorDistance !== null && anchorDistance <= 1) {
+        score -= 220;
+      }
+
+      if (candidateFingerprint === toFingerprint(anchorFeedback.strategy)) {
+        score -= 260;
       }
     }
 

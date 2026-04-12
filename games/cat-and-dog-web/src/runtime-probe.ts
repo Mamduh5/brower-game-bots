@@ -192,20 +192,18 @@ function toWindDirection(windValue: number | null): CatAndDogRuntimeState["windD
 export function buildCatAndDogObservationRequest(input: {
   decisionActionId?: string;
   snapshot?: GameSnapshot;
+  includeVision?: boolean;
+  includeRuntimeProbe?: boolean;
 }): ObservationRequest {
   const modes: ObservationRequest["modes"] =
-    input.decisionActionId === "start-cpu-match" ||
-    input.decisionActionId === "execute-planned-shot" ||
-    input.decisionActionId === "wait-for-turn-resolution" ||
-    input.snapshot?.semanticState.gameplayEntered === true
+    input.includeVision === true ||
+    input.decisionActionId === "start-cpu-match"
       ? ["dom", "screenshot"]
       : ["dom"];
 
   const shouldRequestRuntimeProbe =
+    input.includeRuntimeProbe === true ||
     input.decisionActionId === "start-cpu-match" ||
-    input.decisionActionId === "execute-planned-shot" ||
-    input.decisionActionId === "wait-for-turn-resolution" ||
-    input.snapshot?.semanticState.gameplayEntered === true ||
     input.snapshot?.semanticState.menuVisible === true;
 
   return {
