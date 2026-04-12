@@ -1773,7 +1773,12 @@ export function selectCatAndDogAttemptStrategy(input: {
     (
       anchorFamilyStats.repeatedSelfSide >= 2 ||
       anchorFamilyStats.repeatedBlocked >= 2 ||
-      anchorFamilyStats.unknowns >= 2
+      anchorFamilyStats.unknowns >= 2 ||
+      (anchorFamily === "near-target-finisher" && anchorFamilyStats.repeatedNearTarget >= 2) ||
+      (
+        (anchorFamily === "self-side-recovery" || anchorFamily === "blocked-terrain-escape") &&
+        (anchorFamilyStats.repeatedSelfSide >= 1 || anchorFamilyStats.repeatedBlocked >= 1)
+      )
     );
   const canUseRuntimePlanner = anchorFeedback && hasRuntimeShotPlannerContext(anchorFeedback);
   const anchorCandidates =

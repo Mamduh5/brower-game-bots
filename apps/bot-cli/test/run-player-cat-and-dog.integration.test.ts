@@ -188,12 +188,15 @@ describe("runPlayerCatAndDog integration", () => {
         expect(summaryJson.summary.winningAttemptNumber).toBe(2);
         expect(summaryJson.summary.winningAttemptStrategy.angleDirection).toBe("right");
         expect(summaryJson.summary.unknownAttempts).toBe(0);
+        expect(summaryJson.summary.deadPathProtectedUnknowns).toBe(0);
+        expect(summaryJson.summary.stepBudgetUnknowns).toBe(0);
         expect(summaryJson.summary.terminalAttempts).toBe(2);
         expect(summaryJson.summary.mostProgressiveAttemptNumber).toBe(2);
         expect(summaryJson.summary.mostProgressiveAttemptAssessment).toBe("won-round");
         expect(summaryJson.summary.mostProgressiveAttemptScore).toBeGreaterThan(500);
         expect(summaryJson.summary.winningStrategy).toBeUndefined();
         expect(summaryJson.strategyInsights.strongestFailedFamily).toBeTruthy();
+        expect(summaryJson.strategyInsights).toHaveProperty("strongestDeadPathSequence");
         expect(summaryJson.strategyInsights.lossesWithMeaningfulAdaptation).toBeGreaterThanOrEqual(0);
         expect(summaryJson.attempts[0].strategySelectionReason).toBe("initial-candidate");
         expect(summaryJson.attempts[1].strategySelectionReason).toBe("runtime-shot-planner");
@@ -328,6 +331,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.note).toContain("stalled");
         expect(result.attempts[0]?.diagnostics.stalledLoopDetected).toBe(true);
         expect(result.attempts[0]?.diagnostics.stalledLoopReason).toBe("unresolved-shot-loop");
+        expect(result.attempts[0]?.diagnostics.deadPathAbortReason).toBe("unresolved-shot-loop");
+        expect(result.attempts[0]?.diagnostics.unknownTerminationKind).toBe("dead-path-protection");
         expect(result.attempts[0]?.diagnostics.stepBudgetReached).toBe(false);
         expect(result.attempts[0]?.diagnostics.maxUnchangedObservationCycles).toBeGreaterThanOrEqual(2);
         expect(result.attempts[0]?.diagnostics.observationCount).toBeGreaterThan(0);
@@ -335,6 +340,8 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.finalState.endTitleText).toBeNull();
         expect(result.attempts[0]?.finalState.endSubtitleText).toBeNull();
         expect(result.attempts[0]?.finalState.cpuSetupVisible).toBe(false);
+        expect(result.attempts[0]?.finalState.lastKnownGoodRuntimeState).toBeTruthy();
+        expect(result.attempts[0]?.finalState.lastKnownGoodVisionState).toBeTruthy();
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {

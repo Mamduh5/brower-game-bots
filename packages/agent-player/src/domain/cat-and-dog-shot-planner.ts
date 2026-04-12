@@ -318,6 +318,18 @@ function chooseFamily(input: {
 
   const familyStats = buildFamilyStats(shotHistory);
   const currentStats = familyStats.get(lastShot.family);
+  let consecutiveSameFamilyFailures = 0;
+  for (const shot of [...shotHistory].reverse()) {
+    if (shot.family !== lastShot.family) {
+      break;
+    }
+
+    if (shot.familyFailed !== true) {
+      break;
+    }
+
+    consecutiveSameFamilyFailures += 1;
+  }
   const repeatedWeakFingerprintCount = shotHistory.filter((shot) => shot.fingerprint === lastShot.fingerprint).length;
   const repeatedWeakFingerprint =
     repeatedWeakFingerprintCount >= 2 &&
@@ -335,8 +347,27 @@ function chooseFamily(input: {
       currentStats.blocked >= 2 ||
       currentStats.noChange >= 2
     );
+  const exhaustedFamily =
+    currentStats !== undefined &&
+    currentStats.uses >= 2 &&
+    currentStats.failingUses >= 2 &&
+    (
+      (lastShot.family === "self-side-recovery" && currentStats.selfSide >= 2) ||
+      (lastShot.family === "blocked-terrain-escape" && currentStats.blocked >= 2) ||
+      (
+        lastShot.family === "near-target-finisher" &&
+        currentStats.nearTarget >= 2 &&
+        currentStats.targetSide === 0
+      ) ||
+      (
+        currentStats.failingUses === currentStats.uses &&
+        currentStats.targetSide === 0 &&
+        currentStats.nearTarget === 0
+      ) ||
+      consecutiveSameFamilyFailures >= 3
+    );
 
-  if (repeatedFamilyFailure) {
+  if (repeatedFamilyFailure || exhaustedFamily) {
     const switched = chooseRecoveryFamily({
       failedFamily: lastShot.family,
       runtime,
@@ -347,7 +378,9 @@ function chooseFamily(input: {
       source: "family-abandonment",
       familySwitchReason: switched.reason,
       adaptationReason: [
-        `Recent ${lastShot.family} shots kept failing with ${lastShot.visualOutcomeLabel}.`,
+        exhaustedFamily
+          ? `Exhaust ${lastShot.family} after repeated non-productive local use.`
+          : `Recent ${lastShot.family} shots kept failing with ${lastShot.visualOutcomeLabel}.`,
         repeatedWeakFingerprint ? "Avoid replaying the same weak shot fingerprint inside the same attempt." : null
       ]
         .filter((part): part is string => Boolean(part))

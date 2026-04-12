@@ -136,6 +136,10 @@ export interface CatAndDogAttemptRunDiagnostics extends CatAndDogAttemptDiagnost
   strongestFailedFamily: string | null;
   strongestFailedShotSequence: string | null;
   meaningfulAdaptationObserved: boolean;
+  familyExhaustions: number;
+  deadPathAbortReason: string | null;
+  strongestDeadPathSequence: string | null;
+  unknownTerminationKind: "none" | "dead-path-protection" | "step-budget-exhausted" | "ambiguous-final-state";
 }
 
 export interface CatAndDogShotRecord {
@@ -312,6 +316,10 @@ function readShotResolutionCategory(snapshot: GameSnapshot): ShotResolutionCateg
   return typeof value === "string" ? (value as ShotResolutionCategory) : "none";
 }
 
+function isTrue(value: unknown): boolean {
+  return value === true;
+}
+
 function buildResolutionSignature(snapshot: GameSnapshot): string | null {
   if (snapshot.semanticState.shotResolved !== true) {
     return null;
@@ -434,6 +442,72 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
   };
 }
 
+function extractRuntimeState(snapshot: GameSnapshot): JsonObject | null {
+  if (snapshot.semanticState.runtimeStateAvailable !== true) {
+    return null;
+  }
+
+  return {
+    runtimeStateAvailable: true,
+    runtimeStateSource: toJsonValue(snapshot.semanticState.runtimeStateSource),
+    windValue: toJsonValue(snapshot.semanticState.windValue),
+    windNormalized: toJsonValue(snapshot.semanticState.windNormalized),
+    windDirection: toJsonValue(snapshot.semanticState.windDirection),
+    projectileLabel: toJsonValue(snapshot.semanticState.projectileLabel),
+    projectileWeight: toJsonValue(snapshot.semanticState.projectileWeight),
+    projectileLaunchSpeedMultiplier: toJsonValue(snapshot.semanticState.projectileLaunchSpeedMultiplier),
+    projectileGravityMultiplier: toJsonValue(snapshot.semanticState.projectileGravityMultiplier),
+    projectileWindInfluenceMultiplier: toJsonValue(snapshot.semanticState.projectileWindInfluenceMultiplier),
+    projectileSplashRadius: toJsonValue(snapshot.semanticState.projectileSplashRadius),
+    projectileDamageMin: toJsonValue(snapshot.semanticState.projectileDamageMin),
+    projectileDamageMax: toJsonValue(snapshot.semanticState.projectileDamageMax),
+    projectileWindupSeconds: toJsonValue(snapshot.semanticState.projectileWindupSeconds),
+    preparedShotAngle: toJsonValue(snapshot.semanticState.preparedShotAngle),
+    preparedShotPower: toJsonValue(snapshot.semanticState.preparedShotPower),
+    preparedShotKey: toJsonValue(snapshot.semanticState.preparedShotKey),
+    selectedWeaponKey: toJsonValue(snapshot.semanticState.selectedWeaponKey),
+    turnCounter: toJsonValue(snapshot.semanticState.turnCounter)
+  };
+}
+
+function extractVisionState(snapshot: GameSnapshot): JsonObject | null {
+  if (snapshot.semanticState.visionAvailable !== true) {
+    return null;
+  }
+
+  return {
+    visionAvailable: true,
+    visionChangeRatio: toJsonValue(snapshot.semanticState.visionChangeRatio),
+    visionChangeStrength: toJsonValue(snapshot.semanticState.visionChangeStrength),
+    visionChangeFocus: toJsonValue(snapshot.semanticState.visionChangeFocus),
+    visionImpactXRatio: toJsonValue(snapshot.semanticState.visionImpactXRatio),
+    visionImpactYRatio: toJsonValue(snapshot.semanticState.visionImpactYRatio),
+    visionImpactRegion: toJsonValue(snapshot.semanticState.visionImpactRegion),
+    visionImpactCategory: toJsonValue(snapshot.semanticState.visionImpactCategory),
+    visionShotOutcomeLabel: toJsonValue(snapshot.semanticState.visionShotOutcomeLabel),
+    visionShotOutcomeConfidence: toJsonValue(snapshot.semanticState.visionShotOutcomeConfidence),
+    visionShotOutcomeSource: toJsonValue(snapshot.semanticState.visionShotOutcomeSource),
+    visionPlayerAnchorXRatio: toJsonValue(snapshot.semanticState.visionPlayerAnchorXRatio),
+    visionPlayerAnchorYRatio: toJsonValue(snapshot.semanticState.visionPlayerAnchorYRatio),
+    visionEnemyAnchorXRatio: toJsonValue(snapshot.semanticState.visionEnemyAnchorXRatio),
+    visionEnemyAnchorYRatio: toJsonValue(snapshot.semanticState.visionEnemyAnchorYRatio)
+  };
+}
+
+function summarizeFinalStateWithContext(input: {
+  snapshot: GameSnapshot;
+  lastKnownGoodRuntimeState: JsonObject | null;
+  lastKnownGoodVisionState: JsonObject | null;
+}): JsonObject {
+  return {
+    ...summarizeFinalState(input.snapshot),
+    finalLiveRuntimeState: extractRuntimeState(input.snapshot),
+    finalLiveVisionState: extractVisionState(input.snapshot),
+    lastKnownGoodRuntimeState: input.lastKnownGoodRuntimeState,
+    lastKnownGoodVisionState: input.lastKnownGoodVisionState
+  };
+}
+
 function buildAttemptAssessment(
   outcome: AttemptOutcome,
   diagnostics: CatAndDogAttemptRunDiagnostics
@@ -504,8 +578,9 @@ function detectStallReason(input: {
   diagnostics: CatAndDogAttemptRunDiagnostics;
   decisionActionId: string;
   unchangedObservationCycles: number;
+  shotHistory: readonly CatAndDogShotRecord[];
 }): string | null {
-  const { snapshot, diagnostics, decisionActionId, unchangedObservationCycles } = input;
+  const { snapshot, diagnostics, decisionActionId, unchangedObservationCycles, shotHistory } = input;
   if (
     snapshot.semanticState.endVisible === true ||
     snapshot.semanticState.outcome === "win" ||
@@ -524,6 +599,23 @@ function detectStallReason(input: {
   }
 
   if (
+    diagnostics.shotsFired > 0 &&
+    diagnostics.shotResolutionsObserved === 0 &&
+    snapshot.semanticState.playerTurnReady !== true &&
+    (
+      snapshot.semanticState.canvasHintCategory === "instructional" ||
+      snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
+      snapshot.semanticState.canvasHintCategory === "turn-status" ||
+      snapshot.semanticState.shotResolutionCategory === "turn-start" ||
+      snapshot.semanticState.shotResolutionCategory === "aiming" ||
+      snapshot.semanticState.shotResolutionCategory === "windup"
+    ) &&
+    unchangedObservationCycles >= 2
+  ) {
+    return "instructional-resolution-loop";
+  }
+
+  if (
     decisionActionId === "wait-for-turn-resolution" &&
     snapshot.semanticState.playerTurnReady !== true &&
     unchangedObservationCycles >= 3 &&
@@ -537,15 +629,57 @@ function detectStallReason(input: {
     return "turn-resolution-loop";
   }
 
+  if (
+    isTrue(snapshot.semanticState.gameplayEntered) &&
+    !isTrue(snapshot.semanticState.playerTurnReady) &&
+    !isTrue(snapshot.semanticState.turnBannerVisible) &&
+    !isTrue(snapshot.semanticState.endVisible) &&
+    (
+      snapshot.semanticState.canvasHintCategory === "cpu-planning" ||
+      snapshot.semanticState.canvasHintCategory === "instructional"
+    ) &&
+    unchangedObservationCycles >= 2
+  ) {
+    return "non-actionable-battle-state";
+  }
+
+  const recentShots = shotHistory.slice(-3);
+  if (
+    recentShots.length >= 3 &&
+    recentShots.every((shot) => shot.feedback.familyFailed === true) &&
+    recentShots.every((shot) => shot.family === recentShots[0]?.family)
+  ) {
+    return `family-exhausted:${recentShots[0]?.family ?? "unknown"}`;
+  }
+
+  if (
+    recentShots.length >= 3 &&
+    recentShots.every((shot) => shot.feedback.familyFailed === true) &&
+    recentShots.every((shot) => shot.feedback.meaningfulProgress !== true)
+  ) {
+    return "dead-shot-sequence";
+  }
+
   return null;
 }
 
 function buildStallNote(reason: string, attemptNumber: number): string {
+  if (reason.startsWith("family-exhausted:")) {
+    const family = reason.slice("family-exhausted:".length);
+    return `Attempt ${attemptNumber} aborted after exhausting ${family} without meaningful improvement.`;
+  }
+
   switch (reason) {
     case "unresolved-shot-loop":
       return `Attempt ${attemptNumber} stalled after a shot without visible resolution progress.`;
+    case "instructional-resolution-loop":
+      return `Attempt ${attemptNumber} remained in aiming or instructional feedback without a meaningful shot resolution.`;
     case "turn-resolution-loop":
       return `Attempt ${attemptNumber} remained in a non-productive turn-resolution loop without reaching a terminal state.`;
+    case "non-actionable-battle-state":
+      return `Attempt ${attemptNumber} reached a non-actionable battle state without terminal confirmation.`;
+    case "dead-shot-sequence":
+      return `Attempt ${attemptNumber} aborted after repeated non-productive shot feedback.`;
     default:
       return `Attempt ${attemptNumber} stalled in a non-productive gameplay loop.`;
   }
@@ -636,7 +770,11 @@ function createAttemptDiagnostics(maxStepsBudget: number): CatAndDogAttemptRunDi
     nonProductiveShots: 0,
     strongestFailedFamily: null,
     strongestFailedShotSequence: null,
-    meaningfulAdaptationObserved: false
+    meaningfulAdaptationObserved: false,
+    familyExhaustions: 0,
+    deadPathAbortReason: null,
+    strongestDeadPathSequence: null,
+    unknownTerminationKind: "none"
   };
 }
 
@@ -1003,6 +1141,12 @@ function buildPlayerSummaryJson(input: {
       strategyMode: input.options.strategyMode,
       hadWin: Boolean(winningAttempt),
       unknownAttempts: input.attempts.filter((attempt) => attempt.outcome === "UNKNOWN").length,
+      deadPathProtectedUnknowns: input.attempts.filter(
+        (attempt) => attempt.outcome === "UNKNOWN" && attempt.diagnostics.unknownTerminationKind === "dead-path-protection"
+      ).length,
+      stepBudgetUnknowns: input.attempts.filter(
+        (attempt) => attempt.outcome === "UNKNOWN" && attempt.diagnostics.unknownTerminationKind === "step-budget-exhausted"
+      ).length,
       terminalAttempts: input.attempts.filter((attempt) => attempt.outcome !== "UNKNOWN").length,
       ...(winningAttempt ? { winningAttemptNumber: winningAttempt.attemptNumber } : {}),
       ...(winningAttempt ? { winningAttemptStrategy: toJsonValue(winningAttempt.strategy) } : {}),
@@ -1013,7 +1157,8 @@ function buildPlayerSummaryJson(input: {
       ...(strongestFailedAttempt
         ? {
             strongestFailedFamily: strongestFailedAttempt.diagnostics.strongestFailedFamily,
-            strongestFailedShotSequence: strongestFailedAttempt.diagnostics.strongestFailedShotSequence
+            strongestFailedShotSequence: strongestFailedAttempt.diagnostics.strongestFailedShotSequence,
+            strongestDeadPathSequence: strongestFailedAttempt.diagnostics.strongestDeadPathSequence
           }
         : {}),
       reportId: input.report.reportId,
@@ -1023,6 +1168,7 @@ function buildPlayerSummaryJson(input: {
       rankedAttemptVariants,
       strongestFailedFamily: strongestFailedAttempt?.diagnostics.strongestFailedFamily ?? null,
       strongestFailedShotSequence: strongestFailedAttempt?.diagnostics.strongestFailedShotSequence ?? null,
+      strongestDeadPathSequence: strongestFailedAttempt?.diagnostics.strongestDeadPathSequence ?? null,
       lossesWithMeaningfulAdaptation: input.attempts.filter(
         (attempt) => attempt.outcome !== "WIN" && attempt.diagnostics.meaningfulAdaptationObserved
       ).length
@@ -1295,6 +1441,8 @@ function buildShotHistoryDiagnostics(
   | "strongestFailedFamily"
   | "strongestFailedShotSequence"
   | "meaningfulAdaptationObserved"
+  | "familyExhaustions"
+  | "strongestDeadPathSequence"
 > {
   const uniqueFingerprints = new Set(shotHistory.map((shot) => shot.fingerprint));
   const failedShots = shotHistory.filter((shot) => shot.feedback.familyFailed === true);
@@ -1311,6 +1459,19 @@ function buildShotHistoryDiagnostics(
           .map((shot) => `${shot.family}:${String(shot.feedback.visualOutcomeLabel ?? "unknown")}`)
           .join(" -> ")
       : null;
+  const strongestDeadPathSequence =
+    failedShots.length >= 2
+      ? failedShots
+          .slice(-4)
+          .map(
+            (shot) =>
+              `${shot.family}:${String(shot.feedback.visualOutcomeLabel ?? "unknown")}:${String(
+                shot.feedback.shotResolutionCategory ?? "none"
+              )}`
+          )
+          .join(" -> ")
+      : null;
+  const familyExhaustions = [...familyCounts.values()].filter((count) => count >= 2).length;
 
   return {
     plannedShots: shotHistory.length,
@@ -1321,6 +1482,8 @@ function buildShotHistoryDiagnostics(
     nonProductiveShots: shotHistory.filter((shot) => shot.feedback.familyFailed === true).length,
     strongestFailedFamily,
     strongestFailedShotSequence,
+    familyExhaustions,
+    strongestDeadPathSequence,
     meaningfulAdaptationObserved:
       uniqueFingerprints.size > 1 ||
       shotHistory.some((shot) => typeof shot.familySwitchReason === "string" || typeof shot.adaptationReason === "string")
@@ -1521,6 +1684,8 @@ export async function runPlayerCatAndDog(
       let endStateCaptured = false;
       let outcome: AttemptOutcome = "UNKNOWN";
       let note = `Attempt ${attemptNumber} reached the step budget without a terminal outcome.`;
+      let lastKnownGoodRuntimeState = extractRuntimeState(currentSnapshot);
+      let lastKnownGoodVisionState = extractVisionState(currentSnapshot);
       let lastResolutionSignature: string | null = null;
       let lastHintSignature: string | null = null;
       let lastCombatHintSignature: string | null = null;
@@ -1706,6 +1871,8 @@ export async function runPlayerCatAndDog(
           ...diagnostics,
           snapshotTranslationMs: diagnostics.snapshotTranslationMs + (Date.now() - postActionTranslateStartedAt)
         };
+        lastKnownGoodRuntimeState = extractRuntimeState(currentSnapshot) ?? lastKnownGoodRuntimeState;
+        lastKnownGoodVisionState = extractVisionState(currentSnapshot) ?? lastKnownGoodVisionState;
         ({
           diagnostics,
           lastResolutionSignature,
@@ -1800,13 +1967,15 @@ export async function runPlayerCatAndDog(
           snapshot: currentSnapshot,
           diagnostics,
           decisionActionId: decision.actionId,
-          unchangedObservationCycles
+          unchangedObservationCycles,
+          shotHistory
         });
         if (stallReason) {
           diagnostics = {
             ...diagnostics,
             stalledLoopDetected: true,
-            stalledLoopReason: stallReason
+            stalledLoopReason: stallReason,
+            deadPathAbortReason: stallReason
           };
           note = buildStallNote(stallReason, attemptNumber);
           break;
@@ -1894,11 +2063,23 @@ export async function runPlayerCatAndDog(
           waitHeavyRatio:
             elapsedMs > 0
               ? Number((diagnostics.totalWaitMs / elapsedMs).toFixed(3))
-              : 0
+              : 0,
+          unknownTerminationKind:
+            outcome !== "UNKNOWN"
+              ? "none"
+              : diagnostics.deadPathAbortReason || diagnostics.stalledLoopDetected
+                ? "dead-path-protection"
+                : diagnostics.stepBudgetReached
+                  ? "step-budget-exhausted"
+                  : "ambiguous-final-state"
         },
         actionHistory,
         shotHistory,
-        finalState: summarizeFinalState(currentSnapshot),
+        finalState: summarizeFinalStateWithContext({
+          snapshot: currentSnapshot,
+          lastKnownGoodRuntimeState,
+          lastKnownGoodVisionState
+        }),
         artifacts: [...attemptArtifacts].sort(byArtifactPath)
       };
       attempts.push(attemptRecord);
@@ -1924,7 +2105,11 @@ export async function runPlayerCatAndDog(
           diagnostics: toJsonValue(attemptRecord.diagnostics),
           actionHistory: toJsonValue(actionHistory),
           shotHistory: toJsonValue(shotHistory),
-          finalState: summarizeFinalState(currentSnapshot),
+          finalState: summarizeFinalStateWithContext({
+            snapshot: currentSnapshot,
+            lastKnownGoodRuntimeState,
+            lastKnownGoodVisionState
+          }),
           artifacts: attemptRecord.artifacts.map((artifact) => ({
             artifactId: artifact.artifactId,
             kind: artifact.kind,
