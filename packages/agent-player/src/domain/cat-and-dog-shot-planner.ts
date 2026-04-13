@@ -470,6 +470,7 @@ function chooseFamily(input: {
 }
 
 function resolveWeaponChoice(input: {
+  attemptStrategy: CatAndDogAttemptStrategy;
   family: CatAndDogShotFamily;
   runtime: CatAndDogShotPlannerRuntimeContext;
   lastShot: CatAndDogShotFeedbackRecord | null;
@@ -484,13 +485,7 @@ function resolveWeaponChoice(input: {
     input.runtime.preparedShotKey === "super" ||
     input.runtime.preparedShotKey === "heal"
       ? input.runtime.preparedShotKey
-      : input.runtime.selectedWeaponKey === "normal" ||
-          input.runtime.selectedWeaponKey === "light" ||
-          input.runtime.selectedWeaponKey === "heavy" ||
-          input.runtime.selectedWeaponKey === "super" ||
-          input.runtime.selectedWeaponKey === "heal"
-        ? input.runtime.selectedWeaponKey
-        : input.lastShot?.weaponKey ?? "normal";
+      : input.lastShot?.weaponKey ?? input.attemptStrategy.weaponKey;
   const splashFriendly =
     (input.runtime.projectileSplashRadius ?? 0) >= 60 &&
     (input.runtime.projectileDamageMax ?? 0) >= 18;
@@ -843,6 +838,7 @@ export function planCatAndDogShotExecution(input: PlanCatAndDogShotInput): CatAn
     shotNumber
   });
   const weaponChoice = resolveWeaponChoice({
+    attemptStrategy: input.attemptStrategy,
     family: familyDecision.family,
     runtime: input.runtime,
     lastShot

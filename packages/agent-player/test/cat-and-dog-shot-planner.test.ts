@@ -79,6 +79,41 @@ function buildShotFeedback(
 }
 
 describe("planCatAndDogShotExecution", () => {
+  it("keeps the attempt-selected weapon when runtime starts on the default normal weapon", () => {
+    const plan = planCatAndDogShotExecution({
+      attemptStrategy: {
+        ...buildBaseStrategy(),
+        weaponKey: "heavy"
+      },
+      selectionDetails: buildSelectionDetails({
+        plannerFamily: null,
+        plannerCategory: null
+      }),
+      runtime: {
+        windDirection: "right",
+        windNormalized: 0.18,
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1.01,
+        projectileGravityMultiplier: 1.04,
+        projectileWindInfluenceMultiplier: 1.22,
+        projectileSplashRadius: 64,
+        projectileDamageMin: 9,
+        projectileDamageMax: 23,
+        projectileWindupSeconds: 0.17,
+        preparedShotAngle: null,
+        preparedShotPower: null,
+        preparedShotKey: null,
+        selectedWeaponKey: "normal"
+      },
+      shotHistory: []
+    });
+
+    expect(plan.family).toBe("medium-arc-default");
+    expect(plan.strategy.weaponKey).toBe("heavy");
+    expect(plan.fingerprint.startsWith("heavy:")).toBe(true);
+  });
+
   it("chooses a higher-arc family under strong headwind even before shot history exists", () => {
     const plan = planCatAndDogShotExecution({
       attemptStrategy: buildBaseStrategy(),
