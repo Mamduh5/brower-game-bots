@@ -1288,15 +1288,15 @@ function shouldFinalizePendingShot(snapshot: GameSnapshot, pendingShot: PendingS
     snapshot.semanticState.visionShotOutcomeLabel === "near-target" ||
     snapshot.semanticState.visionShotOutcomeLabel === "target-side-impact" ||
     snapshot.semanticState.visionShotOutcomeLabel === "self-side-impact";
+  const turnAdvanced =
+    snapshot.semanticState.playerTurnReady === true &&
+    pendingShot.preTurnCounter !== null &&
+    turnCounter !== null &&
+    turnCounter > pendingShot.preTurnCounter;
   return (
     snapshot.semanticState.shotResolved === true ||
-    (snapshot.semanticState.playerTurnReady === true &&
-      (
-        pendingShot.preTurnCounter === null ||
-        turnCounter === null ||
-        turnCounter > pendingShot.preTurnCounter ||
-        meaningfulVisualOutcome
-      )) ||
+    turnAdvanced ||
+    meaningfulVisualOutcome ||
     snapshot.semanticState.endVisible === true ||
     snapshot.semanticState.outcome === "win" ||
     snapshot.semanticState.outcome === "loss"
@@ -1752,13 +1752,15 @@ export async function runPlayerCatAndDog(
         let semanticActionParams = decision.params;
         if (semanticActionId === "execute-planned-shot") {
           if (pendingShot) {
-            shotHistory.push(
-              buildShotFeedbackRecord({
-                pendingShot,
-                snapshot: currentSnapshot,
-                resolvedAt: clock.now().toISOString()
-              })
-            );
+            if (shouldFinalizePendingShot(currentSnapshot, pendingShot)) {
+              shotHistory.push(
+                buildShotFeedbackRecord({
+                  pendingShot,
+                  snapshot: currentSnapshot,
+                  resolvedAt: clock.now().toISOString()
+                })
+              );
+            }
             pendingShot = null;
           }
 
@@ -2044,13 +2046,15 @@ export async function runPlayerCatAndDog(
 
       const attemptEndedAt = clock.now().toISOString();
       if (pendingShot) {
-        shotHistory.push(
-          buildShotFeedbackRecord({
-            pendingShot,
-            snapshot: currentSnapshot,
-            resolvedAt: attemptEndedAt
-          })
-        );
+        if (shouldFinalizePendingShot(currentSnapshot, pendingShot)) {
+          shotHistory.push(
+            buildShotFeedbackRecord({
+              pendingShot,
+              snapshot: currentSnapshot,
+              resolvedAt: attemptEndedAt
+            })
+          );
+        }
         pendingShot = null;
       }
       const elapsedMs = Math.max(

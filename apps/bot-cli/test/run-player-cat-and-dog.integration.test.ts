@@ -331,6 +331,12 @@ describe("runPlayerCatAndDog integration", () => {
         expect(result.attempts[0]?.diagnostics.deadPathAbortReason).toBeNull();
         expect(result.attempts[0]?.diagnostics.stalledLoopDetected).toBe(false);
         expect(result.attempts[0]?.diagnostics.unknownTerminationKind).toBe("none");
+        expect(result.attempts[0]?.shotHistory.some((shot) => shot.feedback.shotResolutionCategory === "aiming")).toBe(
+          false
+        );
+        expect(result.attempts[0]?.shotHistory.some((shot) => shot.feedback.hintCategory === "instructional")).toBe(
+          false
+        );
       } finally {
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {
