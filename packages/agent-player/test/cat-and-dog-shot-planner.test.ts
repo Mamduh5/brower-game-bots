@@ -194,6 +194,68 @@ describe("planCatAndDogShotExecution", () => {
     expect(plan.source).toBe("family-abandonment");
   });
 
+  it("does not treat unresolved vision-only failures as full-strength family exhaustion", () => {
+    const plan = planCatAndDogShotExecution({
+      attemptStrategy: buildBaseStrategy(),
+      selectionDetails: buildSelectionDetails({
+        plannerFamily: "medium-arc-default",
+        plannerCategory: "default-runtime"
+      }),
+      runtime: {
+        windDirection: "calm",
+        windNormalized: 0,
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1,
+        projectileGravityMultiplier: 1,
+        projectileWindInfluenceMultiplier: 1,
+        projectileSplashRadius: 24,
+        projectileDamageMin: 8,
+        projectileDamageMax: 14,
+        projectileWindupSeconds: 0.18,
+        preparedShotAngle: null,
+        preparedShotPower: null,
+        preparedShotKey: null,
+        selectedWeaponKey: "normal"
+      },
+      shotHistory: [
+        buildShotFeedback({
+          family: "medium-arc-default",
+          visualOutcomeLabel: "short",
+          shotResolved: false,
+          shotResolutionCategory: "none",
+          hintCategory: "none",
+          hintText: null,
+          fingerprint: "normal:right:3:up:4:180:2200"
+        }),
+        buildShotFeedback({
+          shotNumber: 2,
+          family: "medium-arc-default",
+          visualOutcomeLabel: "short",
+          shotResolved: false,
+          shotResolutionCategory: "none",
+          hintCategory: "none",
+          hintText: null,
+          fingerprint: "normal:right:3:up:5:180:2200"
+        }),
+        buildShotFeedback({
+          shotNumber: 3,
+          family: "medium-arc-default",
+          visualOutcomeLabel: "self-side-impact",
+          shotResolved: false,
+          shotResolutionCategory: "none",
+          hintCategory: "none",
+          hintText: null,
+          fingerprint: "normal:right:4:up:5:180:2200"
+        })
+      ]
+    });
+
+    expect(plan.source).toBe("within-attempt-correction");
+    expect(plan.family).toBe("self-side-recovery");
+    expect(plan.familySwitchReason).toContain("self side");
+  });
+
   it("uses heavy conservatively for blocked-terrain escape when splash context justifies it", () => {
     const plan = planCatAndDogShotExecution({
       attemptStrategy: buildBaseStrategy(),

@@ -363,12 +363,28 @@ function hasTriedFallbackFamily(shotHistory: readonly CatAndDogShotRecord[]): bo
   return new Set(shotHistory.map((shot) => shot.family)).size >= 2;
 }
 
+function getFailureEvidenceWeight(shot: CatAndDogShotRecord): number {
+  const visionOnlyDirectionalFailure =
+    shot.feedback.shotResolved !== true &&
+    (shot.feedback.shotResolutionCategory === null || shot.feedback.shotResolutionCategory === "none") &&
+    (
+      shot.feedback.visualOutcomeLabel === "self-side-impact" ||
+      shot.feedback.visualOutcomeLabel === "blocked" ||
+      shot.feedback.visualOutcomeLabel === "short" ||
+      shot.feedback.visualOutcomeLabel === "long" ||
+      shot.feedback.visualOutcomeLabel === "no-meaningful-visual-change"
+    );
+
+  return visionOnlyDirectionalFailure ? 0.35 : 1;
+}
+
 function isResolvedFailureShot(shot: CatAndDogShotRecord): boolean {
   const visualOutcomeLabel = shot.feedback.visualOutcomeLabel;
   const shotResolutionCategory = shot.feedback.shotResolutionCategory;
 
   return (
     shot.feedback.familyFailed === true &&
+    getFailureEvidenceWeight(shot) >= 1 &&
     (
       shot.feedback.shotResolved === true ||
       visualOutcomeLabel === "blocked" ||

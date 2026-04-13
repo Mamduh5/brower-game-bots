@@ -88,6 +88,24 @@ interface FamilyStats {
   targetSide: number;
 }
 
+function getFailureEvidenceWeight(shot: Pick<
+  CatAndDogShotFeedbackRecord,
+  "shotResolved" | "shotResolutionCategory" | "visualOutcomeLabel"
+>): number {
+  const visionOnlyDirectionalFailure =
+    shot.shotResolved !== true &&
+    (shot.shotResolutionCategory === null || shot.shotResolutionCategory === "none") &&
+    (
+      shot.visualOutcomeLabel === "self-side-impact" ||
+      shot.visualOutcomeLabel === "blocked" ||
+      shot.visualOutcomeLabel === "short" ||
+      shot.visualOutcomeLabel === "long" ||
+      shot.visualOutcomeLabel === "no-meaningful-visual-change"
+    );
+
+  return visionOnlyDirectionalFailure ? 0.35 : 1;
+}
+
 function clampTapCount(value: number): number {
   return Math.max(0, Math.min(5, value));
 }
@@ -191,11 +209,13 @@ function buildFamilyStats(
     };
 
     current.uses += 1;
-    current.failingUses += shot.familyFailed ? 1 : 0;
-    current.selfSide += shot.visualOutcomeLabel === "self-side-impact" ? 1 : 0;
-    current.blocked += shot.visualOutcomeLabel === "blocked" ? 1 : 0;
-    current.short += shot.visualOutcomeLabel === "short" ? 1 : 0;
-    current.noChange += shot.visualOutcomeLabel === "no-meaningful-visual-change" ? 1 : 0;
+    const failureWeight = shot.familyFailed ? getFailureEvidenceWeight(shot) : 0;
+
+    current.failingUses += failureWeight;
+    current.selfSide += shot.visualOutcomeLabel === "self-side-impact" ? failureWeight : 0;
+    current.blocked += shot.visualOutcomeLabel === "blocked" ? failureWeight : 0;
+    current.short += shot.visualOutcomeLabel === "short" ? failureWeight : 0;
+    current.noChange += shot.visualOutcomeLabel === "no-meaningful-visual-change" ? failureWeight : 0;
     current.nearTarget += shot.visualOutcomeLabel === "near-target" ? 1 : 0;
     current.targetSide += shot.visualOutcomeLabel === "target-side-impact" ? 1 : 0;
     map.set(shot.family, current);
@@ -328,7 +348,7 @@ function chooseFamily(input: {
       break;
     }
 
-    consecutiveSameFamilyFailures += 1;
+    consecutiveSameFamilyFailures += getFailureEvidenceWeight(shot);
   }
   const repeatedWeakFingerprintCount = shotHistory.filter((shot) => shot.fingerprint === lastShot.fingerprint).length;
   const repeatedWeakFingerprint =
