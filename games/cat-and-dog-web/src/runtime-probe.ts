@@ -18,6 +18,25 @@ export interface CatAndDogRuntimeState {
   windNormalized: number | null;
   windDirection: "left" | "right" | "calm" | "unknown";
   windMax: number | null;
+  aimAngleMin: number | null;
+  aimAngleMax: number | null;
+  aimAngleTap: number | null;
+  aimPowerMin: number | null;
+  aimPowerMax: number | null;
+  aimPowerTap: number | null;
+  currentAimAngle: number | null;
+  currentAimPower: number | null;
+  playerHp: number | null;
+  cpuHp: number | null;
+  currentPlayerX: number | null;
+  targetPlayerX: number | null;
+  wallHp: number | null;
+  wallDestroyed: boolean;
+  normalAmmoAvailable: boolean;
+  lightAmmoAvailable: boolean;
+  heavyAmmoAvailable: boolean;
+  superAmmoAvailable: boolean;
+  healAmmoAvailable: boolean;
   preparedShotAngle: number | null;
   preparedShotPower: number | null;
   preparedShotKey: string | null;
@@ -39,11 +58,31 @@ return (async () => {
 
   const normalizeNumber = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
   const normalizeString = (value) => (typeof value === "string" && value.length > 0 ? value : null);
+  const readHealth = (player) => normalizeNumber(player?.health?.current);
+  const readX = (player) => normalizeNumber(player?.transform?.x);
+  const hasAmmo = (player, key) => {
+    if (!player) {
+      return false;
+    }
+
+    if (typeof player.hasAmmo === "function") {
+      return Boolean(player.hasAmmo(key));
+    }
+
+    const amount = player?.weapon?.ammo?.[key];
+    return amount === Infinity || (typeof amount === "number" && amount > 0);
+  };
 
   const buildFromState = (input) => {
     const state = input?.state ?? null;
     const config = input?.config ?? null;
     const currentPlayer = input?.currentPlayer ?? null;
+    const players = Array.isArray(input?.players) ? input.players : [];
+    const currentPlayerIndex = normalizeNumber(state?.currentPlayerIndex);
+    const targetPlayerIndex = currentPlayerIndex === 0 ? 1 : currentPlayerIndex === 1 ? 0 : null;
+    const targetPlayer = targetPlayerIndex === null ? null : players[targetPlayerIndex] ?? null;
+    const playerOne = players[0] ?? null;
+    const cpuPlayer = players[1] ?? null;
     const preparedThrow = state?.preparedThrow ?? null;
     const selectedShotKey = normalizeString(
       currentPlayer?.weapon?.shotType ?? preparedThrow?.shotKey ?? null
@@ -66,6 +105,41 @@ return (async () => {
       cpuDifficulty: normalizeString(state?.cpuDifficulty),
       windValue,
       windMax,
+      aimConfig: config?.aim
+        ? {
+            angleMin: normalizeNumber(config.aim.angleMin),
+            angleMax: normalizeNumber(config.aim.angleMax),
+            angleTap: normalizeNumber(config.aim.angleTap),
+            powerMin: normalizeNumber(config.aim.powerMin),
+            powerMax: normalizeNumber(config.aim.powerMax),
+            powerTap: normalizeNumber(config.aim.powerTap)
+          }
+        : null,
+      currentAim: currentPlayer?.aim
+        ? {
+            angle: normalizeNumber(currentPlayer.aim.angle),
+            power: normalizeNumber(currentPlayer.aim.power)
+          }
+        : null,
+      playerHp: readHealth(playerOne),
+      cpuHp: readHealth(cpuPlayer),
+      currentPlayerX: readX(currentPlayer),
+      targetPlayerX: readX(targetPlayer),
+      wall: state?.wall
+        ? {
+            hp: normalizeNumber(state.wall.hp),
+            destroyed: Boolean(state.wall.destroyed)
+          }
+        : null,
+      ammoAvailable: currentPlayer
+        ? {
+            normal: hasAmmo(currentPlayer, "normal"),
+            light: hasAmmo(currentPlayer, "light"),
+            heavy: hasAmmo(currentPlayer, "heavy"),
+            super: hasAmmo(currentPlayer, "super"),
+            heal: hasAmmo(currentPlayer, "heal")
+          }
+        : null,
       preparedThrow: preparedThrow
         ? {
             playerIndex: normalizeNumber(preparedThrow.playerIndex),
@@ -149,7 +223,8 @@ return (async () => {
       source: "game-instance",
       state: game.state,
       config: configModule?.CONFIG ?? null,
-      currentPlayer: typeof game.getCurrentPlayer === "function" ? game.getCurrentPlayer() : null
+      currentPlayer: typeof game.getCurrentPlayer === "function" ? game.getCurrentPlayer() : null,
+      players: Array.isArray(game.players) ? game.players : []
     });
   } catch (error) {
     return {
@@ -204,6 +279,7 @@ export function buildCatAndDogObservationRequest(input: {
   const shouldRequestRuntimeProbe =
     input.includeRuntimeProbe === true ||
     input.decisionActionId === "start-cpu-match" ||
+    input.snapshot?.semanticState.gameplayEntered === true ||
     input.snapshot?.semanticState.menuVisible === true;
 
   return {
@@ -236,6 +312,25 @@ export function parseCatAndDogRuntimeState(frame: ObservationFrame): CatAndDogRu
       windNormalized: null,
       windDirection: "unknown",
       windMax: null,
+      aimAngleMin: null,
+      aimAngleMax: null,
+      aimAngleTap: null,
+      aimPowerMin: null,
+      aimPowerMax: null,
+      aimPowerTap: null,
+      currentAimAngle: null,
+      currentAimPower: null,
+      playerHp: null,
+      cpuHp: null,
+      currentPlayerX: null,
+      targetPlayerX: null,
+      wallHp: null,
+      wallDestroyed: false,
+      normalAmmoAvailable: false,
+      lightAmmoAvailable: false,
+      heavyAmmoAvailable: false,
+      superAmmoAvailable: false,
+      healAmmoAvailable: false,
       preparedShotAngle: null,
       preparedShotPower: null,
       preparedShotKey: null,
@@ -266,6 +361,10 @@ export function parseCatAndDogRuntimeState(frame: ObservationFrame): CatAndDogRu
           : "unavailable";
   const preparedThrow = readNestedObject(value?.preparedThrow);
   const projectileConfig = readNestedObject(value?.projectileConfig);
+  const aimConfig = readNestedObject(value?.aimConfig);
+  const currentAim = readNestedObject(value?.currentAim);
+  const wall = readNestedObject(value?.wall);
+  const ammoAvailable = readNestedObject(value?.ammoAvailable);
   const windValue = readNumber(value?.windValue);
   const windMax = readNumber(value?.windMax);
   const windNormalized =
@@ -287,6 +386,25 @@ export function parseCatAndDogRuntimeState(frame: ObservationFrame): CatAndDogRu
     windNormalized,
     windDirection: toWindDirection(windValue),
     windMax,
+    aimAngleMin: readNumber(aimConfig?.angleMin),
+    aimAngleMax: readNumber(aimConfig?.angleMax),
+    aimAngleTap: readNumber(aimConfig?.angleTap),
+    aimPowerMin: readNumber(aimConfig?.powerMin),
+    aimPowerMax: readNumber(aimConfig?.powerMax),
+    aimPowerTap: readNumber(aimConfig?.powerTap),
+    currentAimAngle: readNumber(currentAim?.angle),
+    currentAimPower: readNumber(currentAim?.power),
+    playerHp: readNumber(value?.playerHp),
+    cpuHp: readNumber(value?.cpuHp),
+    currentPlayerX: readNumber(value?.currentPlayerX),
+    targetPlayerX: readNumber(value?.targetPlayerX),
+    wallHp: readNumber(wall?.hp),
+    wallDestroyed: readBoolean(wall?.destroyed),
+    normalAmmoAvailable: readBoolean(ammoAvailable?.normal),
+    lightAmmoAvailable: readBoolean(ammoAvailable?.light),
+    heavyAmmoAvailable: readBoolean(ammoAvailable?.heavy),
+    superAmmoAvailable: readBoolean(ammoAvailable?.super),
+    healAmmoAvailable: readBoolean(ammoAvailable?.heal),
     preparedShotAngle: readNumber(preparedThrow?.angle),
     preparedShotPower: readNumber(preparedThrow?.power),
     preparedShotKey: readString(preparedThrow?.shotKey),

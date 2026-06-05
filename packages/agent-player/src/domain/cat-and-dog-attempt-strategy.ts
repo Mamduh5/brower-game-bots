@@ -13,7 +13,9 @@ export const CatAndDogAttemptStrategySchema = z.object({
   powerDirection: z.enum(["up", "down"]),
   powerTapCount: z.number().int().min(0).max(5),
   settleMs: z.number().int().nonnegative(),
-  turnResolutionWaitMs: z.number().int().positive()
+  turnResolutionWaitMs: z.number().int().positive(),
+  targetAngle: z.number().min(12).max(82).optional(),
+  targetPower: z.number().min(330).max(840).optional()
 });
 export type CatAndDogAttemptStrategy = z.infer<typeof CatAndDogAttemptStrategySchema>;
 

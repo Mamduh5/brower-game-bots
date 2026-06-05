@@ -311,6 +311,11 @@ function readSemanticNumber(snapshot: GameSnapshot, key: string): number | null 
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function readSemanticStringArray(snapshot: GameSnapshot, key: string): readonly string[] {
+  const value = snapshot.semanticState[key];
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
 function readShotResolutionCategory(snapshot: GameSnapshot): ShotResolutionCategory {
   const value = snapshot.semanticState.shotResolutionCategory;
   return typeof value === "string" ? (value as ShotResolutionCategory) : "none";
@@ -441,6 +446,17 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     windValue: toJsonValue(snapshot.semanticState.windValue),
     windNormalized: toJsonValue(snapshot.semanticState.windNormalized),
     windDirection: toJsonValue(snapshot.semanticState.windDirection),
+    currentAimAngle: toJsonValue(snapshot.semanticState.currentAimAngle),
+    currentAimPower: toJsonValue(snapshot.semanticState.currentAimPower),
+    aimAngleTap: toJsonValue(snapshot.semanticState.aimAngleTap),
+    aimPowerTap: toJsonValue(snapshot.semanticState.aimPowerTap),
+    runtimePlayerHp: toJsonValue(snapshot.semanticState.runtimePlayerHp),
+    runtimeCpuHp: toJsonValue(snapshot.semanticState.runtimeCpuHp),
+    currentPlayerX: toJsonValue(snapshot.semanticState.currentPlayerX),
+    targetPlayerX: toJsonValue(snapshot.semanticState.targetPlayerX),
+    wallHp: toJsonValue(snapshot.semanticState.wallHp),
+    wallDestroyed: toJsonValue(snapshot.semanticState.wallDestroyed),
+    availableWeaponKeys: toJsonValue(snapshot.semanticState.availableWeaponKeys),
     projectileLabel: toJsonValue(snapshot.semanticState.projectileLabel),
     projectileWeight: toJsonValue(snapshot.semanticState.projectileWeight),
     projectileLaunchSpeedMultiplier: toJsonValue(snapshot.semanticState.projectileLaunchSpeedMultiplier),
@@ -1264,6 +1280,7 @@ function buildShotPlanFromSnapshot(input: {
         input.snapshot.semanticState.windDirection === "calm"
           ? input.snapshot.semanticState.windDirection
           : "unknown",
+      windValue: readSemanticNumber(input.snapshot, "windValue"),
       windNormalized: readSemanticNumber(input.snapshot, "windNormalized"),
       projectileLabel:
         typeof input.snapshot.semanticState.projectileLabel === "string"
@@ -1289,7 +1306,22 @@ function buildShotPlanFromSnapshot(input: {
       selectedWeaponKey:
         typeof input.snapshot.semanticState.selectedWeaponKey === "string"
           ? input.snapshot.semanticState.selectedWeaponKey
-          : null
+          : null,
+      currentAimAngle: readSemanticNumber(input.snapshot, "currentAimAngle"),
+      currentAimPower: readSemanticNumber(input.snapshot, "currentAimPower"),
+      aimAngleMin: readSemanticNumber(input.snapshot, "aimAngleMin"),
+      aimAngleMax: readSemanticNumber(input.snapshot, "aimAngleMax"),
+      aimAngleTap: readSemanticNumber(input.snapshot, "aimAngleTap"),
+      aimPowerMin: readSemanticNumber(input.snapshot, "aimPowerMin"),
+      aimPowerMax: readSemanticNumber(input.snapshot, "aimPowerMax"),
+      aimPowerTap: readSemanticNumber(input.snapshot, "aimPowerTap"),
+      playerHp: readSemanticNumber(input.snapshot, "runtimePlayerHp") ?? readSemanticNumber(input.snapshot, "playerHpValue"),
+      cpuHp: readSemanticNumber(input.snapshot, "runtimeCpuHp") ?? readSemanticNumber(input.snapshot, "cpuHpValue"),
+      currentPlayerX: readSemanticNumber(input.snapshot, "currentPlayerX"),
+      targetPlayerX: readSemanticNumber(input.snapshot, "targetPlayerX"),
+      wallHp: readSemanticNumber(input.snapshot, "wallHp"),
+      wallDestroyed: input.snapshot.semanticState.wallDestroyed === true,
+      availableWeaponKeys: readSemanticStringArray(input.snapshot, "availableWeaponKeys")
     },
     shotHistory: input.shotHistory
   });
@@ -1793,7 +1825,13 @@ export async function runPlayerCatAndDog(
             powerDirection: plannedShot.strategy.powerDirection,
             powerTapCount: plannedShot.strategy.powerTapCount,
             settleMs: plannedShot.strategy.settleMs,
-            turnResolutionWaitMs: plannedShot.strategy.turnResolutionWaitMs
+            turnResolutionWaitMs: plannedShot.strategy.turnResolutionWaitMs,
+            ...(typeof plannedShot.strategy.targetAngle === "number"
+              ? { targetAngle: plannedShot.strategy.targetAngle }
+              : {}),
+            ...(typeof plannedShot.strategy.targetPower === "number"
+              ? { targetPower: plannedShot.strategy.targetPower }
+              : {})
           };
           pendingShot = {
             plan: plannedShot,

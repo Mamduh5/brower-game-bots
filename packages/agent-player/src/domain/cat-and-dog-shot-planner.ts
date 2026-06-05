@@ -8,6 +8,7 @@ import type {
 
 export interface CatAndDogShotPlannerRuntimeContext {
   windDirection: "left" | "right" | "calm" | "unknown";
+  windValue?: number | null;
   windNormalized: number | null;
   projectileLabel: string | null;
   projectileWeight: number | null;
@@ -22,6 +23,21 @@ export interface CatAndDogShotPlannerRuntimeContext {
   preparedShotPower: number | null;
   preparedShotKey: string | null;
   selectedWeaponKey: string | null;
+  currentAimAngle?: number | null;
+  currentAimPower?: number | null;
+  aimAngleMin?: number | null;
+  aimAngleMax?: number | null;
+  aimAngleTap?: number | null;
+  aimPowerMin?: number | null;
+  aimPowerMax?: number | null;
+  aimPowerTap?: number | null;
+  playerHp?: number | null;
+  cpuHp?: number | null;
+  currentPlayerX?: number | null;
+  targetPlayerX?: number | null;
+  wallHp?: number | null;
+  wallDestroyed?: boolean;
+  availableWeaponKeys?: readonly string[];
 }
 
 export interface CatAndDogShotFeedbackRecord {
@@ -59,7 +75,8 @@ export interface CatAndDogShotExecutionPlan {
     | "within-attempt-correction"
     | "family-abandonment"
     | "stability-reset"
-    | "finisher";
+    | "finisher"
+    | "physics-solver";
   planReason: string;
   familySwitchReason: string | null;
   projectilePolicyReason: string | null;
@@ -126,7 +143,9 @@ function toFingerprint(strategy: CatAndDogAttemptStrategy): string {
     strategy.powerDirection,
     strategy.powerTapCount,
     strategy.settleMs,
-    strategy.turnResolutionWaitMs
+    strategy.turnResolutionWaitMs,
+    strategy.targetAngle ?? "",
+    strategy.targetPower ?? ""
   ].join(":");
 }
 
@@ -189,6 +208,481 @@ function toPlannerCategory(family: CatAndDogShotFamily): CatAndDogPlannerCategor
     default:
       return "default-runtime";
   }
+}
+
+type CatAndDogAttackWeaponKey = Exclude<CatAndDogAttemptStrategy["weaponKey"], "heal">;
+
+interface ProjectilePhysicsConfig {
+  weight: number;
+  launchSpeedMultiplier: number;
+  gravityMultiplier: number;
+  windInfluenceMultiplier: number;
+  radius: number;
+  damageMin: number;
+  damageMax: number;
+  directBonus: number;
+  splashRadius: number;
+  directDamage?: number;
+  trackingDelay?: number;
+  trackingTurnRate?: number;
+  trackingAcceleration?: number;
+  trackingMaxSpeedMultiplier?: number;
+}
+
+interface PhysicsShotResult {
+  weaponKey: CatAndDogAttackWeaponKey;
+  angle: number;
+  power: number;
+  directHit: boolean;
+  wallHit: boolean;
+  damage: number;
+  bestDistance: number;
+  finalDistance: number;
+  impactX: number;
+  impactY: number;
+  score: number;
+}
+
+const PHYSICS_WORLD = {
+  canvasWidth: 960,
+  canvasHeight: 540,
+  groundY: 438,
+  gravity: 790,
+  wallX: 480,
+  wallWidth: 56,
+  wallHeight: 132,
+  playerHandOffsetX: 34,
+  playerHandOffsetY: 63,
+  playerHeadRadius: 17,
+  playerBodyRadius: 24,
+  defaultPlayerX: 150,
+  defaultTargetX: 810,
+  defaultAngle: 42,
+  defaultPower: 500,
+  defaultAngleMin: 12,
+  defaultAngleMax: 82,
+  defaultAngleTap: 1.8,
+  defaultPowerMin: 330,
+  defaultPowerMax: 840,
+  defaultPowerTap: 18
+} as const;
+
+const PROJECTILE_PHYSICS: Record<CatAndDogAttackWeaponKey, ProjectilePhysicsConfig> = {
+  normal: {
+    weight: 1,
+    launchSpeedMultiplier: 1.01,
+    gravityMultiplier: 1.04,
+    windInfluenceMultiplier: 1.22,
+    radius: 7,
+    damageMin: 9,
+    damageMax: 23,
+    directBonus: 10,
+    splashRadius: 64
+  },
+  light: {
+    weight: 0.66,
+    launchSpeedMultiplier: 1.08,
+    gravityMultiplier: 0.84,
+    windInfluenceMultiplier: 2.1,
+    radius: 5.2,
+    damageMin: 3,
+    damageMax: 8,
+    directDamage: 11,
+    directBonus: 0,
+    splashRadius: 32
+  },
+  heavy: {
+    weight: 1.72,
+    launchSpeedMultiplier: 0.89,
+    gravityMultiplier: 1.3,
+    windInfluenceMultiplier: 0.46,
+    radius: 9.2,
+    damageMin: 14,
+    damageMax: 31,
+    directBonus: 14,
+    splashRadius: 70
+  },
+  super: {
+    weight: 1.28,
+    launchSpeedMultiplier: 0.92,
+    gravityMultiplier: 1.2,
+    windInfluenceMultiplier: 0.92,
+    radius: 7,
+    damageMin: 14,
+    damageMax: 24,
+    directDamage: 55,
+    directBonus: 0,
+    splashRadius: 44,
+    trackingDelay: 0.5,
+    trackingTurnRate: 2.35,
+    trackingAcceleration: 18,
+    trackingMaxSpeedMultiplier: 1.1
+  }
+};
+
+const ATTACK_WEAPON_ORDER: readonly CatAndDogAttackWeaponKey[] = ["super", "heavy", "normal", "light"];
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function distanceBetween(leftX: number, leftY: number, rightX: number, rightY: number): number {
+  return Math.hypot(leftX - rightX, leftY - rightY);
+}
+
+function normalizeRadians(value: number): number {
+  let angle = value;
+  while (angle > Math.PI) {
+    angle -= Math.PI * 2;
+  }
+  while (angle < -Math.PI) {
+    angle += Math.PI * 2;
+  }
+  return angle;
+}
+
+function buildReachableValues(input: {
+  current: number;
+  min: number;
+  max: number;
+  tap: number;
+}): readonly number[] {
+  const values = new Set<number>();
+  for (let count = -80; count <= 80; count += 1) {
+    values.add(Number(clampNumber(input.current + count * input.tap, input.min, input.max).toFixed(3)));
+  }
+
+  return [...values].sort((left, right) => left - right);
+}
+
+function getTargetCircles(targetX: number): readonly { x: number; y: number; radius: number }[] {
+  return [
+    { x: targetX, y: PHYSICS_WORLD.groundY - 73, radius: PHYSICS_WORLD.playerHeadRadius },
+    { x: targetX, y: PHYSICS_WORLD.groundY - 39, radius: PHYSICS_WORLD.playerBodyRadius }
+  ];
+}
+
+function getDamageAnchor(targetX: number): { x: number; y: number } {
+  return {
+    x: targetX,
+    y: PHYSICS_WORLD.groundY - 46
+  };
+}
+
+function computeImpactDamage(input: {
+  shot: ProjectilePhysicsConfig;
+  impactX: number;
+  impactY: number;
+  targetX: number;
+  directHit: boolean;
+}): number {
+  if (input.directHit) {
+    return input.shot.directDamage ?? input.shot.damageMax + input.shot.directBonus;
+  }
+
+  const anchor = getDamageAnchor(input.targetX);
+  const distance = distanceBetween(input.impactX, input.impactY, anchor.x, anchor.y);
+  if (distance > input.shot.splashRadius) {
+    return 0;
+  }
+
+  const ratio = 1 - distance / input.shot.splashRadius;
+  return Math.round(input.shot.damageMin + (input.shot.damageMax - input.shot.damageMin) * Math.pow(ratio, 1.15));
+}
+
+function simulatePhysicsShot(input: {
+  weaponKey: CatAndDogAttackWeaponKey;
+  angle: number;
+  power: number;
+  windValue: number;
+  wallDestroyed: boolean;
+  currentPlayerX: number;
+  targetPlayerX: number;
+}): Omit<PhysicsShotResult, "score"> {
+  const shot = PROJECTILE_PHYSICS[input.weaponKey];
+  const facing = input.targetPlayerX >= input.currentPlayerX ? 1 : -1;
+  const radians = input.angle * Math.PI / 180;
+  const targetAnchor = getDamageAnchor(input.targetPlayerX);
+  let x = input.currentPlayerX + facing * (PHYSICS_WORLD.playerHandOffsetX + Math.cos(radians) * 10);
+  let y = PHYSICS_WORLD.groundY - PHYSICS_WORLD.playerHandOffsetY - Math.sin(radians) * 8;
+  let vx = Math.cos(radians) * input.power * shot.launchSpeedMultiplier * facing;
+  let vy = -Math.sin(radians) * input.power * shot.launchSpeedMultiplier;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let finalDistance = Number.POSITIVE_INFINITY;
+  let directHit = false;
+  let wallHit = false;
+  let impactX = x;
+  let impactY = y;
+
+  for (let step = 0; step < 600; step += 1) {
+    const stepSeconds = 1 / 60;
+    if (shot.trackingDelay && step / 60 >= shot.trackingDelay) {
+      const desiredAngle = Math.atan2(targetAnchor.y - y, targetAnchor.x - x);
+      const currentAngle = Math.atan2(vy, vx || 0.001);
+      const turn = clampNumber(
+        normalizeRadians(desiredAngle - currentAngle),
+        -(shot.trackingTurnRate ?? 0) * stepSeconds,
+        (shot.trackingTurnRate ?? 0) * stepSeconds
+      );
+      const currentSpeed = Math.hypot(vx, vy);
+      const maxSpeed = input.power * shot.launchSpeedMultiplier * (shot.trackingMaxSpeedMultiplier ?? 1);
+      const nextSpeed = Math.min(maxSpeed, currentSpeed + (shot.trackingAcceleration ?? 0) * stepSeconds);
+      vx = Math.cos(currentAngle + turn) * nextSpeed;
+      vy = Math.sin(currentAngle + turn) * nextSpeed;
+    }
+
+    vx += (input.windValue * shot.windInfluenceMultiplier / (shot.weight || 1)) * stepSeconds;
+    vy += PHYSICS_WORLD.gravity * shot.gravityMultiplier * stepSeconds;
+    x += vx * stepSeconds;
+    y += vy * stepSeconds;
+    bestDistance = Math.min(bestDistance, distanceBetween(x, y, targetAnchor.x, targetAnchor.y));
+
+    if (!input.wallDestroyed) {
+      const wallLeft = PHYSICS_WORLD.wallX - PHYSICS_WORLD.wallWidth / 2;
+      const wallRight = PHYSICS_WORLD.wallX + PHYSICS_WORLD.wallWidth / 2;
+      const wallTop = PHYSICS_WORLD.groundY - PHYSICS_WORLD.wallHeight;
+      const wallClosestX = clampNumber(x, wallLeft, wallRight);
+      const wallClosestY = clampNumber(y, wallTop, PHYSICS_WORLD.groundY);
+      if (distanceBetween(x, y, wallClosestX, wallClosestY) <= shot.radius) {
+        wallHit = true;
+        impactX = wallClosestX;
+        impactY = wallClosestY;
+        finalDistance = distanceBetween(impactX, impactY, targetAnchor.x, targetAnchor.y);
+        break;
+      }
+    }
+
+    for (const circle of getTargetCircles(input.targetPlayerX)) {
+      if (distanceBetween(x, y, circle.x, circle.y) <= shot.radius + circle.radius) {
+        directHit = true;
+        impactX = x;
+        impactY = y;
+        finalDistance = 0;
+        break;
+      }
+    }
+    if (directHit) {
+      break;
+    }
+
+    if (y + shot.radius >= PHYSICS_WORLD.groundY) {
+      impactX = x;
+      impactY = PHYSICS_WORLD.groundY - 1;
+      finalDistance = distanceBetween(impactX, impactY, targetAnchor.x, targetAnchor.y);
+      break;
+    }
+
+    if (
+      x < -80 ||
+      x > PHYSICS_WORLD.canvasWidth + 80 ||
+      y > PHYSICS_WORLD.canvasHeight + 80
+    ) {
+      impactX = clampNumber(x, 0, PHYSICS_WORLD.canvasWidth);
+      impactY = clampNumber(y, 0, PHYSICS_WORLD.groundY);
+      finalDistance = distanceBetween(impactX, impactY, targetAnchor.x, targetAnchor.y) + 40;
+      break;
+    }
+  }
+
+  if (!Number.isFinite(finalDistance)) {
+    finalDistance = bestDistance;
+  }
+
+  const damage = computeImpactDamage({
+    shot,
+    impactX,
+    impactY,
+    targetX: input.targetPlayerX,
+    directHit
+  });
+
+  return {
+    weaponKey: input.weaponKey,
+    angle: input.angle,
+    power: input.power,
+    directHit,
+    wallHit,
+    damage,
+    bestDistance,
+    finalDistance,
+    impactX,
+    impactY
+  };
+}
+
+function scorePhysicsShot(input: {
+  result: Omit<PhysicsShotResult, "score">;
+  cpuHp: number | null;
+}): number {
+  const lethal = input.cpuHp !== null && input.result.damage >= input.cpuHp;
+  const weaponBias =
+    input.result.weaponKey === "super" ? -250 : input.result.weaponKey === "heavy" ? -120 : input.result.weaponKey === "light" ? 80 : 0;
+  return (
+    (input.result.wallHit ? 80_000 : 0) +
+    (lethal ? -120_000 : 0) +
+    (input.result.directHit ? -800 : 0) -
+    input.result.damage * 1_200 +
+    input.result.bestDistance * 2 +
+    input.result.finalDistance * 0.4 +
+    weaponBias
+  );
+}
+
+function buildTapPlan(input: {
+  current: number;
+  target: number;
+  tap: number;
+  increaseDirection: CatAndDogAttemptStrategy["angleDirection"] | CatAndDogAttemptStrategy["powerDirection"];
+  decreaseDirection: CatAndDogAttemptStrategy["angleDirection"] | CatAndDogAttemptStrategy["powerDirection"];
+}): {
+  direction: CatAndDogAttemptStrategy["angleDirection"] | CatAndDogAttemptStrategy["powerDirection"];
+  count: number;
+} {
+  const delta = input.target - input.current;
+  return {
+    direction: delta < 0 ? input.decreaseDirection : input.increaseDirection,
+    count: Math.max(0, Math.min(80, Math.round(Math.abs(delta) / input.tap)))
+  };
+}
+
+function getAvailableAttackWeapons(runtime: CatAndDogShotPlannerRuntimeContext): readonly CatAndDogAttackWeaponKey[] {
+  const raw = runtime.availableWeaponKeys ?? [];
+  return ATTACK_WEAPON_ORDER.filter((weaponKey) => raw.includes(weaponKey));
+}
+
+function solvePhysicsShot(input: {
+  attemptStrategy: CatAndDogAttemptStrategy;
+  runtime: CatAndDogShotPlannerRuntimeContext;
+}): PhysicsShotResult | null {
+  const availableWeapons = getAvailableAttackWeapons(input.runtime);
+  if (!input.runtime.availableWeaponKeys || availableWeapons.length === 0) {
+    return null;
+  }
+
+  const windValue = input.runtime.windNormalized !== null && input.runtime.windValue === null
+    ? input.runtime.windNormalized * 190
+    : input.runtime.windValue ?? 0;
+  const currentAngle = input.runtime.currentAimAngle ?? PHYSICS_WORLD.defaultAngle;
+  const currentPower = input.runtime.currentAimPower ?? PHYSICS_WORLD.defaultPower;
+  const angleMin = input.runtime.aimAngleMin ?? PHYSICS_WORLD.defaultAngleMin;
+  const angleMax = input.runtime.aimAngleMax ?? PHYSICS_WORLD.defaultAngleMax;
+  const angleTap = input.runtime.aimAngleTap ?? PHYSICS_WORLD.defaultAngleTap;
+  const powerMin = input.runtime.aimPowerMin ?? PHYSICS_WORLD.defaultPowerMin;
+  const powerMax = input.runtime.aimPowerMax ?? PHYSICS_WORLD.defaultPowerMax;
+  const powerTap = input.runtime.aimPowerTap ?? PHYSICS_WORLD.defaultPowerTap;
+  const currentPlayerX = input.runtime.currentPlayerX ?? PHYSICS_WORLD.defaultPlayerX;
+  const targetPlayerX = input.runtime.targetPlayerX ?? PHYSICS_WORLD.defaultTargetX;
+  const wallDestroyed =
+    input.runtime.wallDestroyed === true ||
+    (input.runtime.wallHp !== undefined && input.runtime.wallHp !== null && input.runtime.wallHp <= 0);
+  const cpuHp = input.runtime.cpuHp ?? null;
+  const angles = buildReachableValues({
+    current: currentAngle,
+    min: angleMin,
+    max: angleMax,
+    tap: angleTap
+  });
+  const powers = buildReachableValues({
+    current: currentPower,
+    min: powerMin,
+    max: powerMax,
+    tap: powerTap
+  });
+  let best: PhysicsShotResult | null = null;
+
+  for (const weaponKey of availableWeapons) {
+    for (const angle of angles) {
+      for (const power of powers) {
+        const result = simulatePhysicsShot({
+          weaponKey,
+          angle,
+          power,
+          windValue,
+          wallDestroyed,
+          currentPlayerX,
+          targetPlayerX
+        });
+        const scored = {
+          ...result,
+          score: scorePhysicsShot({
+            result,
+            cpuHp
+          })
+        };
+        if (!best || scored.score < best.score) {
+          best = scored;
+        }
+      }
+    }
+  }
+
+  return best && best.damage > 0 ? best : null;
+}
+
+function buildPhysicsSolvedPlan(input: {
+  attemptStrategy: CatAndDogAttemptStrategy;
+  runtime: CatAndDogShotPlannerRuntimeContext;
+  shotNumber: number;
+}): CatAndDogShotExecutionPlan | null {
+  const solved = solvePhysicsShot(input);
+  if (!solved) {
+    return null;
+  }
+
+  const currentAngle = input.runtime.currentAimAngle ?? PHYSICS_WORLD.defaultAngle;
+  const currentPower = input.runtime.currentAimPower ?? PHYSICS_WORLD.defaultPower;
+  const angleTap = input.runtime.aimAngleTap ?? PHYSICS_WORLD.defaultAngleTap;
+  const powerTap = input.runtime.aimPowerTap ?? PHYSICS_WORLD.defaultPowerTap;
+  const anglePlan = buildTapPlan({
+    current: currentAngle,
+    target: solved.angle,
+    tap: angleTap,
+    increaseDirection: "right",
+    decreaseDirection: "left"
+  });
+  const powerPlan = buildTapPlan({
+    current: currentPower,
+    target: solved.power,
+    tap: powerTap,
+    increaseDirection: "up",
+    decreaseDirection: "down"
+  });
+  const strategy: CatAndDogAttemptStrategy = {
+    ...input.attemptStrategy,
+    weaponKey: solved.weaponKey,
+    angleDirection: anglePlan.direction as CatAndDogAttemptStrategy["angleDirection"],
+    angleTapCount: anglePlan.count,
+    powerDirection: powerPlan.direction as CatAndDogAttemptStrategy["powerDirection"],
+    powerTapCount: powerPlan.count,
+    settleMs: Math.max(120, input.attemptStrategy.settleMs),
+    turnResolutionWaitMs: Math.max(1_800, Math.min(2_400, input.attemptStrategy.turnResolutionWaitMs)),
+    targetAngle: solved.angle,
+    targetPower: solved.power
+  };
+  const fingerprint = toFingerprint(strategy);
+  const expected = solved.directHit ? "direct" : "splash";
+
+  return {
+    shotNumber: input.shotNumber,
+    family: "near-target-finisher",
+    category: "finisher",
+    strategy,
+    fingerprint,
+    source: "physics-solver",
+    planReason:
+      `Physics solver selected ${solved.weaponKey} ${expected} shot for ${solved.damage} expected damage at angle ${solved.angle.toFixed(1)} and power ${solved.power.toFixed(0)}.`,
+    familySwitchReason: null,
+    projectilePolicyReason: `Live wind ${String(input.runtime.windValue ?? 0)} and ammo availability were used for a reachable keyboard shot.`,
+    adaptationReason: null,
+    inputsUsed: [
+      "wind",
+      "current-aim",
+      "ammo",
+      "hp",
+      "wall-state",
+      "projectile-physics"
+    ]
+  };
 }
 
 function buildFamilyStats(
@@ -841,6 +1335,15 @@ function buildInputsUsed(input: {
 export function planCatAndDogShotExecution(input: PlanCatAndDogShotInput): CatAndDogShotExecutionPlan {
   const shotNumber = input.shotHistory.length + 1;
   const lastShot = input.shotHistory[input.shotHistory.length - 1] ?? null;
+  const physicsSolvedPlan = buildPhysicsSolvedPlan({
+    attemptStrategy: input.attemptStrategy,
+    runtime: input.runtime,
+    shotNumber
+  });
+  if (physicsSolvedPlan) {
+    return physicsSolvedPlan;
+  }
+
   const openingFamily = inferOpeningFamily({
     attemptStrategy: input.attemptStrategy,
     runtime: input.runtime,

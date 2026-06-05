@@ -74,11 +74,49 @@ function readIntegerParam(
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
+function readNumberParam(params: GameActionRequest["params"], key: string): number | null {
+  const value = params?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readSemanticNumber(snapshot: GameSnapshot, key: string): number | null {
+  const value = snapshot.semanticState[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function buildRepeatedKeypresses(key: string, count: number): EnvironmentAction[] {
   return Array.from({ length: count }, () => ({
     kind: "keypress" as const,
     key
   }));
+}
+
+function buildAimAdjustment(input: {
+  current: number | null;
+  target: number | null;
+  tapSize: number | null;
+  fallbackDirection: string;
+  fallbackTapCount: number;
+  decreaseKey: string;
+  increaseKey: string;
+}): EnvironmentAction[] {
+  if (
+    input.current === null ||
+    input.target === null ||
+    input.tapSize === null ||
+    input.tapSize <= 0
+  ) {
+    return buildRepeatedKeypresses(
+      input.fallbackDirection === "left" || input.fallbackDirection === "down"
+        ? input.decreaseKey
+        : input.increaseKey,
+      input.fallbackTapCount
+    );
+  }
+
+  const delta = input.target - input.current;
+  const tapCount = Math.max(0, Math.min(80, Math.round(Math.abs(delta) / input.tapSize)));
+  return tapCount > 0 ? buildRepeatedKeypresses(delta < 0 ? input.decreaseKey : input.increaseKey, tapCount) : [];
 }
 
 function toDigitKey(weaponKey: string | null): string {
@@ -221,6 +259,32 @@ export class CatAndDogGameSession implements GameSession {
         windNormalized: runtime.windNormalized,
         windDirection: runtime.windDirection,
         windMax: runtime.windMax,
+        aimAngleMin: runtime.aimAngleMin,
+        aimAngleMax: runtime.aimAngleMax,
+        aimAngleTap: runtime.aimAngleTap,
+        aimPowerMin: runtime.aimPowerMin,
+        aimPowerMax: runtime.aimPowerMax,
+        aimPowerTap: runtime.aimPowerTap,
+        currentAimAngle: runtime.currentAimAngle,
+        currentAimPower: runtime.currentAimPower,
+        runtimePlayerHp: runtime.playerHp,
+        runtimeCpuHp: runtime.cpuHp,
+        currentPlayerX: runtime.currentPlayerX,
+        targetPlayerX: runtime.targetPlayerX,
+        wallHp: runtime.wallHp,
+        wallDestroyed: runtime.wallDestroyed,
+        availableWeaponKeys: [
+          ...(runtime.normalAmmoAvailable ? ["normal"] : []),
+          ...(runtime.lightAmmoAvailable ? ["light"] : []),
+          ...(runtime.heavyAmmoAvailable ? ["heavy"] : []),
+          ...(runtime.superAmmoAvailable ? ["super"] : []),
+          ...(runtime.healAmmoAvailable ? ["heal"] : [])
+        ],
+        normalAmmoAvailable: runtime.normalAmmoAvailable,
+        lightAmmoAvailable: runtime.lightAmmoAvailable,
+        heavyAmmoAvailable: runtime.heavyAmmoAvailable,
+        superAmmoAvailable: runtime.superAmmoAvailable,
+        healAmmoAvailable: runtime.healAmmoAvailable,
         preparedShotAngle: runtime.preparedShotAngle,
         preparedShotPower: runtime.preparedShotPower,
         preparedShotKey: runtime.preparedShotKey,
@@ -285,6 +349,12 @@ export class CatAndDogGameSession implements GameSession {
         runtimeStateAvailable: runtime.runtimeStateAvailable ? 1 : 0,
         windValue: runtime.windValue ?? 0,
         windNormalized: runtime.windNormalized ?? 0,
+        currentAimAngle: runtime.currentAimAngle ?? 0,
+        currentAimPower: runtime.currentAimPower ?? 0,
+        wallHp: runtime.wallHp ?? 0,
+        wallDestroyed: runtime.wallDestroyed ? 1 : 0,
+        superAmmoAvailable: runtime.superAmmoAvailable ? 1 : 0,
+        heavyAmmoAvailable: runtime.heavyAmmoAvailable ? 1 : 0,
         projectileWeight: runtime.projectileWeight ?? 0,
         projectileWindInfluenceMultiplier: runtime.projectileWindInfluenceMultiplier ?? 0,
         visionAvailable: visionSummary.visionAvailable ? 1 : 0,
@@ -403,9 +473,29 @@ export class CatAndDogGameSession implements GameSession {
         const powerDirection = readStringParam(action.params, "powerDirection") === "down" ? "down" : "up";
         const angleTapCount = readIntegerParam(action.params, "angleTapCount", 1);
         const powerTapCount = readIntegerParam(action.params, "powerTapCount", 1);
+        const targetAngle = readNumberParam(action.params, "targetAngle");
+        const targetPower = readNumberParam(action.params, "targetPower");
         const settleMs = readIntegerParam(action.params, "settleMs", 150);
         const turnResolutionWaitMs = readIntegerParam(action.params, "turnResolutionWaitMs", 1800);
         const postFireObserveDelayMs = Math.max(260, Math.min(700, Math.floor(turnResolutionWaitMs / 3)));
+        const angleAdjustments = buildAimAdjustment({
+          current: readSemanticNumber(snapshot, "currentAimAngle"),
+          target: targetAngle,
+          tapSize: readSemanticNumber(snapshot, "aimAngleTap"),
+          fallbackDirection: angleDirection,
+          fallbackTapCount: angleTapCount,
+          decreaseKey: "A",
+          increaseKey: "D"
+        });
+        const powerAdjustments = buildAimAdjustment({
+          current: readSemanticNumber(snapshot, "currentAimPower"),
+          target: targetPower,
+          tapSize: readSemanticNumber(snapshot, "aimPowerTap"),
+          fallbackDirection: powerDirection,
+          fallbackTapCount: powerTapCount,
+          decreaseKey: "S",
+          increaseKey: "W"
+        });
 
         if (snapshot.semanticState.playerTurnReady !== true) {
           throw new Error("Cannot execute a planned shot before the player turn is ready.");
@@ -420,8 +510,8 @@ export class CatAndDogGameSession implements GameSession {
             kind: "wait",
             durationMs: 70
           },
-          ...buildRepeatedKeypresses(angleDirection === "left" ? "A" : "D", angleTapCount),
-          ...buildRepeatedKeypresses(powerDirection === "down" ? "S" : "W", powerTapCount),
+          ...angleAdjustments,
+          ...powerAdjustments,
           {
             kind: "wait",
             durationMs: settleMs
