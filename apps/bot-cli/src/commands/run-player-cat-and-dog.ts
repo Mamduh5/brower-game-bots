@@ -859,8 +859,8 @@ function updateAttemptProgressFromSnapshot(
   previousPlayerTurnReady: boolean;
 } {
   let nextDiagnostics = updateAttemptDiagnostics(diagnostics, snapshot);
-  const playerHpValue = readSemanticNumber(snapshot, "playerHpValue");
-  const cpuHpValue = readSemanticNumber(snapshot, "cpuHpValue");
+  const playerHpValue = readSemanticNumber(snapshot, "runtimePlayerHp") ?? readSemanticNumber(snapshot, "playerHpValue");
+  const cpuHpValue = readSemanticNumber(snapshot, "runtimeCpuHp") ?? readSemanticNumber(snapshot, "cpuHpValue");
   const windValue = readSemanticNumber(snapshot, "windValue");
   const windNormalized = readSemanticNumber(snapshot, "windNormalized");
   const projectileWeight = readSemanticNumber(snapshot, "projectileWeight");
@@ -1390,8 +1390,8 @@ function buildShotFeedbackRecord(input: {
   snapshot: GameSnapshot;
   resolvedAt: string;
 }): CatAndDogShotRecord {
-  const playerHp = readSemanticNumber(input.snapshot, "playerHpValue");
-  const cpuHp = readSemanticNumber(input.snapshot, "cpuHpValue");
+  const playerHp = readSemanticNumber(input.snapshot, "runtimePlayerHp") ?? readSemanticNumber(input.snapshot, "playerHpValue");
+  const cpuHp = readSemanticNumber(input.snapshot, "runtimeCpuHp") ?? readSemanticNumber(input.snapshot, "cpuHpValue");
   const damageTakenDelta =
     input.pendingShot.prePlayerHp !== null && playerHp !== null
       ? Math.max(0, input.pendingShot.prePlayerHp - playerHp)
@@ -1875,8 +1875,8 @@ export async function runPlayerCatAndDog(
           pendingShot = {
             plan: plannedShot,
             plannedAt: clock.now().toISOString(),
-            prePlayerHp: readSemanticNumber(currentSnapshot, "playerHpValue"),
-            preCpuHp: readSemanticNumber(currentSnapshot, "cpuHpValue"),
+            prePlayerHp: readSemanticNumber(currentSnapshot, "runtimePlayerHp") ?? readSemanticNumber(currentSnapshot, "playerHpValue"),
+            preCpuHp: readSemanticNumber(currentSnapshot, "runtimeCpuHp") ?? readSemanticNumber(currentSnapshot, "cpuHpValue"),
             preTurnCounter: readSemanticNumber(currentSnapshot, "turnCounter")
           };
         }

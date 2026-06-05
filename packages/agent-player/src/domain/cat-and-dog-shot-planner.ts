@@ -38,6 +38,7 @@ export interface CatAndDogShotPlannerRuntimeContext {
   wallHp?: number | null;
   wallDestroyed?: boolean;
   availableWeaponKeys?: readonly string[];
+  healsObserved?: number | null;
 }
 
 export interface CatAndDogShotFeedbackRecord {
@@ -82,6 +83,7 @@ export interface CatAndDogShotExecutionPlan {
   projectilePolicyReason: string | null;
   adaptationReason: string | null;
   inputsUsed: readonly string[];
+  expectedDamage?: number;
 }
 
 export interface PlanCatAndDogShotInput {
@@ -674,6 +676,7 @@ function buildPhysicsSolvedPlan(input: {
     familySwitchReason: null,
     projectilePolicyReason: `Live wind ${String(input.runtime.windValue ?? 0)} and ammo availability were used for a reachable keyboard shot.`,
     adaptationReason: null,
+    expectedDamage: solved.damage,
     inputsUsed: [
       "wind",
       "current-aim",
@@ -682,6 +685,204 @@ function buildPhysicsSolvedPlan(input: {
       "wall-state",
       "projectile-physics"
     ]
+  };
+}
+
+function retargetShotPlan(input: {
+  plan: CatAndDogShotExecutionPlan;
+  runtime: CatAndDogShotPlannerRuntimeContext;
+  targetAngle: number;
+  targetPower: number;
+}): CatAndDogShotExecutionPlan {
+  const currentAngle = input.runtime.currentAimAngle ?? PHYSICS_WORLD.defaultAngle;
+  const currentPower = input.runtime.currentAimPower ?? PHYSICS_WORLD.defaultPower;
+  const angleTap = input.runtime.aimAngleTap ?? PHYSICS_WORLD.defaultAngleTap;
+  const powerTap = input.runtime.aimPowerTap ?? PHYSICS_WORLD.defaultPowerTap;
+  const anglePlan = buildTapPlan({
+    current: currentAngle,
+    target: input.targetAngle,
+    tap: angleTap,
+    increaseDirection: "right",
+    decreaseDirection: "left"
+  });
+  const powerPlan = buildTapPlan({
+    current: currentPower,
+    target: input.targetPower,
+    tap: powerTap,
+    increaseDirection: "up",
+    decreaseDirection: "down"
+  });
+  const strategy: CatAndDogAttemptStrategy = {
+    ...input.plan.strategy,
+    angleDirection: anglePlan.direction as CatAndDogAttemptStrategy["angleDirection"],
+    angleTapCount: anglePlan.count,
+    powerDirection: powerPlan.direction as CatAndDogAttemptStrategy["powerDirection"],
+    powerTapCount: powerPlan.count,
+    targetAngle: input.targetAngle,
+    targetPower: input.targetPower
+  };
+
+  return {
+    ...input.plan,
+    strategy,
+    fingerprint: toFingerprint(strategy)
+  };
+}
+
+function buildImpossibleHealBaitPlan(input: {
+  attemptStrategy: CatAndDogAttemptStrategy;
+  runtime: CatAndDogShotPlannerRuntimeContext;
+  shotNumber: number;
+  shotHistory: readonly CatAndDogShotFeedbackRecord[];
+}): CatAndDogShotExecutionPlan | null {
+  if (input.attemptStrategy.difficulty !== "impossible") {
+    return null;
+  }
+
+  if (input.shotHistory.some((shot) => shot.weaponKey === "super")) {
+    return null;
+  }
+
+  if (didSuccessfulImpossibleHealBaitOpening(input.shotHistory, input.runtime)) {
+    return null;
+  }
+
+  const available = input.runtime.availableWeaponKeys ?? [];
+  if (!available.includes("normal") || !available.includes("super")) {
+    return null;
+  }
+
+  const cpuHp = input.runtime.cpuHp ?? null;
+  if (cpuHp !== null && cpuHp <= 90) {
+    return null;
+  }
+
+  const normalPlan = buildPhysicsSolvedPlan({
+    attemptStrategy: {
+      ...input.attemptStrategy,
+      weaponKey: "normal"
+    },
+    runtime: {
+      ...input.runtime,
+      availableWeaponKeys: ["normal"]
+    },
+    shotNumber: input.shotNumber
+  });
+  if (!normalPlan || (normalPlan.expectedDamage ?? 0) < 25) {
+    return null;
+  }
+
+  const retryReason = input.shotNumber > 1
+    ? " Previous heal-bait shot did not force the CPU heal, so keep Super reserved and retry Normal."
+    : "";
+
+  return {
+    ...normalPlan,
+    planReason:
+      `Impossible heal bait: use Normal for ${normalPlan.expectedDamage ?? "unknown"} expected damage so the CPU spends its one full heal before Super is used.${retryReason} ${normalPlan.planReason}`,
+    projectilePolicyReason:
+      `${normalPlan.projectilePolicyReason} Impossible CPU full-heals below 82% HP, so Super should be preserved for the post-heal damage phase.`,
+    adaptationReason:
+      [
+        normalPlan.adaptationReason,
+        input.shotNumber > 1
+          ? "Retry Normal heal bait because Super has not been used and the CPU heal has not been forced."
+          : "Use Normal first on impossible to force the guaranteed CPU heal while preserving Super."
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" ") || null,
+    inputsUsed: [...new Set([...normalPlan.inputsUsed, "hp"])]
+  };
+}
+
+function didSuccessfulImpossibleHealBaitOpening(
+  shotHistory: readonly CatAndDogShotFeedbackRecord[],
+  runtime?: CatAndDogShotPlannerRuntimeContext
+): boolean {
+  const firstShot = shotHistory[0] ?? null;
+  return (
+    firstShot?.weaponKey === "normal" &&
+    ((firstShot.damageDealtDelta ?? 0) >= 25 || (runtime?.healsObserved ?? 0) > 0)
+  );
+}
+
+function buildImpossibleHeavyDamagePlan(input: {
+  attemptStrategy: CatAndDogAttemptStrategy;
+  runtime: CatAndDogShotPlannerRuntimeContext;
+  shotNumber: number;
+  solved: CatAndDogShotExecutionPlan | null;
+  shotHistory: readonly CatAndDogShotFeedbackRecord[];
+}): CatAndDogShotExecutionPlan | null {
+  if (input.attemptStrategy.difficulty !== "impossible") {
+    return null;
+  }
+
+  if (!input.shotHistory.some((shot) => shot.weaponKey === "super")) {
+    return null;
+  }
+
+  if (didSuccessfulImpossibleHealBaitOpening(input.shotHistory, input.runtime)) {
+    return null;
+  }
+
+  if (!input.runtime.availableWeaponKeys?.includes("heavy") || input.solved?.strategy.weaponKey === "heavy") {
+    return null;
+  }
+
+  const cpuHp = input.runtime.cpuHp ?? null;
+  const baselineDamage = input.solved?.expectedDamage ?? 0;
+  if (cpuHp !== null && baselineDamage >= cpuHp) {
+    return null;
+  }
+
+  const heavyPlan = buildPhysicsSolvedPlan({
+    attemptStrategy: {
+      ...input.attemptStrategy,
+      weaponKey: "heavy"
+    },
+    runtime: {
+      ...input.runtime,
+      availableWeaponKeys: ["heavy"]
+    },
+    shotNumber: input.shotNumber
+  });
+  const heavyDamage = heavyPlan?.expectedDamage ?? 0;
+  if (!heavyPlan) {
+    return null;
+  }
+
+  const lastShot = input.shotHistory[input.shotHistory.length - 1] ?? null;
+  const lastHeavyUnderperformed =
+    lastShot?.weaponKey === "heavy" &&
+    ((lastShot.damageDealtDelta ?? 0) < 30 || lastShot.meaningfulProgress !== true);
+  const solverAngle = heavyPlan.strategy.targetAngle ?? input.runtime.currentAimAngle ?? PHYSICS_WORLD.defaultAngle;
+  const solverPower = heavyPlan.strategy.targetPower ?? input.runtime.currentAimPower ?? PHYSICS_WORLD.defaultPower;
+  const targetAngle = lastHeavyUnderperformed ? 45.6 : clampNumber(solverAngle, 43.8, 45.6);
+  const targetPower = Math.max(solverPower, PHYSICS_WORLD.defaultPowerMax);
+  const selectedHeavyPlan = retargetShotPlan({
+    plan: heavyPlan,
+    runtime: input.runtime,
+    targetAngle,
+    targetPower
+  });
+
+  return {
+    ...selectedHeavyPlan,
+    planReason:
+      `Impossible damage race: prefer Heavy after Super has been used even when the local simulator estimates ${heavyDamage} damage; baseline ${input.solved?.strategy.weaponKey ?? "none"} plan expected ${baselineDamage} and was not lethal. Retargeted Heavy from ${solverAngle.toFixed(1)}/${solverPower.toFixed(0)} to ${targetAngle.toFixed(1)}/${targetPower.toFixed(0)} to stay in the observed impossible winning band. ${heavyPlan.planReason}`,
+    projectilePolicyReason:
+      `${heavyPlan.projectilePolicyReason} Impossible CPU heal/double-shot pressure rewards higher per-turn damage once Super has been spent.`,
+    adaptationReason:
+      [
+        heavyPlan.adaptationReason,
+        "Escalate post-Super turns toward Heavy when Normal is not a predicted finish.",
+        lastHeavyUnderperformed
+          ? "Previous Heavy underperformed, so step up to the high end of the post-Super angle band."
+          : null
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" ") || null,
+    inputsUsed: [...new Set([...selectedHeavyPlan.inputsUsed, "last-shot-feedback"])]
   };
 }
 
@@ -1335,11 +1536,32 @@ function buildInputsUsed(input: {
 export function planCatAndDogShotExecution(input: PlanCatAndDogShotInput): CatAndDogShotExecutionPlan {
   const shotNumber = input.shotHistory.length + 1;
   const lastShot = input.shotHistory[input.shotHistory.length - 1] ?? null;
+  const impossibleHealBaitOpeningPlan = buildImpossibleHealBaitPlan({
+    attemptStrategy: input.attemptStrategy,
+    runtime: input.runtime,
+    shotNumber,
+    shotHistory: input.shotHistory
+  });
+  if (impossibleHealBaitOpeningPlan) {
+    return impossibleHealBaitOpeningPlan;
+  }
+
   const physicsSolvedPlan = buildPhysicsSolvedPlan({
     attemptStrategy: input.attemptStrategy,
     runtime: input.runtime,
     shotNumber
   });
+  const impossibleHeavyDamagePlan = buildImpossibleHeavyDamagePlan({
+    attemptStrategy: input.attemptStrategy,
+    runtime: input.runtime,
+    shotNumber,
+    solved: physicsSolvedPlan,
+    shotHistory: input.shotHistory
+  });
+  if (impossibleHeavyDamagePlan) {
+    return impossibleHeavyDamagePlan;
+  }
+
   if (physicsSolvedPlan) {
     return physicsSolvedPlan;
   }

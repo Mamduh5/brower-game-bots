@@ -292,6 +292,246 @@ describe("planCatAndDogShotExecution", () => {
     expect(plan.projectilePolicyReason).toContain("Heavy");
   });
 
+  it("opens impossible mode with Normal to bait the CPU full heal before Super", () => {
+    const plan = planCatAndDogShotExecution({
+      attemptStrategy: {
+        ...buildBaseStrategy(),
+        difficulty: "impossible",
+        strategyMode: "explore"
+      },
+      selectionDetails: buildSelectionDetails(),
+      runtime: {
+        windDirection: "left",
+        windValue: -99.74319434217466,
+        windNormalized: -0.525,
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1.01,
+        projectileGravityMultiplier: 1.04,
+        projectileWindInfluenceMultiplier: 1.22,
+        projectileSplashRadius: 64,
+        projectileDamageMin: 9,
+        projectileDamageMax: 23,
+        projectileWindupSeconds: 0.17,
+        preparedShotAngle: null,
+        preparedShotPower: null,
+        preparedShotKey: null,
+        selectedWeaponKey: "normal",
+        currentAimAngle: 42,
+        currentAimPower: 500,
+        aimAngleTap: 1.8,
+        aimPowerTap: 18,
+        playerHp: 110,
+        cpuHp: 110,
+        currentPlayerX: 150,
+        targetPlayerX: 810,
+        wallHp: 150,
+        wallDestroyed: false,
+        availableWeaponKeys: ["normal", "light", "heavy", "super"]
+      },
+      shotHistory: []
+    });
+
+    expect(plan.strategy.weaponKey).toBe("normal");
+    expect(plan.expectedDamage).toBeGreaterThanOrEqual(25);
+    expect(plan.planReason).toContain("Impossible heal bait");
+    expect(plan.adaptationReason).toContain("preserving Super");
+  });
+
+  it("retries Normal heal bait when the impossible opener underperforms before Super", () => {
+    const plan = planCatAndDogShotExecution({
+      attemptStrategy: {
+        ...buildBaseStrategy(),
+        difficulty: "impossible",
+        strategyMode: "explore"
+      },
+      selectionDetails: buildSelectionDetails(),
+      runtime: {
+        windDirection: "calm",
+        windValue: 4.167442846469939,
+        windNormalized: 0.022,
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1.01,
+        projectileGravityMultiplier: 1.04,
+        projectileWindInfluenceMultiplier: 1.22,
+        projectileSplashRadius: 64,
+        projectileDamageMin: 9,
+        projectileDamageMax: 23,
+        projectileWindupSeconds: 0.17,
+        preparedShotAngle: null,
+        preparedShotPower: null,
+        preparedShotKey: null,
+        selectedWeaponKey: "normal",
+        currentAimAngle: 34.8,
+        currentAimPower: 770,
+        aimAngleTap: 1.8,
+        aimPowerTap: 18,
+        playerHp: 77,
+        cpuHp: 110,
+        currentPlayerX: 150,
+        targetPlayerX: 810,
+        wallHp: 150,
+        wallDestroyed: false,
+        availableWeaponKeys: ["normal", "light", "heavy", "super"]
+      },
+      shotHistory: [
+        buildShotFeedback({
+          family: "near-target-finisher",
+          category: "finisher",
+          fingerprint: "normal:left:4:up:15:240:2400:34.8:770",
+          weaponKey: "normal",
+          visualOutcomeLabel: "short",
+          shotResolutionCategory: "none",
+          hintCategory: "none",
+          hintText: null,
+          damageDealtDelta: 0,
+          meaningfulProgress: false,
+          familyFailed: true
+        })
+      ]
+    });
+
+    expect(plan.strategy.weaponKey).toBe("normal");
+    expect(plan.planReason).toContain("Previous heal-bait shot did not force");
+    expect(plan.adaptationReason).toContain("Retry Normal heal bait");
+  });
+
+  it("prioritizes Heavy after Super on impossible when Normal is not lethal", () => {
+    const plan = planCatAndDogShotExecution({
+      attemptStrategy: {
+        ...buildBaseStrategy(),
+        difficulty: "impossible",
+        strategyMode: "explore",
+        settleMs: 300,
+        turnResolutionWaitMs: 3000
+      },
+      selectionDetails: buildSelectionDetails({
+        plannerFamily: "self-side-recovery",
+        plannerCategory: "recovery"
+      }),
+      runtime: {
+        windDirection: "left",
+        windValue: -99.74319434217466,
+        windNormalized: -0.525,
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1.01,
+        projectileGravityMultiplier: 1.04,
+        projectileWindInfluenceMultiplier: 1.22,
+        projectileSplashRadius: 64,
+        projectileDamageMin: 9,
+        projectileDamageMax: 23,
+        projectileWindupSeconds: 0.17,
+        preparedShotAngle: null,
+        preparedShotPower: null,
+        preparedShotKey: null,
+        selectedWeaponKey: "normal",
+        currentAimAngle: 63.6,
+        currentAimPower: 840,
+        aimAngleTap: 1.8,
+        aimPowerTap: 18,
+        playerHp: 110,
+        cpuHp: 110,
+        currentPlayerX: 150,
+        targetPlayerX: 810,
+        wallHp: 82,
+        wallDestroyed: false,
+        availableWeaponKeys: ["normal", "light", "heavy"]
+      },
+      shotHistory: [
+        buildShotFeedback({
+          family: "near-target-finisher",
+          category: "finisher",
+          fingerprint: "super:right:12:up:19:300:2400:63.6:840",
+          weaponKey: "super",
+          visualOutcomeLabel: "blocked",
+          shotResolutionCategory: "direct-hit",
+          damageDealtDelta: 55,
+          meaningfulProgress: true,
+          familyFailed: true
+        })
+      ]
+    });
+
+    expect(plan.strategy.weaponKey).toBe("heavy");
+    expect(plan.strategy.targetAngle).toBe(43.8);
+    expect(plan.strategy.targetPower).toBe(840);
+    expect(plan.expectedDamage).toBeGreaterThan(0);
+    expect(plan.expectedDamage).toBeLessThan(33);
+    expect(plan.planReason).toContain("Impossible damage race");
+    expect(plan.adaptationReason).toContain("post-Super");
+  });
+
+  it("allows Normal finishers after a successful impossible heal-bait opener", () => {
+    const plan = planCatAndDogShotExecution({
+      attemptStrategy: {
+        ...buildBaseStrategy(),
+        difficulty: "impossible",
+        strategyMode: "explore",
+        settleMs: 300,
+        turnResolutionWaitMs: 3000
+      },
+      selectionDetails: buildSelectionDetails({
+        plannerFamily: "self-side-recovery",
+        plannerCategory: "recovery"
+      }),
+      runtime: {
+        windDirection: "left",
+        windValue: -99.74319434217466,
+        windNormalized: -0.525,
+        projectileLabel: "Normal",
+        projectileWeight: 1,
+        projectileLaunchSpeedMultiplier: 1.01,
+        projectileGravityMultiplier: 1.04,
+        projectileWindInfluenceMultiplier: 1.22,
+        projectileSplashRadius: 64,
+        projectileDamageMin: 9,
+        projectileDamageMax: 23,
+        projectileWindupSeconds: 0.17,
+        preparedShotAngle: null,
+        preparedShotPower: null,
+        preparedShotKey: null,
+        selectedWeaponKey: "normal",
+        currentAimAngle: 63.6,
+        currentAimPower: 840,
+        aimAngleTap: 1.8,
+        aimPowerTap: 18,
+        playerHp: 110,
+        cpuHp: 55,
+        currentPlayerX: 150,
+        targetPlayerX: 810,
+        wallHp: 82,
+        wallDestroyed: false,
+        availableWeaponKeys: ["normal", "light", "heavy"]
+      },
+      shotHistory: [
+        buildShotFeedback({
+          fingerprint: "normal:left:6:up:14:180:2200:31.2:768",
+          weaponKey: "normal",
+          damageDealtDelta: 33,
+          meaningfulProgress: true,
+          familyFailed: false
+        }),
+        buildShotFeedback({
+          shotNumber: 2,
+          family: "near-target-finisher",
+          category: "finisher",
+          fingerprint: "super:right:12:up:19:300:2400:63.6:840",
+          weaponKey: "super",
+          visualOutcomeLabel: "blocked",
+          shotResolutionCategory: "direct-hit",
+          damageDealtDelta: 55,
+          meaningfulProgress: true,
+          familyFailed: true
+        })
+      ]
+    });
+
+    expect(plan.strategy.weaponKey).toBe("normal");
+    expect(plan.expectedDamage).toBeGreaterThanOrEqual(25);
+  });
+
   it("avoids repeating an identical weak shot fingerprint inside the same attempt", () => {
     const plan = planCatAndDogShotExecution({
       attemptStrategy: buildBaseStrategy(),

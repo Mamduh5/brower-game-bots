@@ -506,6 +506,19 @@ export class CatAndDogGameSession implements GameSession {
           throw new Error("Cannot execute a planned shot before the player turn is ready.");
         }
 
+        if (weaponKey === "heal") {
+          return [
+            {
+              kind: "keypress",
+              key: toDigitKey(weaponKey)
+            },
+            {
+              kind: "wait",
+              durationMs: Math.max(520, Math.min(900, Math.floor(turnResolutionWaitMs / 2)))
+            }
+          ];
+        }
+
         return [
           {
             kind: "keypress",
