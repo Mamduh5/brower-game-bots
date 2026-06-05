@@ -19,7 +19,8 @@ const TypeActionSchema = z.object({
 
 const KeyPressActionSchema = z.object({
   kind: z.literal("keypress"),
-  key: z.string().min(1)
+  key: z.string().min(1),
+  repeat: z.number().int().positive().max(120).optional()
 });
 
 const NavigateActionSchema = z.object({

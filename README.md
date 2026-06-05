@@ -94,4 +94,6 @@ pnpm run dev -- run-tester-cat-and-dog
 
 pnpm run dev -- run-player-cat-and-dog
 pnpm run dev -- run-player-cat-and-dog --max-attempts=15 --strategy-mode=explore
-pnpm run dev -- run-player-cat-and-dog --max-attempts=3 --stop-on-win=false
+pnpm run dev -- run-player-cat-and-dog --max-attempts=5 --stop-on-win=false
+
+pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false

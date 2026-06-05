@@ -163,7 +163,9 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
         await page.locator(action.target.selector).fill(action.text);
         break;
       case "keypress":
-        await page.keyboard.press(action.key);
+        for (let count = 0; count < (action.repeat ?? 1); count += 1) {
+          await page.keyboard.press(action.key);
+        }
         break;
       case "navigate":
         await page.goto(action.url);

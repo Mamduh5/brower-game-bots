@@ -4,6 +4,8 @@ import { runPlayerCatAndDog } from "./commands/run-player-cat-and-dog.js";
 import { runPlayer } from "./commands/run-player.js";
 import { runTester } from "./commands/run-tester.js";
 
+const CAT_AND_DOG_DIFFICULTIES = new Set(["easy", "normal", "hard", "impossible"]);
+
 function parseNumberFlag(flag: string, fallback: number): number {
   const raw = process.argv.find((entry) => entry.startsWith(`${flag}=`));
   if (!raw) {
@@ -36,6 +38,13 @@ function parseBooleanFlag(flag: string, fallback: boolean): boolean {
   return fallback;
 }
 
+function parseCatAndDogDifficultyFlag(): "easy" | "normal" | "hard" | "impossible" {
+  const raw = parseStringFlag("--difficulty") ?? "easy";
+  return CAT_AND_DOG_DIFFICULTIES.has(raw)
+    ? (raw as "easy" | "normal" | "hard" | "impossible")
+    : "easy";
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   const container = await createContainer();
@@ -46,6 +55,7 @@ async function main(): Promise<void> {
       break;
     case "run-player-cat-and-dog":
       await runPlayerCatAndDog(container, {
+        difficulty: parseCatAndDogDifficultyFlag(),
         maxAttempts: parseNumberFlag("--max-attempts", 3),
         stopOnWin: parseBooleanFlag("--stop-on-win", true),
         strategyMode: parseStringFlag("--strategy-mode") === "explore" ? "explore" : "baseline"

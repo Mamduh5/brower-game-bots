@@ -176,6 +176,7 @@ export interface CatAndDogPlayerAttemptRecord {
 }
 
 export interface CatAndDogPlayerRunOptions {
+  difficulty?: CatAndDogAttemptStrategy["difficulty"];
   maxAttempts?: number;
   stopOnWin?: boolean;
   strategyMode?: CatAndDogStrategyMode;
@@ -443,6 +444,7 @@ function summarizeFinalState(snapshot: GameSnapshot): JsonObject {
     progressSignalSource: toJsonValue(snapshot.semanticState.progressSignalSource),
     runtimeStateAvailable: toJsonValue(snapshot.semanticState.runtimeStateAvailable),
     runtimeStateSource: toJsonValue(snapshot.semanticState.runtimeStateSource),
+    cpuDifficulty: toJsonValue(snapshot.semanticState.cpuDifficulty),
     windValue: toJsonValue(snapshot.semanticState.windValue),
     windNormalized: toJsonValue(snapshot.semanticState.windNormalized),
     windDirection: toJsonValue(snapshot.semanticState.windDirection),
@@ -504,6 +506,7 @@ function extractRuntimeState(snapshot: GameSnapshot): JsonObject | null {
   return {
     runtimeStateAvailable: true,
     runtimeStateSource: toJsonValue(snapshot.semanticState.runtimeStateSource),
+    cpuDifficulty: toJsonValue(snapshot.semanticState.cpuDifficulty),
     windValue: toJsonValue(snapshot.semanticState.windValue),
     windNormalized: toJsonValue(snapshot.semanticState.windNormalized),
     windDirection: toJsonValue(snapshot.semanticState.windDirection),
@@ -1140,7 +1143,7 @@ function buildPlayerSummaryJson(input: {
   run: RunRecord;
   report: RunReport;
   attempts: readonly CatAndDogPlayerAttemptRecord[];
-  options: Required<Pick<CatAndDogPlayerRunOptions, "maxAttempts" | "stopOnWin" | "strategyMode">>;
+  options: Required<Pick<CatAndDogPlayerRunOptions, "difficulty" | "maxAttempts" | "stopOnWin" | "strategyMode">>;
   artifacts: readonly ArtifactRef[];
 }): JsonObject {
   const winningAttempt = input.attempts.find((attempt) => attempt.outcome === "WIN") ?? null;
@@ -1169,6 +1172,21 @@ function buildPlayerSummaryJson(input: {
       .filter((attempt) => attempt.outcome !== "WIN" && attempt.diagnostics.strongestFailedFamily)
       .sort((left, right) => scoreAttemptRecord(right) - scoreAttemptRecord(left) || right.attemptNumber - left.attemptNumber)[0] ??
     null;
+  const runtimeCpuDifficulty =
+    input.attempts
+      .map((attempt) => {
+        const finalState = attempt.finalState;
+        const liveRuntimeState =
+          finalState.finalLiveRuntimeState && typeof finalState.finalLiveRuntimeState === "object"
+            ? (finalState.finalLiveRuntimeState as JsonObject)
+            : null;
+        const lastKnownRuntimeState =
+          finalState.lastKnownGoodRuntimeState && typeof finalState.lastKnownGoodRuntimeState === "object"
+            ? (finalState.lastKnownGoodRuntimeState as JsonObject)
+            : null;
+        return finalState.cpuDifficulty ?? liveRuntimeState?.cpuDifficulty ?? lastKnownRuntimeState?.cpuDifficulty ?? null;
+      })
+      .find((value): value is JsonValue => typeof value === "string") ?? null;
 
   return {
     run: {
@@ -1185,6 +1203,8 @@ function buildPlayerSummaryJson(input: {
       maxAttempts: input.options.maxAttempts,
       stopOnWin: input.options.stopOnWin,
       strategyMode: input.options.strategyMode,
+      requestedDifficulty: input.options.difficulty,
+      runtimeCpuDifficulty,
       hadWin: Boolean(winningAttempt),
       unknownAttempts: input.attempts.filter((attempt) => attempt.outcome === "UNKNOWN").length,
       deadPathProtectedUnknowns: input.attempts.filter(
@@ -1232,6 +1252,20 @@ function buildPlayerSummaryJson(input: {
       diagnostics: toJsonValue(attempt.diagnostics),
       actionHistory: toJsonValue(attempt.actionHistory),
       shotHistory: toJsonValue(attempt.shotHistory),
+      requestedDifficulty: input.options.difficulty,
+      runtimeCpuDifficulty:
+        attempt.finalState.cpuDifficulty ??
+        (
+          attempt.finalState.finalLiveRuntimeState && typeof attempt.finalState.finalLiveRuntimeState === "object"
+            ? (attempt.finalState.finalLiveRuntimeState as JsonObject).cpuDifficulty
+            : null
+        ) ??
+        (
+          attempt.finalState.lastKnownGoodRuntimeState && typeof attempt.finalState.lastKnownGoodRuntimeState === "object"
+            ? (attempt.finalState.lastKnownGoodRuntimeState as JsonObject).cpuDifficulty
+            : null
+        ) ??
+        null,
       finalState: toJsonValue(attempt.finalState),
       artifacts: attempt.artifacts.map((artifact) => ({
         artifactId: artifact.artifactId,
@@ -1559,6 +1593,7 @@ export async function runPlayerCatAndDog(
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const stopOnWin = options.stopOnWin ?? true;
   const strategyMode = options.strategyMode ?? "baseline";
+  const difficulty = options.difficulty ?? "easy";
   const maxStepsPerAttempt = options.maxStepsPerAttempt ?? DEFAULT_MAX_STEPS_PER_ATTEMPT;
   const plugin = resolveGamePlugin("cat-and-dog-web");
   const brain = createPlayerBrain();
@@ -1576,6 +1611,7 @@ export async function runPlayerCatAndDog(
       maxAttempts,
       stopOnWin,
       strategyMode,
+      difficulty,
       maxStepsPerAttempt
     }
   };
@@ -1624,7 +1660,7 @@ export async function runPlayerCatAndDog(
     return artifact;
   };
 
-  logger.info({ maxAttempts, stopOnWin, strategyMode }, "Starting cat-and-dog player run.");
+  logger.info({ maxAttempts, stopOnWin, strategyMode, difficulty }, "Starting cat-and-dog player run.");
 
   try {
     await brain.initialize({ run });
@@ -1650,8 +1686,11 @@ export async function runPlayerCatAndDog(
         strategyMode,
         history: attempts.map((attempt) => buildAttemptFeedback(attempt))
       });
+      const strategy: CatAndDogAttemptStrategy = {
+        ...strategySelection.strategy,
+        difficulty
+      };
       const {
-        strategy,
         selectionReason: strategySelectionReason,
         selectionDetails: strategySelectionDetails
       } = strategySelection;
@@ -2226,10 +2265,11 @@ export async function runPlayerCatAndDog(
       run,
       report,
       attempts,
-      options: {
-        maxAttempts,
-        stopOnWin,
-        strategyMode
+        options: {
+          difficulty,
+          maxAttempts,
+          stopOnWin,
+          strategyMode
       },
       artifacts: [...capturedArtifacts].sort(byArtifactPath)
     });

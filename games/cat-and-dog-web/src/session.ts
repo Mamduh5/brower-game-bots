@@ -85,10 +85,15 @@ function readSemanticNumber(snapshot: GameSnapshot, key: string): number | null 
 }
 
 function buildRepeatedKeypresses(key: string, count: number): EnvironmentAction[] {
-  return Array.from({ length: count }, () => ({
-    kind: "keypress" as const,
-    key
-  }));
+  return count > 0
+    ? [
+        {
+          kind: "keypress" as const,
+          key,
+          repeat: count
+        }
+      ]
+    : [];
 }
 
 function buildAimAdjustment(input: {
