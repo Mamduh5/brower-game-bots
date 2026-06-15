@@ -8,6 +8,7 @@
     "build": "pnpm -r --if-present run build",
     "clean": "pnpm -r --if-present run clean",
     "dev": "pnpm --filter @game-bots/bot-cli run dev",
+    "gui": "pnpm --filter @game-bots/bot-gui run dev",
     "lint": "tsc -b tsconfig.json --pretty false",
     "test": "vitest --config vitest.config.ts run",
     "test:unit": "vitest --config vitest.config.ts run --project unit",

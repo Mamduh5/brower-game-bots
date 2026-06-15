@@ -51,6 +51,9 @@
     },
     {
       "path": "./apps/bot-cli"
+    },
+    {
+      "path": "./apps/bot-gui"
     }
   ]
 }

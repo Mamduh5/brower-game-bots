@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cat-and-Dog Bot Runs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Cat-and-Dog Bot Runs</h1>
+        <p>Local completed-run replay and artifact viewer.</p>
+      </div>
+      <button id="refresh-runs" type="button">Refresh</button>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <form id="manual-load-form" class="manual-load">
+          <label for="summary-path">Summary path</label>
+          <div class="inline-form">
+            <input
+              id="summary-path"
+              name="summaryPath"
+              type="text"
+              placeholder="artifacts/<runId>/reports/02-player-attempt-summary.json"
+            />
+            <button type="submit">Load</button>
+          </div>
+        </form>
+
+        <section>
+          <div class="section-heading">
+            <h2>Discovered Runs</h2>
+            <span id="run-count" class="muted">0</span>
+          </div>
+          <div id="run-list" class="run-list"></div>
+        </section>
+      </aside>
+
+      <section class="content">
+        <div id="status" class="status">Loading run artifacts...</div>
+        <div id="run-detail" class="hidden"></div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

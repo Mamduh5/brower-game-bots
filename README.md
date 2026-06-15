@@ -97,3 +97,19 @@ pnpm run dev -- run-player-cat-and-dog --max-attempts=15 --strategy-mode=explore
 pnpm run dev -- run-player-cat-and-dog --max-attempts=5 --stop-on-win=false
 
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false
+
+## Cat-and-Dog Bot GUI
+
+Start the local completed-run replay dashboard:
+
+```powershell
+pnpm run gui
+```
+
+Open the printed URL, usually `http://127.0.0.1:5178`. The dashboard scans `artifacts/**/reports/02-player-attempt-summary.json` and can also load a manually entered summary path such as:
+
+```text
+artifacts/<runId>/reports/02-player-attempt-summary.json
+```
+
+It displays run id, game/profile ids, requested and runtime difficulty, max attempts, stop-on-win, strategy mode, attempt outcomes, final HP and damage, wind, wall state, selected/planned/prepared shot values, shot history, planner/adaptation reasons, final notes, artifact paths, and screenshot paths. See `apps/bot-gui/README.md` for the read-only replay scope and future human-vs-bot seam.
