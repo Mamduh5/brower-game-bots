@@ -7,8 +7,13 @@ import { runTester } from "./commands/run-tester.js";
 
 const CAT_AND_DOG_DIFFICULTIES = new Set(["easy", "normal", "hard", "impossible"]);
 
-function parseNumberFlag(flag: string, fallback: number): number {
-  const raw = process.argv.find((entry) => entry.startsWith(`${flag}=`));
+function normalizedArgs(): string[] {
+  const args = process.argv.slice(2);
+  return args[0] === "--" ? args.slice(1) : args;
+}
+
+function parseNumberFlag(args: readonly string[], flag: string, fallback: number): number {
+  const raw = args.find((entry) => entry.startsWith(`${flag}=`));
   if (!raw) {
     return fallback;
   }
@@ -17,13 +22,13 @@ function parseNumberFlag(flag: string, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function parseStringFlag(flag: string): string | null {
-  const raw = process.argv.find((entry) => entry.startsWith(`${flag}=`));
+function parseStringFlag(args: readonly string[], flag: string): string | null {
+  const raw = args.find((entry) => entry.startsWith(`${flag}=`));
   return raw ? raw.slice(flag.length + 1) : null;
 }
 
-function parseBooleanFlag(flag: string, fallback: boolean): boolean {
-  const raw = parseStringFlag(flag);
+function parseBooleanFlag(args: readonly string[], flag: string, fallback: boolean): boolean {
+  const raw = parseStringFlag(args, flag);
   if (raw === null) {
     return fallback;
   }
@@ -39,35 +44,36 @@ function parseBooleanFlag(flag: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function hasFlag(flag: string): boolean {
-  return process.argv.includes(flag);
+function hasFlag(args: readonly string[], flag: string): boolean {
+  return args.includes(flag);
 }
 
-function parseHeadlessFlag(): boolean {
-  if (hasFlag("--visible")) {
+function parseHeadlessFlag(args: readonly string[]): boolean {
+  if (hasFlag(args, "--visible")) {
     return false;
   }
 
-  return parseBooleanFlag("--headless", true);
+  return parseBooleanFlag(args, "--headless", true);
 }
 
-function parseChessOpponentFlag(): "computer" {
-  const raw = parseStringFlag("--opponent") ?? "computer";
+function parseChessOpponentFlag(args: readonly string[]): "computer" {
+  const raw = parseStringFlag(args, "--opponent") ?? "computer";
   if (raw !== "computer") {
     throw new Error("run-player-chess-com only supports --opponent=computer. Human matchmaking is not allowed.");
   }
   return "computer";
 }
 
-function parseCatAndDogDifficultyFlag(): "easy" | "normal" | "hard" | "impossible" {
-  const raw = parseStringFlag("--difficulty") ?? "easy";
+function parseCatAndDogDifficultyFlag(args: readonly string[]): "easy" | "normal" | "hard" | "impossible" {
+  const raw = parseStringFlag(args, "--difficulty") ?? "easy";
   return CAT_AND_DOG_DIFFICULTIES.has(raw)
     ? (raw as "easy" | "normal" | "hard" | "impossible")
     : "easy";
 }
 
 async function main(): Promise<void> {
-  const command = process.argv[2];
+  const args = normalizedArgs();
+  const command = args[0];
   const container = await createContainer();
 
   switch (command) {
@@ -76,20 +82,20 @@ async function main(): Promise<void> {
       break;
     case "run-player-cat-and-dog":
       await runPlayerCatAndDog(container, {
-        difficulty: parseCatAndDogDifficultyFlag(),
-        maxAttempts: parseNumberFlag("--max-attempts", 3),
-        stopOnWin: parseBooleanFlag("--stop-on-win", true),
-        strategyMode: parseStringFlag("--strategy-mode") === "explore" ? "explore" : "baseline",
-        headless: parseHeadlessFlag()
+        difficulty: parseCatAndDogDifficultyFlag(args),
+        maxAttempts: parseNumberFlag(args, "--max-attempts", 3),
+        stopOnWin: parseBooleanFlag(args, "--stop-on-win", true),
+        strategyMode: parseStringFlag(args, "--strategy-mode") === "explore" ? "explore" : "baseline",
+        headless: parseHeadlessFlag(args)
       });
       break;
     case "run-player-chess-com":
       await runPlayerChessCom(container, {
-        opponent: parseChessOpponentFlag(),
-        maxMoves: parseNumberFlag("--max-moves", 80),
-        headless: parseHeadlessFlag(),
-        turnTimeoutMs: parseNumberFlag("--turn-timeout-ms", 30000),
-        pollMs: parseNumberFlag("--poll-ms", 750)
+        opponent: parseChessOpponentFlag(args),
+        maxMoves: parseNumberFlag(args, "--max-moves", 80),
+        headless: parseHeadlessFlag(args),
+        turnTimeoutMs: parseNumberFlag(args, "--turn-timeout-ms", 30000),
+        pollMs: parseNumberFlag(args, "--poll-ms", 750)
       });
       break;
     case "run-tester":
