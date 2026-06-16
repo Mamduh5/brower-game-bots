@@ -689,19 +689,13 @@ describe("cat-and-dog plugin", () => {
       },
       {
         kind: "keypress",
-        key: "D"
+        key: "D",
+        repeat: 2
       },
       {
         kind: "keypress",
-        key: "D"
-      },
-      {
-        kind: "keypress",
-        key: "W"
-      },
-      {
-        kind: "keypress",
-        key: "W"
+        key: "W",
+        repeat: 2
       },
       {
         kind: "wait",
