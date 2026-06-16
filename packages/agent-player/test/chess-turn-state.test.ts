@@ -39,6 +39,20 @@ describe("chess turn state inference", () => {
     expect(state.boardChangedSinceLastObservation).toBe(true);
   });
 
+  it("does not trust stale bot side-to-move text while the board still equals the last bot move", () => {
+    const state = inferChessTurnState({
+      boardDetected: true,
+      fen: AFTER_BOT_E4,
+      sideToMove: "white",
+      botColor: "white",
+      lastBotMoveFen: AFTER_BOT_E4,
+      previousObservationFen: AFTER_BOT_E4
+    });
+
+    expect(state.botTurnStatus).toBe("opponent-turn");
+    expect(state.reason).toMatch(/waiting for computer reply/i);
+  });
+
   it("uses explicit side-to-move when available", () => {
     const state = inferChessTurnState({
       boardDetected: true,

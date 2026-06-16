@@ -73,6 +73,10 @@ describe("chess basic policy", () => {
 
     expect(chess.isCheck()).toBe(true);
     expect(move?.lan).toBe("e1e2");
+    expect(move?.inCheck).toBe(true);
+    expect(move?.checkEvasionRequired).toBe(true);
+    expect(move?.checkEvasionMoveType).toBe("king-move");
+    expect(move?.reason).toMatch(/check/i);
     chess.move({ from: move?.from ?? "", to: move?.to ?? "", promotion: move?.promotion ?? undefined });
     expect(chess.isCheck()).toBe(false);
   });
@@ -81,7 +85,18 @@ describe("chess basic policy", () => {
     const move = chooseBeginnerChessMove(board("4k3/P7/8/8/8/8/8/4K3 w - - 0 1"));
 
     expect(move?.lan).toBe("a7a8q");
+    expect(move?.uci).toBe("a7a8q");
     expect(move?.promotion).toBe("queen");
+    expect(move?.promotionPiece).toBe("queen");
     expect(move?.reason).toBe("promotes to queen");
+  });
+
+  it("detects checkmate positions with no legal evasion", () => {
+    const evaluation = evaluateChessPosition(board("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1", "black"));
+
+    expect(evaluation?.inCheck).toBe(true);
+    expect(evaluation?.isCheckmate).toBe(true);
+    expect(evaluation?.legalMoveCount).toBe(0);
+    expect(evaluation?.candidates).toHaveLength(0);
   });
 });

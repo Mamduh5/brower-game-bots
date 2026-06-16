@@ -3,13 +3,16 @@ import { randomUUID } from "node:crypto";
 
 import type { ArtifactRef, JsonObject, JsonValue, RunEvent, RunRecord, RunReport, RunRequest } from "@game-bots/contracts";
 import {
+  boardHashFromFen,
   chooseBeginnerChessMove,
+  evaluateChessPosition,
   inferChessTurnState,
   type ChessBoardState,
   type ChessBotTurnStatus,
   type ChessColor,
   type ChessMoveChoice,
   type ChessPiece,
+  type ChessPieceKind,
   type ChessTurnConfidence,
   type ChessTurnState
 } from "@game-bots/agent-player";
@@ -18,6 +21,7 @@ import type { GameSnapshot } from "@game-bots/game-sdk";
 import {
   CHESS_COM_BOARD_RUNTIME_PROBE,
   CHESS_COM_PLAYER_COMPUTER_PROFILE_ID,
+  promotionQueenClickPoint,
   squareCenter
 } from "@game-bots/chess-com-web";
 import { toJsonReport } from "@game-bots/reporting";
@@ -40,6 +44,7 @@ type ChessComLoopState =
   | "waiting-for-board"
   | "bot-turn-ready"
   | "executing-move"
+  | "waiting-for-promotion"
   | "waiting-for-move-apply"
   | "waiting-for-opponent"
   | "waiting-for-bot-turn"
@@ -61,6 +66,9 @@ export interface ChessComObservationRecord {
   readonly lastMove: string | null;
   readonly moveListLength: number | null;
   readonly boardChangedSinceLastObservation: boolean;
+  readonly stableBoardCount: number;
+  readonly promotionUiDetected: boolean;
+  readonly promotionChoiceCount: number;
   readonly elapsedWaitMs: number;
   readonly screenshotPath: string | null;
 }
@@ -77,6 +85,12 @@ export interface ChessComMoveRecord {
   readonly selectedMoveUci: string;
   readonly selectedMoveScore: number;
   readonly selectedMoveReason: string;
+  readonly selectedMovePromotion: ChessPieceKind | null;
+  readonly promotionPiece: ChessPieceKind | null;
+  readonly promotionUiDetected: boolean;
+  readonly promotionChoiceApplied: boolean;
+  readonly checkEvasionRequired: boolean;
+  readonly checkEvasionMoveType: string | null;
   readonly topCandidateMoves: readonly JsonObject[];
   readonly materialBalanceBefore: number;
   readonly inCheck: boolean;
@@ -103,6 +117,7 @@ export interface ChessComRunResult {
 const DEFAULT_MAX_MOVES = 80;
 const DEFAULT_TURN_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_MS = 750;
+const REQUIRED_STABLE_BOARD_POLLS = 2;
 
 export async function runPlayerChessCom(
   container: AppContainer,
@@ -153,6 +168,8 @@ export async function runPlayerChessCom(
   let recentEvents: readonly RunEvent[] = [];
   let lastBotMoveFen: string | null = null;
   let lastObservationFen: string | null = null;
+  let lastStableBoardHash: string | null = null;
+  let stableBoardCount = 0;
   let stopReason: string | null = null;
   let finalLoopState: ChessComLoopState = "bootstrapping";
 
@@ -214,6 +231,12 @@ export async function runPlayerChessCom(
       previousObservationFen: lastObservationFen,
       outcome
     });
+    if (turn.boardHash && turn.boardHash === lastStableBoardHash) {
+      stableBoardCount += 1;
+    } else {
+      lastStableBoardHash = turn.boardHash;
+      stableBoardCount = turn.boardHash ? 1 : 0;
+    }
     const record: ChessComObservationRecord = {
       timestamp: clock.now().toISOString(),
       moveNumber,
@@ -227,6 +250,9 @@ export async function runPlayerChessCom(
       lastMove: readString(snapshot.semanticState.lastMove),
       moveListLength: readNumber(snapshot.semanticState.moveListLength),
       boardChangedSinceLastObservation: turn.boardChangedSinceLastObservation,
+      stableBoardCount,
+      promotionUiDetected: snapshot.semanticState.promotionUiDetected === true,
+      promotionChoiceCount: readNumber(snapshot.semanticState.promotionChoiceCount) ?? 0,
       elapsedWaitMs: Date.now() - waitStartedAt,
       screenshotPath: null
     };
@@ -270,7 +296,7 @@ export async function runPlayerChessCom(
         stopReason = `game-ended:${readString(state.snapshot.semanticState.outcome) ?? "unknown"}`;
         return null;
       }
-      if (state.turn.botTurnStatus === "bot-turn") {
+      if (state.turn.botTurnStatus === "bot-turn" && state.record.stableBoardCount >= REQUIRED_STABLE_BOARD_POLLS) {
         finalLoopState = "bot-turn-ready";
         return state;
       }
@@ -293,17 +319,33 @@ export async function runPlayerChessCom(
     return null;
   };
 
-  const waitForMoveApply = async (moveNumber: number, beforeFen: string | null): Promise<{
+  const waitForMoveApply = async (
+    moveNumber: number,
+    beforeFen: string | null,
+    selectedMove: ChessMoveChoice,
+    beforeMoveListLength: number | null
+  ): Promise<{
     readonly snapshot: GameSnapshot;
     readonly afterFen: string | null;
   }> => {
     const waitStartedAt = Date.now();
     let latest: { readonly snapshot: GameSnapshot; readonly board: ChessBoardState } | null = null;
+    const expectedBoardHash = boardHashFromFen(selectedMove.resultingFen);
     while (Date.now() - waitStartedAt <= Math.min(10_000, turnTimeoutMs)) {
       const observed = await observeAndRecord(moveNumber, "waiting-for-move-apply", waitStartedAt, "chess.move.apply.observed");
       latest = observed;
       const afterFen = observed.board.fen;
-      if (afterFen && beforeFen && afterFen !== beforeFen) {
+      const afterBoardHash = boardHashFromFen(afterFen);
+      const moveIsReflected = boardReflectsSelectedMove(afterFen, selectedMove, observed.board.botColor);
+      const moveListAdvanced = beforeMoveListLength !== null && (observed.record.moveListLength ?? 0) > beforeMoveListLength;
+      if (
+        afterFen &&
+        beforeFen &&
+        afterFen !== beforeFen &&
+        afterBoardHash &&
+        (afterBoardHash === expectedBoardHash || moveIsReflected || moveListAdvanced) &&
+        observed.record.stableBoardCount >= REQUIRED_STABLE_BOARD_POLLS
+      ) {
         return { snapshot: observed.snapshot, afterFen };
       }
       await environmentSession.execute({ kind: "wait", durationMs: pollMs });
@@ -312,6 +354,72 @@ export async function runPlayerChessCom(
       snapshot: latest?.snapshot ?? (await observeAndRecord(moveNumber, "waiting-for-move-apply", waitStartedAt, "chess.move.apply.observed")).snapshot,
       afterFen: latest?.board.fen ?? null
     };
+  };
+
+  const handlePromotionIfNeeded = async (
+    moveNumber: number,
+    selectedMove: ChessMoveChoice,
+    bounds: JsonObject,
+    orientation: ChessColor
+  ): Promise<{
+    readonly promotionUiDetected: boolean;
+    readonly promotionChoiceApplied: boolean;
+  }> => {
+    if (!selectedMove.promotion) {
+      return { promotionUiDetected: false, promotionChoiceApplied: false };
+    }
+
+    const waitStartedAt = Date.now();
+    let latestPromotionUiDetected = false;
+    let latestQueenBounds: Record<string, unknown> = {};
+    await environmentSession.execute({ kind: "wait", durationMs: Math.min(500, pollMs) });
+
+    while (Date.now() - waitStartedAt <= Math.min(5_000, turnTimeoutMs)) {
+      const observed = await observeAndRecord(moveNumber, "waiting-for-promotion", waitStartedAt, "chess.promotion.observed");
+      latestPromotionUiDetected ||= observed.snapshot.semanticState.promotionUiDetected === true;
+      latestQueenBounds = asRecord(observed.snapshot.semanticState.promotionQueenBounds);
+      if (latestPromotionUiDetected) {
+        break;
+      }
+      const observedBoardHash = boardHashFromFen(observed.board.fen);
+      const expectedBoardHash = boardHashFromFen(selectedMove.resultingFen);
+      if (observedBoardHash && expectedBoardHash && observedBoardHash === expectedBoardHash && observed.record.stableBoardCount >= REQUIRED_STABLE_BOARD_POLLS) {
+        return { promotionUiDetected: false, promotionChoiceApplied: false };
+      }
+      await environmentSession.execute({ kind: "wait", durationMs: pollMs });
+    }
+
+    const queenPoint = centerFromBounds(latestQueenBounds) ?? promotionQueenClickPoint(selectedMove.to, boundsFromRecord(bounds), orientation);
+    if (!queenPoint) {
+      const artifact = await captureArtifact(moveNumber, "promotion-choice-missing", "screenshot").catch(() => null);
+      if (artifact && observations.length > 0) {
+        const latest = observations[observations.length - 1];
+        if (latest) {
+          observations[observations.length - 1] = { ...latest, screenshotPath: artifact.relativePath };
+        }
+      }
+      return { promotionUiDetected: latestPromotionUiDetected, promotionChoiceApplied: false };
+    }
+
+    await environmentSession.execute({ kind: "mouse-click", point: queenPoint });
+    await appendTrackedEvent({
+      eventId: randomUUID(),
+      runId: run.runId,
+      sequence: await container.runEngine.nextSequence(run.runId),
+      timestamp: clock.now().toISOString(),
+      type: "action.executed",
+      actionKind: "mouse-click",
+      status: "succeeded",
+      summary: `Selected Chess.com queen promotion for ${selectedMove.lan}.`,
+      payload: {
+        semanticActionId: "choose-promotion-piece",
+        promotionPiece: "queen",
+        promotionUiDetected: latestPromotionUiDetected,
+        point: queenPoint
+      }
+    });
+    await environmentSession.execute({ kind: "wait", durationMs: Math.min(750, pollMs) });
+    return { promotionUiDetected: latestPromotionUiDetected, promotionChoiceApplied: true };
   };
 
   logger.info({ opponent, maxMoves, headless, turnTimeoutMs, pollMs }, "Starting chess-com player run.");
@@ -342,6 +450,12 @@ export async function runPlayerChessCom(
       const board = readyState.board;
       const selectedMove = chooseBeginnerChessMove(board);
       if (!selectedMove) {
+        const evaluation = evaluateChessPosition(board);
+        if (evaluation?.isCheckmate || evaluation?.isStalemate) {
+          finalLoopState = "game-ended";
+          stopReason = evaluation.isCheckmate ? "game-ended:checkmate" : "game-ended:stalemate";
+          break;
+        }
         finalLoopState = "stopped-uncertain";
         stopReason = "no-legal-move-for-proven-bot-turn";
         logger.info({ moveNumber, fen: board.fen }, "No conservative Chess.com move available; stopping safely.");
@@ -381,16 +495,28 @@ export async function runPlayerChessCom(
         payload: {
           semanticActionId: "execute-chess-move",
           semanticActionParams: toJsonValue(selectedMove),
-          beforeFen: board.fen
+          beforeFen: board.fen,
+          promotionPiece: selectedMove.promotionPiece,
+          checkEvasionRequired: selectedMove.checkEvasionRequired,
+          checkEvasionMoveType: selectedMove.checkEvasionMoveType
         }
       });
 
+      const promotionResult = await handlePromotionIfNeeded(moveNumber, selectedMove, bounds as JsonObject, orientation);
       finalLoopState = "waiting-for-move-apply";
-      const applied = await waitForMoveApply(moveNumber, board.fen);
+      const beforeMoveListLength = readNumber(beforeSnapshot.semanticState.moveListLength);
+      const applied = await waitForMoveApply(moveNumber, board.fen, selectedMove, beforeMoveListLength);
       const afterSnapshot = applied.snapshot;
       const afterScreenshot = await captureArtifact(moveNumber, "after-move", "screenshot");
       const afterFen = applied.afterFen ?? readString(afterSnapshot.semanticState.fen);
-      const moveApplied = Boolean(afterFen && board.fen && afterFen !== board.fen);
+      const moveApplied = Boolean(
+        afterFen &&
+          board.fen &&
+          afterFen !== board.fen &&
+          (boardHashFromFen(afterFen) === boardHashFromFen(selectedMove.resultingFen) ||
+            boardReflectsSelectedMove(afterFen, selectedMove, board.botColor) ||
+            moveListAdvanced(beforeMoveListLength, readNumber(afterSnapshot.semanticState.moveListLength)))
+      );
       await appendBoardEvent({
         appendTrackedEvent,
         nextSequence: () => container.runEngine.nextSequence(run.runId),
@@ -414,6 +540,12 @@ export async function runPlayerChessCom(
         selectedMoveUci: selectedMove.uci,
         selectedMoveScore: selectedMove.score,
         selectedMoveReason: selectedMove.reason,
+        selectedMovePromotion: selectedMove.promotion,
+        promotionPiece: selectedMove.promotionPiece,
+        promotionUiDetected: promotionResult.promotionUiDetected,
+        promotionChoiceApplied: promotionResult.promotionChoiceApplied,
+        checkEvasionRequired: selectedMove.checkEvasionRequired,
+        checkEvasionMoveType: selectedMove.checkEvasionMoveType,
         topCandidateMoves: selectedMove.topCandidates.map((candidate) => toJsonValue(candidate) as JsonObject),
         materialBalanceBefore: selectedMove.materialBalanceBefore,
         inCheck: selectedMove.inCheck,
@@ -445,7 +577,7 @@ export async function runPlayerChessCom(
         stopReason = "move-apply-timeout";
         break;
       }
-      lastBotMoveFen = afterFen;
+      lastBotMoveFen = selectedMove.resultingFen;
       finalLoopState = "waiting-for-opponent";
       if (moveNumber === maxMoves) {
         finalLoopState = "max-moves-reached";
@@ -682,6 +814,87 @@ function boundsFromRecord(record: Record<string, unknown>): { readonly x: number
     width: typeof record.width === "number" ? record.width : 0,
     height: typeof record.height === "number" ? record.height : 0
   };
+}
+
+function centerFromBounds(record: Record<string, unknown>): { readonly x: number; readonly y: number } | null {
+  const x = typeof record.x === "number" ? record.x : null;
+  const y = typeof record.y === "number" ? record.y : null;
+  const width = typeof record.width === "number" ? record.width : null;
+  const height = typeof record.height === "number" ? record.height : null;
+  if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+    return null;
+  }
+  return {
+    x: x + width / 2,
+    y: y + height / 2
+  };
+}
+
+function boardReflectsSelectedMove(fen: string | null, move: ChessMoveChoice, botColor: ChessColor): boolean {
+  const pieces = pieceMapFromFen(fen);
+  const target = pieces[move.to];
+  if (!target) {
+    return false;
+  }
+  const expectedKind = move.promotion ?? move.piece;
+  if (target.color !== botColor || target.kind !== expectedKind) {
+    return false;
+  }
+  const source = pieces[move.from];
+  return !(source?.color === botColor && source.kind === move.piece);
+}
+
+function moveListAdvanced(before: number | null, after: number | null): boolean {
+  return before !== null && after !== null && after > before;
+}
+
+function pieceMapFromFen(fen: string | null): Record<string, ChessPiece> {
+  const placement = fen?.trim().split(/\s+/)[0];
+  if (!placement) {
+    return {};
+  }
+  const pieces: Record<string, ChessPiece> = {};
+  const ranks = placement.split("/");
+  for (let rankIndex = 0; rankIndex < ranks.length; rankIndex += 1) {
+    const rankText = ranks[rankIndex] ?? "";
+    const rank = 8 - rankIndex;
+    let fileIndex = 0;
+    for (const char of rankText) {
+      if (/\d/.test(char)) {
+        fileIndex += Number(char);
+        continue;
+      }
+      const file = "abcdefgh"[fileIndex];
+      const kind = pieceKindFromFenChar(char);
+      if (file && kind) {
+        pieces[`${file}${rank}`] = {
+          color: char === char.toUpperCase() ? "white" : "black",
+          kind
+        };
+      }
+      fileIndex += 1;
+    }
+  }
+  return pieces;
+}
+
+function pieceKindFromFenChar(char: string): ChessPieceKind | null {
+  switch (char.toLowerCase()) {
+    case "p":
+      return "pawn";
+    case "n":
+      return "knight";
+    case "b":
+      return "bishop";
+    case "r":
+      return "rook";
+    case "q":
+      return "queen";
+    case "k":
+      return "king";
+    default:
+      return null;
+  }
 }
 
 function isChessPieceKind(value: string | null): value is ChessPiece["kind"] {

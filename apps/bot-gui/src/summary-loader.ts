@@ -40,7 +40,11 @@ export interface NormalizedChessSummary {
   readonly botTurnStatus: string | null;
   readonly botTurnConfidence: string | null;
   readonly turnReason: string | null;
+  readonly boardHash: string | null;
   readonly boardChangedSinceLastObservation: boolean | null;
+  readonly stableBoardCount: number | null;
+  readonly promotionUiDetected: boolean | null;
+  readonly promotionChoiceCount: number | null;
   readonly elapsedWaitMs: number | null;
   readonly lastMove: string | null;
   readonly plannedMove: string | null;
@@ -48,9 +52,14 @@ export interface NormalizedChessSummary {
   readonly selectedMoveUci: string | null;
   readonly selectedMoveScore: number | null;
   readonly selectedMoveReason: string | null;
+  readonly selectedMovePromotion: string | null;
+  readonly promotionPiece: string | null;
+  readonly promotionChoiceApplied: boolean | null;
   readonly legalMoveCount: number | null;
   readonly materialBalance: number | null;
   readonly inCheck: boolean | null;
+  readonly checkEvasionRequired: boolean | null;
+  readonly checkEvasionMoveType: string | null;
   readonly isCheckmate: boolean | null;
   readonly isStalemate: boolean | null;
   readonly topCandidateMoves: readonly JsonRecord[];
@@ -254,7 +263,11 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     botTurnStatus: stringAt(latestObservation, "botTurnStatus"),
     botTurnConfidence: stringAt(latestObservation, "botTurnConfidence"),
     turnReason: stringAt(latestObservation, "reason"),
+    boardHash: stringAt(latestObservation, "boardHash"),
     boardChangedSinceLastObservation: booleanAt(latestObservation, "boardChangedSinceLastObservation"),
+    stableBoardCount: numberAt(latestObservation, "stableBoardCount"),
+    promotionUiDetected: booleanAt(latestObservation, "promotionUiDetected") ?? booleanAt(latestMove, "promotionUiDetected"),
+    promotionChoiceCount: numberAt(latestObservation, "promotionChoiceCount"),
     elapsedWaitMs: numberAt(latestObservation, "elapsedWaitMs"),
     lastMove: stringAt(latestMove, "lastMove"),
     plannedMove: stringAt(selectedMove, "lan"),
@@ -262,9 +275,14 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     selectedMoveUci: stringAt(latestMove, "selectedMoveUci") ?? stringAt(selectedMove, "uci") ?? stringAt(selectedMove, "lan"),
     selectedMoveScore: numberAt(latestMove, "selectedMoveScore") ?? numberAt(selectedMove, "score"),
     selectedMoveReason: stringAt(latestMove, "selectedMoveReason") ?? stringAt(selectedMove, "reason"),
+    selectedMovePromotion: stringAt(latestMove, "selectedMovePromotion") ?? stringAt(selectedMove, "promotion"),
+    promotionPiece: stringAt(latestMove, "promotionPiece") ?? stringAt(selectedMove, "promotionPiece"),
+    promotionChoiceApplied: booleanAt(latestMove, "promotionChoiceApplied"),
     legalMoveCount: numberAt(selectedMove, "legalMoveCount"),
     materialBalance: numberAt(latestMove, "materialBalanceBefore") ?? numberAt(selectedMove, "materialBalanceBefore"),
     inCheck: booleanAt(latestMove, "inCheck") ?? booleanAt(selectedMove, "inCheck"),
+    checkEvasionRequired: booleanAt(latestMove, "checkEvasionRequired") ?? booleanAt(selectedMove, "checkEvasionRequired"),
+    checkEvasionMoveType: stringAt(latestMove, "checkEvasionMoveType") ?? stringAt(selectedMove, "checkEvasionMoveType"),
     isCheckmate: booleanAt(latestMove, "isCheckmate") ?? booleanAt(selectedMove, "isCheckmate"),
     isStalemate: booleanAt(latestMove, "isStalemate") ?? booleanAt(selectedMove, "isStalemate"),
     topCandidateMoves: arrayAt(latestMove, "topCandidateMoves").map(asRecord),

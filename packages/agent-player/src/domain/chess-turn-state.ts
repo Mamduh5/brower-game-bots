@@ -47,6 +47,18 @@ export function inferChessTurnState(input: ChessTurnStateInput): ChessTurnState 
     };
   }
 
+  if (lastBotMoveHash) {
+    if (boardHash === lastBotMoveHash) {
+      return {
+        botTurnStatus: "opponent-turn",
+        confidence: "medium",
+        reason: "waiting for computer reply; board unchanged after bot move",
+        boardHash,
+        boardChangedSinceLastObservation
+      };
+    }
+  }
+
   if (input.sideToMove) {
     return {
       botTurnStatus: input.sideToMove === input.botColor ? "bot-turn" : "opponent-turn",
@@ -58,16 +70,6 @@ export function inferChessTurnState(input: ChessTurnStateInput): ChessTurnState 
   }
 
   if (lastBotMoveHash) {
-    if (boardHash === lastBotMoveHash) {
-      return {
-        botTurnStatus: "opponent-turn",
-        confidence: "medium",
-        reason: "waiting for computer reply; board unchanged after bot move",
-        boardHash,
-        boardChangedSinceLastObservation
-      };
-    }
-
     return {
       botTurnStatus: "bot-turn",
       confidence: "medium",

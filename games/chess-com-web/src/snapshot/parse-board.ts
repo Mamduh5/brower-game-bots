@@ -27,6 +27,9 @@ export interface ChessComBoardState {
   readonly outcome: string | null;
   readonly lastMove: string | null;
   readonly moveListLength: number | null;
+  readonly promotionUiDetected: boolean;
+  readonly promotionChoiceCount: number;
+  readonly promotionQueenBounds: ChessBoardBounds | null;
 }
 
 interface RuntimeProbePiece {
@@ -43,6 +46,9 @@ interface RuntimeProbePayload {
   readonly sideToMoveText?: unknown;
   readonly lastMoveText?: unknown;
   readonly moveListLength?: unknown;
+  readonly promotionUiDetected?: unknown;
+  readonly promotionChoiceCount?: unknown;
+  readonly promotionQueenBounds?: unknown;
 }
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
@@ -78,6 +84,28 @@ return (() => {
   const turnNode = document.querySelector("[class*='clock-player-turn'], [class*='clock'][class*='turn']");
   const moveNodes = Array.from(document.querySelectorAll(".move-list-row, [class*='move-list'] [class*='move']"));
   const lastMoveNode = moveNodes[moveNodes.length - 1] ?? null;
+  const promotionRoots = Array.from(document.querySelectorAll(
+    ".promotion-piece, [class*='promotion'], [data-cy*='promotion'], [aria-label*='promotion' i]"
+  ));
+  const promotionChoices = promotionRoots
+    .flatMap((root) => [root].concat(Array.from(root.querySelectorAll(".piece, [class*='queen'], [class*='promotion'], button, [role='button']"))))
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      const label = [
+        element.getAttribute("aria-label"),
+        element.getAttribute("data-cy"),
+        element.getAttribute("title"),
+        element.className ? String(element.className) : "",
+        element.textContent ?? ""
+      ].join(" ");
+      return {
+        label,
+        visible: rect.width > 8 && rect.height > 8,
+        bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      };
+    })
+    .filter((entry) => entry.visible);
+  const queenChoice = promotionChoices.find((entry) => /queen|\\bwq\\b|\\bbq\\b|\\bq\\b/i.test(entry.label)) ?? null;
   return {
     url: location.href,
     title: document.title,
@@ -92,7 +120,10 @@ return (() => {
     pieces: uniquePieces,
     sideToMoveText: turnNode?.textContent ?? "",
     lastMoveText: lastMoveNode?.textContent ?? "",
-    moveListLength: moveNodes.length
+    moveListLength: moveNodes.length,
+    promotionUiDetected: promotionChoices.length > 0,
+    promotionChoiceCount: promotionChoices.length,
+    promotionQueenBounds: queenChoice?.bounds ?? null
   };
 })();`
 } as const;
@@ -127,7 +158,10 @@ export function parseChessComBoard(input: {
     safetyReason: safety.reason,
     outcome: detectOutcome(bodyText),
     lastMove: readString(probe.lastMoveText),
-    moveListLength: readNumber(probe.moveListLength)
+    moveListLength: readNumber(probe.moveListLength),
+    promotionUiDetected: readBoolean(probe.promotionUiDetected) ?? false,
+    promotionChoiceCount: readNumber(probe.promotionChoiceCount) ?? 0,
+    promotionQueenBounds: parseBounds(probe.promotionQueenBounds)
   };
 }
 
@@ -152,6 +186,14 @@ export function squareCenter(
     x: bounds.x + offsetX + squareSize * (visualFile + 0.5),
     y: bounds.y + offsetY + squareSize * (visualRank + 0.5)
   };
+}
+
+export function promotionQueenClickPoint(
+  targetSquare: string,
+  bounds: ChessBoardBounds,
+  orientation: ChessColor
+): { readonly x: number; readonly y: number } | null {
+  return squareCenter(targetSquare, bounds, orientation);
 }
 
 function parsePieces(source: unknown): ChessComPiece[] {
@@ -336,4 +378,8 @@ function readString(value: unknown): string | null {
 
 function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }

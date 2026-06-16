@@ -391,7 +391,11 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
           botTurnStatus: readString(turn, "botTurnStatus"),
           botTurnConfidence: readString(turn, "botTurnConfidence"),
           turnReason: readString(turn, "reason"),
+          boardHash: readString(turn, "boardHash"),
           boardChangedSinceLastObservation: booleanAt(turn, "boardChangedSinceLastObservation"),
+          stableBoardCount: numberAt(turn, "stableBoardCount"),
+          promotionUiDetected: booleanAt(turn, "promotionUiDetected") ?? booleanAt(semanticState, "promotionUiDetected"),
+          promotionChoiceCount: numberAt(turn, "promotionChoiceCount") ?? numberAt(semanticState, "promotionChoiceCount"),
           elapsedWaitMs: numberAt(turn, "elapsedWaitMs")
         };
       }
@@ -418,13 +422,26 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
           selectedMoveUci: readString(semanticParams, "uci") ?? readString(semanticParams, "lan"),
           selectedMoveScore: numberAt(semanticParams, "score"),
           selectedMoveReason: readString(semanticParams, "reason"),
+          selectedMovePromotion: readString(semanticParams, "promotion"),
+          promotionPiece: readString(semanticParams, "promotionPiece") ?? readString(payload, "promotionPiece"),
+          promotionChoiceApplied: booleanAt(payload, "promotionChoiceApplied"),
           legalMoveCount: numberAt(semanticParams, "legalMoveCount"),
           materialBalance: numberAt(semanticParams, "materialBalanceBefore"),
           inCheck: booleanAt(semanticParams, "inCheck"),
+          checkEvasionRequired: booleanAt(semanticParams, "checkEvasionRequired") ?? booleanAt(payload, "checkEvasionRequired"),
+          checkEvasionMoveType: readString(semanticParams, "checkEvasionMoveType") ?? readString(payload, "checkEvasionMoveType"),
           isCheckmate: booleanAt(semanticParams, "isCheckmate"),
           isStalemate: booleanAt(semanticParams, "isStalemate"),
           topCandidateMoves: arrayAt(semanticParams, "topCandidates").map(asRecord),
           moveReason: readString(semanticParams, "reason")
+        };
+      }
+      if (readString(payload, "semanticActionId") === "choose-promotion-piece") {
+        latestChess = {
+          ...(latestChess ?? {}),
+          promotionPiece: readString(payload, "promotionPiece"),
+          promotionUiDetected: booleanAt(payload, "promotionUiDetected"),
+          promotionChoiceApplied: true
         };
       }
     }

@@ -97,7 +97,10 @@ export class ChessComGameSession implements GameSession {
         safetyReason: board.safetyReason,
         outcome: board.outcome,
         lastMove: board.lastMove,
-        moveListLength: board.moveListLength
+        moveListLength: board.moveListLength,
+        promotionUiDetected: board.promotionUiDetected,
+        promotionChoiceCount: board.promotionChoiceCount,
+        promotionQueenBounds: board.promotionQueenBounds ? { ...board.promotionQueenBounds } : null
       },
       metrics: {
         pieceCount: board.pieces.length

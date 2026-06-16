@@ -3,6 +3,7 @@ import { Chess, type Color, type Move, type PieceSymbol, type Square } from "che
 export type ChessColor = "white" | "black";
 export type ChessPieceKind = "pawn" | "knight" | "bishop" | "rook" | "queen" | "king";
 export type ChessSquare = `${"a" | "b" | "c" | "d" | "e" | "f" | "g" | "h"}${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+export type ChessCheckEvasionMoveType = "capture-checking-piece" | "block-check" | "king-move" | null;
 
 export interface ChessPiece {
   readonly color: ChessColor;
@@ -25,12 +26,16 @@ export interface ChessMoveCandidate {
   readonly piece: ChessPieceKind;
   readonly captured: ChessPieceKind | null;
   readonly promotion: ChessPieceKind | null;
+  readonly promotionPiece: ChessPieceKind | null;
+  readonly checkEvasionRequired: boolean;
+  readonly checkEvasionMoveType: ChessCheckEvasionMoveType;
   readonly score: number;
   readonly reason: string;
   readonly reasons: readonly string[];
   readonly givesCheck: boolean;
   readonly givesCheckmate: boolean;
   readonly materialBalanceAfter: number;
+  readonly resultingFen: string;
 }
 
 export interface ChessMoveChoice extends ChessMoveCandidate {
@@ -103,7 +108,15 @@ export function evaluateChessPosition(board: ChessBoardState): ChessEvaluation |
   const legalMoves = chess.moves({ verbose: true });
   const materialBalance = evaluateMaterialBalance(board.fen, board.botColor);
   const candidates = legalMoves
-    .map((move) => evaluateCandidate({ fen: board.fen as string, move, botColor: board.botColor, materialBalanceBefore: materialBalance }))
+    .map((move) =>
+      evaluateCandidate({
+        fen: board.fen as string,
+        move,
+        botColor: board.botColor,
+        materialBalanceBefore: materialBalance,
+        inCheck: chess.isCheck()
+      })
+    )
     .filter((candidate): candidate is ChessMoveCandidate => Boolean(candidate))
     .sort(compareCandidates);
 
@@ -152,6 +165,7 @@ function evaluateCandidate(input: {
   readonly move: Move;
   readonly botColor: ChessColor;
   readonly materialBalanceBefore: number;
+  readonly inCheck: boolean;
 }): ChessMoveCandidate | null {
   if (!isChessSquare(input.move.from) || !isChessSquare(input.move.to)) {
     return null;
@@ -171,12 +185,25 @@ function evaluateCandidate(input: {
   const movedPiece = fromPieceSymbol(appliedMove.piece);
   const captured = appliedMove.captured ? fromPieceSymbol(appliedMove.captured) : null;
   const promotion = appliedMove.promotion ? fromPieceSymbol(appliedMove.promotion) : null;
+  const checkEvasionMoveType = input.inCheck ? classifyCheckEvasion(movedPiece, captured) : null;
   const opponentColor = oppositeColor(input.botColor);
   const opponentJsColor = toChessJsColor(opponentColor);
   const materialBalanceAfter = evaluateMaterialBalance(chess.fen(), input.botColor);
+  const resultingFen = chess.fen();
   const materialDelta = materialBalanceAfter - input.materialBalanceBefore;
   const reasons: string[] = [];
   let score = materialDelta;
+
+  if (input.inCheck) {
+    score += 10000;
+    if (checkEvasionMoveType === "capture-checking-piece") {
+      reasons.push("captures checking piece");
+    } else if (checkEvasionMoveType === "king-move") {
+      reasons.push("king moves out of check");
+    } else {
+      reasons.push("blocks check");
+    }
+  }
 
   if (chess.isCheckmate()) {
     score += 100000;
@@ -256,12 +283,16 @@ function evaluateCandidate(input: {
     piece: movedPiece,
     captured,
     promotion,
+    promotionPiece: promotion,
+    checkEvasionRequired: input.inCheck,
+    checkEvasionMoveType,
     score: Math.round(score),
     reason: summarizeReason(reasons),
     reasons,
     givesCheck: chess.isCheck(),
     givesCheckmate: chess.isCheckmate(),
-    materialBalanceAfter
+    materialBalanceAfter,
+    resultingFen
   };
 }
 
@@ -348,6 +379,12 @@ function summarizeReason(reasons: readonly string[]): string {
   if (reasons.includes("checkmate available")) {
     return "checkmate available";
   }
+  const checkEvasion = reasons.find(
+    (reason) => reason === "captures checking piece" || reason === "king moves out of check" || reason === "blocks check"
+  );
+  if (checkEvasion) {
+    return checkEvasion;
+  }
   const queenWin = reasons.find((reason) => reason === "wins queen");
   if (queenWin) {
     return queenWin;
@@ -370,6 +407,16 @@ function summarizeReason(reasons: readonly string[]): string {
   }
   const check = reasons.find((reason) => reason === "gives check");
   return check ?? reasons[0] ?? "best material-preserving move";
+}
+
+function classifyCheckEvasion(movedPiece: ChessPieceKind, captured: ChessPieceKind | null): ChessCheckEvasionMoveType {
+  if (movedPiece === "king") {
+    return "king-move";
+  }
+  if (captured) {
+    return "capture-checking-piece";
+  }
+  return "block-check";
 }
 
 function moveToLan(move: Move): string {

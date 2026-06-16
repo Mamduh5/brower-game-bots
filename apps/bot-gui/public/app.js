@@ -228,7 +228,9 @@ function renderLive(live) {
             ${metric("Turn status", chess.botTurnStatus)}
             ${metric("Turn confidence", chess.botTurnConfidence)}
             ${metric("Waiting reason", chess.turnReason)}
+            ${metric("Board hash", chess.boardHash)}
             ${metric("Board changed", chess.boardChangedSinceLastObservation)}
+            ${metric("Stable board count", chess.stableBoardCount)}
             ${metric("Elapsed wait", chess.elapsedWaitMs === null || chess.elapsedWaitMs === undefined ? null : `${chess.elapsedWaitMs} ms`)}
             ${metric("Side to move", chess.sideToMove)}
             ${metric("Bot color", chess.botColor)}
@@ -236,11 +238,13 @@ function renderLive(live) {
             ${metric("Move list length", chess.moveListLength)}
             ${metric("Planned move", chess.plannedMove)}
             ${metric("Move SAN", chess.selectedMoveSan)}
+            ${metric("Promotion", promotionText(chess))}
             ${metric("Move score", chess.selectedMoveScore)}
             ${metric("Move reason", firstText([chess.selectedMoveReason, chess.moveReason]))}
             ${metric("Legal move count", chess.legalMoveCount)}
             ${metric("Material balance", chess.materialBalance)}
             ${metric("Check / mate", checkText(chess))}
+            ${metric("Check evasion", checkEvasionText(chess))}
             ${metric("Move applied", chess.moveApplied)}
             ${metric("Chess outcome", chess.outcome)}
             ${metric("Stop reason", chess.stopReason)}
@@ -374,7 +378,9 @@ function renderChessSummary(chess) {
         ${metric("Turn status", chess.botTurnStatus)}
         ${metric("Turn confidence", chess.botTurnConfidence)}
         ${metric("Turn reason", chess.turnReason)}
+        ${metric("Board hash", chess.boardHash)}
         ${metric("Board changed", chess.boardChangedSinceLastObservation)}
+        ${metric("Stable board count", chess.stableBoardCount)}
         ${metric("Elapsed wait", chess.elapsedWaitMs === null || chess.elapsedWaitMs === undefined ? null : `${chess.elapsedWaitMs} ms`)}
         ${metric("Current FEN", chess.currentFen)}
         ${metric("Side to move", chess.sideToMove)}
@@ -382,11 +388,13 @@ function renderChessSummary(chess) {
         ${metric("Last move", chess.lastMove)}
         ${metric("Planned move", chess.plannedMove)}
         ${metric("Move SAN", chess.selectedMoveSan)}
+        ${metric("Promotion", promotionText(chess))}
         ${metric("Move score", chess.selectedMoveScore)}
         ${metric("Move reason", chess.selectedMoveReason)}
         ${metric("Legal move count", chess.legalMoveCount)}
         ${metric("Material balance", chess.materialBalance)}
         ${metric("Check / mate", checkText(chess))}
+        ${metric("Check evasion", checkEvasionText(chess))}
         ${metric("Move applied", chess.moveApplied)}
         ${metric("Outcome", chess.outcome)}
         ${metric("Stop reason", chess.stopReason)}
@@ -405,6 +413,8 @@ function renderChessSummary(chess) {
               <th>After FEN</th>
               <th>Score</th>
               <th>Reason</th>
+              <th>Promotion</th>
+              <th>Check evasion</th>
               <th>Top Candidates</th>
               <th>Applied</th>
               <th>Screenshots</th>
@@ -422,6 +432,8 @@ function renderChessSummary(chess) {
                     <td>${escapeHtml(move.afterFen)}</td>
                     <td>${escapeHtml(move.selectedMoveScore ?? selected.score)}</td>
                     <td>${escapeHtml(firstText([move.selectedMoveReason, selected.reason]))}</td>
+                    <td>${escapeHtml(promotionText(move))}</td>
+                    <td>${escapeHtml(checkEvasionText(move))}</td>
                     <td>${renderCandidateList(move.topCandidateMoves ?? selected.topCandidates ?? [])}</td>
                     <td>${escapeHtml(move.moveApplied)}</td>
                     <td>${escapeHtml([move.beforeScreenshotPath, move.afterScreenshotPath].filter(Boolean).join("\\n"))}</td>
@@ -457,6 +469,9 @@ function renderTurnObservationTable(observations) {
             <th>Confidence</th>
             <th>Reason</th>
             <th>Changed</th>
+            <th>Stable</th>
+            <th>Board hash</th>
+            <th>Promotion UI</th>
             <th>Wait</th>
           </tr>
         </thead>
@@ -473,6 +488,9 @@ function renderTurnObservationTable(observations) {
                   <td>${escapeHtml(observation.botTurnConfidence)}</td>
                   <td>${escapeHtml(observation.reason)}</td>
                   <td>${escapeHtml(observation.boardChangedSinceLastObservation)}</td>
+                  <td>${escapeHtml(observation.stableBoardCount)}</td>
+                  <td>${escapeHtml(observation.boardHash)}</td>
+                  <td>${escapeHtml(observation.promotionUiDetected)}</td>
                   <td>${escapeHtml(observation.elapsedWaitMs)} ms</td>
                 </tr>
               `
@@ -752,6 +770,24 @@ function checkText(chess) {
     return null;
   }
   return `check ${chess.inCheck ?? "n/a"} / mate ${chess.isCheckmate ?? "n/a"} / stalemate ${chess.isStalemate ?? "n/a"}`;
+}
+
+function checkEvasionText(chess) {
+  if (!chess) {
+    return null;
+  }
+  return `${chess.checkEvasionRequired ?? "n/a"} / ${chess.checkEvasionMoveType ?? "n/a"}`;
+}
+
+function promotionText(chess) {
+  if (!chess) {
+    return null;
+  }
+  const piece = firstText([chess.promotionPiece, chess.selectedMovePromotion]);
+  if (!piece && chess.promotionUiDetected === null && chess.promotionUiDetected === undefined) {
+    return null;
+  }
+  return `${piece ?? "none"} / UI ${chess.promotionUiDetected ?? "n/a"} / choice ${chess.promotionChoiceApplied ?? "n/a"}`;
 }
 
 function actionText(action) {

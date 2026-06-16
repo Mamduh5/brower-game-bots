@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { chooseBeginnerChessMove, listLegalChessMoves } from "@game-bots/agent-player";
-import { ChessComGameSession, parseChessComBoard, squareCenter } from "@game-bots/chess-com-web";
+import { ChessComGameSession, parseChessComBoard, promotionQueenClickPoint, squareCenter } from "@game-bots/chess-com-web";
 
 const STARTING_BOARD_HTML = `
   <wc-chess-board class="board">
@@ -54,6 +54,28 @@ describe("Chess.com plugin parser and basic policy", () => {
 
     expect(squareCenter("a1", bounds, "white")).toEqual({ x: 120, y: 640 });
     expect(squareCenter("a1", bounds, "black")).toEqual({ x: 680, y: 80 });
+    expect(promotionQueenClickPoint("a8", bounds, "white")).toEqual({ x: 120, y: 80 });
+    expect(promotionQueenClickPoint("h1", bounds, "black")).toEqual({ x: 120, y: 80 });
+  });
+
+  it("detects a visible promotion picker and queen choice bounds from runtime state", () => {
+    const board = parseChessComBoard({
+      html: STARTING_BOARD_HTML,
+      runtimeProbe: {
+        url: "https://www.chess.com/play/computer",
+        title: "Play Computer Chess Online",
+        bodyText: "Play Computer",
+        boardClassName: "board",
+        boardBounds: { x: 80, y: 40, width: 640, height: 640 },
+        promotionUiDetected: true,
+        promotionChoiceCount: 4,
+        promotionQueenBounds: { x: 100, y: 60, width: 40, height: 40 }
+      }
+    });
+
+    expect(board.promotionUiDetected).toBe(true);
+    expect(board.promotionChoiceCount).toBe(4);
+    expect(board.promotionQueenBounds).toEqual({ x: 100, y: 60, width: 40, height: 40 });
   });
 
   it("rejects invalid move squares before sending board coordinates", async () => {
