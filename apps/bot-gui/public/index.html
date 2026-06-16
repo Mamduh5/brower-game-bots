@@ -54,6 +54,13 @@
 
           <form id="runner-form" class="runner-form">
             <label>
+              Game
+              <select id="run-game-id" name="gameId">
+                <option value="cat-and-dog-web">Cat and Dog</option>
+                <option value="chess-com-web">Chess.com Computer</option>
+              </select>
+            </label>
+            <label>
               Difficulty
               <select id="run-difficulty" name="difficulty">
                 <option value="easy">easy</option>
@@ -65,6 +72,10 @@
             <label>
               Max attempts
               <input id="run-max-attempts" name="maxAttempts" type="number" min="1" max="50" value="3" />
+            </label>
+            <label>
+              Max moves
+              <input id="run-max-moves" name="maxMoves" type="number" min="1" max="120" value="80" />
             </label>
             <label>
               Strategy mode

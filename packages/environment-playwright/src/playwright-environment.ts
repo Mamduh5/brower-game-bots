@@ -159,6 +159,36 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
       case "click":
         await page.locator(action.target.selector).click();
         break;
+      case "click-if-visible": {
+        const locator = page.locator(action.target.selector);
+        const count = await locator.count();
+        for (let index = 0; index < count; index += 1) {
+          const candidate = locator.nth(index);
+          try {
+            if ((await candidate.isVisible()) && (await candidate.isEnabled())) {
+              await candidate.click({ timeout: 1000 });
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+        break;
+      }
+      case "mouse-click":
+        await page.mouse.click(action.point.x, action.point.y);
+        break;
+      case "mouse-drag":
+        await page.mouse.move(action.from.x, action.from.y);
+        await page.waitForTimeout(100);
+        await page.mouse.down();
+        await page.waitForTimeout(150);
+        await page.mouse.move(action.to.x, action.to.y, {
+          steps: action.steps ?? 12
+        });
+        await page.waitForTimeout(150);
+        await page.mouse.up();
+        break;
       case "type":
         await page.locator(action.target.selector).fill(action.text);
         break;

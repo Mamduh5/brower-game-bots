@@ -44,6 +44,9 @@ importers:
       '@game-bots/cat-and-dog-web':
         specifier: workspace:*
         version: link:../../games/cat-and-dog-web
+      '@game-bots/chess-com-web':
+        specifier: workspace:*
+        version: link:../../games/chess-com-web
       '@game-bots/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -110,6 +113,18 @@ importers:
         specifier: ^7.0.0
         version: 7.0.0
 
+  games/chess-com-web:
+    dependencies:
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../../packages/environment-sdk
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../../packages/game-sdk
+      '@game-bots/runtime-core':
+        specifier: workspace:*
+        version: link:../../packages/runtime-core
+
   games/play2048-web:
     dependencies:
       '@game-bots/contracts':
@@ -145,6 +160,9 @@ importers:
       '@game-bots/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core
+      chess.js:
+        specifier: ^1.4.0
+        version: 1.4.0
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -639,6 +657,9 @@ packages:
   check-error@2.1.3:
     resolution: {integrity: sha512-PAJdDJusoxnwm1VwW07VWwUN1sl7smmC3OKggvndJFadxxDRyFJBX/ggnu/KE4kQAB7a3Dp8f/YXC1FlUprWmA==}
     engines: {node: '>= 16'}
+
+  chess.js@1.4.0:
+    resolution: {integrity: sha512-BBJgrrtKQOzFLonR0l+k64A98NLemPwNsCskwb+29bRwobUa4iTm51E1kwGPbWXAcfdDa18nad6vpPPKPWarqw==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -1169,6 +1190,8 @@ snapshots:
       pathval: 2.0.1
 
   check-error@2.1.3: {}
+
+  chess.js@1.4.0: {}
 
   debug@4.4.3:
     dependencies:

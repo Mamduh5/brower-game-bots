@@ -1,5 +1,6 @@
 import { createContainer } from "./bootstrap/container.js";
 import { rebuildReport } from "./commands/rebuild-report.js";
+import { runPlayerChessCom } from "./commands/run-player-chess-com.js";
 import { runPlayerCatAndDog } from "./commands/run-player-cat-and-dog.js";
 import { runPlayer } from "./commands/run-player.js";
 import { runTester } from "./commands/run-tester.js";
@@ -50,6 +51,14 @@ function parseHeadlessFlag(): boolean {
   return parseBooleanFlag("--headless", true);
 }
 
+function parseChessOpponentFlag(): "computer" {
+  const raw = parseStringFlag("--opponent") ?? "computer";
+  if (raw !== "computer") {
+    throw new Error("run-player-chess-com only supports --opponent=computer. Human matchmaking is not allowed.");
+  }
+  return "computer";
+}
+
 function parseCatAndDogDifficultyFlag(): "easy" | "normal" | "hard" | "impossible" {
   const raw = parseStringFlag("--difficulty") ?? "easy";
   return CAT_AND_DOG_DIFFICULTIES.has(raw)
@@ -71,6 +80,13 @@ async function main(): Promise<void> {
         maxAttempts: parseNumberFlag("--max-attempts", 3),
         stopOnWin: parseBooleanFlag("--stop-on-win", true),
         strategyMode: parseStringFlag("--strategy-mode") === "explore" ? "explore" : "baseline",
+        headless: parseHeadlessFlag()
+      });
+      break;
+    case "run-player-chess-com":
+      await runPlayerChessCom(container, {
+        opponent: parseChessOpponentFlag(),
+        maxMoves: parseNumberFlag("--max-moves", 80),
         headless: parseHeadlessFlag()
       });
       break;
@@ -96,8 +112,9 @@ async function main(): Promise<void> {
       break;
     default:
       process.stdout.write(
-        "Usage: game-bots <run-player|run-player-cat-and-dog|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n" +
-          "Cat-and-Dog player flags: --difficulty=easy|normal|hard|impossible --max-attempts=3 --strategy-mode=baseline|explore --stop-on-win=true|false --headless=true|false --visible\n"
+        "Usage: game-bots <run-player|run-player-cat-and-dog|run-player-chess-com|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n" +
+          "Cat-and-Dog player flags: --difficulty=easy|normal|hard|impossible --max-attempts=3 --strategy-mode=baseline|explore --stop-on-win=true|false --headless=true|false --visible\n" +
+          "Chess.com player flags: --opponent=computer --max-moves=80 --headless=true|false --visible\n"
       );
   }
 }

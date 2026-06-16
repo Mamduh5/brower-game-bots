@@ -98,6 +98,7 @@ pnpm run dev -- run-player-cat-and-dog --max-attempts=5 --stop-on-win=false
 
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false --visible
+pnpm run dev -- run-player-chess-com --opponent=computer --max-moves=80 --visible
 
 ## Cat-and-Dog Bot GUI
 
@@ -107,7 +108,11 @@ Start the local live runner and completed-run replay dashboard:
 pnpm run gui
 ```
 
-Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start the existing `run-player-cat-and-dog` CLI with selectable difficulty, max attempts, strategy mode, browser mode, and stop-on-win. Browser mode defaults to Headless; select Visible to launch a real Playwright-controlled browser window while the bot plays. The dashboard also scans `artifacts/**/reports/02-player-attempt-summary.json` and can load a manually entered summary path such as:
+Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start Cat-and-Dog or Chess.com with selectable game, browser mode, and bounded run settings. Browser mode defaults to Headless; select Visible to launch a real Playwright-controlled browser window while the bot plays.
+
+Chess.com support is computer-only. The runner navigates to `https://www.chess.com/play/computer`, refuses online/live human matchmaking signals, records board FEN/moves/screenshots, and uses `chess.js` to choose from real legal moves with a simple beginner preference list. It does not use Stockfish.
+
+The dashboard scans `artifacts/**/reports/02-player-attempt-summary.json` and `artifacts/**/reports/02-chess-com-player-summary.json` and can load a manually entered summary path such as:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json

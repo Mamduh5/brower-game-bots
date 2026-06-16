@@ -21,7 +21,23 @@ export interface NormalizedRunSummary extends DiscoveredRunSummary {
   readonly attempts: readonly NormalizedAttempt[];
   readonly artifactPaths: readonly string[];
   readonly screenshotPaths: readonly string[];
+  readonly chess: NormalizedChessSummary | null;
   readonly raw: JsonRecord;
+}
+
+export interface NormalizedChessSummary {
+  readonly opponent: string | null;
+  readonly maxMoves: number | null;
+  readonly movesPlayed: number;
+  readonly outcome: string | null;
+  readonly currentFen: string | null;
+  readonly sideToMove: string | null;
+  readonly botColor: string | null;
+  readonly lastMove: string | null;
+  readonly plannedMove: string | null;
+  readonly legalMoveCount: number | null;
+  readonly moveApplied: boolean | null;
+  readonly moves: readonly JsonRecord[];
 }
 
 export interface NormalizedAttempt {
@@ -105,13 +121,30 @@ export interface NormalizedWall {
 type JsonRecord = Record<string, unknown>;
 
 const PLAYER_SUMMARY_FILE = "02-player-attempt-summary.json";
+const CHESS_PLAYER_SUMMARY_FILE = "02-chess-com-player-summary.json";
+const SUMMARY_FILES = new Set([PLAYER_SUMMARY_FILE, CHESS_PLAYER_SUMMARY_FILE]);
 
 export function getSummaryRelativePathForRun(runId: string): string {
   return path.posix.join("artifacts", runId, "reports", PLAYER_SUMMARY_FILE);
 }
 
+export function getSummaryRelativePathsForRun(runId: string): readonly string[] {
+  return [
+    path.posix.join("artifacts", runId, "reports", PLAYER_SUMMARY_FILE),
+    path.posix.join("artifacts", runId, "reports", CHESS_PLAYER_SUMMARY_FILE)
+  ];
+}
+
 export async function loadCatAndDogSummaryByRunId(repoRoot: string, runId: string): Promise<NormalizedRunSummary> {
-  return loadCatAndDogSummary(repoRoot, getSummaryRelativePathForRun(runId));
+  let lastError: unknown = null;
+  for (const summaryPath of getSummaryRelativePathsForRun(runId)) {
+    try {
+      return await loadCatAndDogSummary(repoRoot, summaryPath);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`No summary found for run ${runId}.`);
 }
 
 export async function discoverCatAndDogSummaries(repoRoot: string): Promise<DiscoveredRunSummary[]> {
@@ -150,12 +183,13 @@ export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoo
   const run = recordAt(raw, "run");
   const summary = recordAt(raw, "summary");
   const attempts = arrayAt(raw, "attempts").map(normalizeAttempt);
+  const chess = normalizeChessSummary(raw);
   const artifactPaths = collectArtifactPaths(arrayAt(raw, "artifacts"));
   const screenshotPaths = artifactPaths.filter(isScreenshotPath);
 
   return {
     runId: stringAt(run, "runId") ?? stringAt(raw, "runId") ?? inferRunId(sourcePath),
-    gameId: stringAt(run, "gameId") ?? stringAt(raw, "gameId"),
+    gameId: stringAt(run, "gameId") ?? stringAt(summary, "gameId") ?? stringAt(raw, "gameId"),
     profileId: stringAt(run, "profileId") ?? stringAt(raw, "profileId"),
     requestedDifficulty: stringAt(summary, "requestedDifficulty") ?? stringAt(raw, "requestedDifficulty"),
     runtimeDifficulty:
@@ -163,15 +197,40 @@ export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoo
     maxAttempts: numberAt(summary, "maxAttempts") ?? numberAt(raw, "maxAttempts"),
     stopOnWin: booleanAt(summary, "stopOnWin") ?? booleanAt(raw, "stopOnWin"),
     strategyMode: stringAt(summary, "strategyMode") ?? stringAt(raw, "strategyMode"),
-    attemptCount: numberAt(summary, "attemptsRun") ?? attempts.length,
-    hadWin: booleanAt(summary, "hadWin") ?? (attempts.some((attempt) => attempt.outcome === "WIN") ? true : null),
+    attemptCount: numberAt(summary, "attemptsRun") ?? numberAt(summary, "movesPlayed") ?? attempts.length,
+    hadWin: booleanAt(summary, "hadWin") ?? (chess?.outcome === "WIN" ? true : attempts.some((attempt) => attempt.outcome === "WIN") ? true : null),
     sourcePath,
     relativeSourcePath: path.relative(repoRoot, sourcePath),
     updatedAt: stringAt(run, "updatedAt") ?? stringAt(raw, "updatedAt"),
     attempts,
     artifactPaths,
     screenshotPaths,
+    chess,
     raw
+  };
+}
+
+function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
+  const summary = recordAt(raw, "summary");
+  const moves = arrayAt(raw, "moves").map(asRecord);
+  if (moves.length === 0 && stringAt(summary, "gameId") !== "chess-com-web") {
+    return null;
+  }
+  const latestMove = moves.at(-1) ?? {};
+  const selectedMove = recordAt(latestMove, "selectedMove");
+  return {
+    opponent: stringAt(summary, "opponent"),
+    maxMoves: numberAt(summary, "maxMoves"),
+    movesPlayed: numberAt(summary, "movesPlayed") ?? moves.length,
+    outcome: stringAt(summary, "outcome") ?? stringAt(latestMove, "outcome"),
+    currentFen: stringAt(latestMove, "afterFen") ?? stringAt(latestMove, "beforeFen"),
+    sideToMove: stringAt(latestMove, "sideToMove"),
+    botColor: stringAt(latestMove, "botColor"),
+    lastMove: stringAt(latestMove, "lastMove"),
+    plannedMove: stringAt(selectedMove, "lan"),
+    legalMoveCount: numberAt(selectedMove, "legalMoveCount"),
+    moveApplied: booleanAt(latestMove, "moveApplied"),
+    moves
   };
 }
 
@@ -307,7 +366,7 @@ async function findSummaryFiles(root: string): Promise<string[]> {
       found.push(...(await findSummaryFiles(entryPath)));
       continue;
     }
-    if (entry.isFile() && entry.name === PLAYER_SUMMARY_FILE) {
+    if (entry.isFile() && SUMMARY_FILES.has(entry.name)) {
       found.push(entryPath);
     }
   }

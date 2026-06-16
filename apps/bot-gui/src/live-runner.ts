@@ -7,7 +7,6 @@ import path from "node:path";
 import initSqlJs, { type SqlJsStatic } from "sql.js";
 
 import {
-  getSummaryRelativePathForRun,
   loadCatAndDogSummaryByRunId,
   normalizeAttempt,
   normalizeShot,
@@ -18,11 +17,14 @@ import {
 
 export type CatAndDogDifficulty = "easy" | "normal" | "hard" | "impossible";
 export type CatAndDogStrategyMode = "baseline" | "explore";
+export type BotGameId = "cat-and-dog-web" | "chess-com-web";
 export type LiveRunStatus = "starting" | "running" | "stopping" | "stopped" | "completed" | "failed";
 
 export interface StartBotRunRequest {
+  readonly gameId: BotGameId;
   readonly difficulty: CatAndDogDifficulty;
   readonly maxAttempts: number;
+  readonly maxMoves: number;
   readonly strategyMode: CatAndDogStrategyMode;
   readonly stopOnWin: boolean;
   readonly headless: boolean;
@@ -42,6 +44,7 @@ export interface LiveRunState {
   readonly currentAttemptNumber: number | null;
   readonly latestAction: JsonRecord | null;
   readonly latestShotPlan: JsonRecord | null;
+  readonly latestChess: JsonRecord | null;
   readonly latestObservation: LiveObservation | null;
   readonly latestAttempt: NormalizedAttempt | null;
   readonly shotHistory: readonly NormalizedShot[];
@@ -117,14 +120,7 @@ export class BotRunManager {
     const normalizedSettings = normalizeStartRequest(settings);
     const botRunId = randomUUID();
     const startedAt = new Date().toISOString();
-    const cliArgs = [
-      "run-player-cat-and-dog",
-      `--difficulty=${normalizedSettings.difficulty}`,
-      `--max-attempts=${normalizedSettings.maxAttempts}`,
-      `--strategy-mode=${normalizedSettings.strategyMode}`,
-      `--stop-on-win=${normalizedSettings.stopOnWin ? "true" : "false"}`,
-      normalizedSettings.headless ? "--headless=true" : "--visible"
-    ];
+    const cliArgs = buildCliArgs(normalizedSettings);
     const spawnSpec = buildSpawnSpec(cliArgs);
     const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: this.repoRoot,
@@ -252,13 +248,13 @@ export class BotRunManager {
         run.phase = eventType;
       }
       const message = readString(parsed, "msg");
-      if (message?.includes("Starting cat-and-dog player run")) {
+      if (message?.includes("Starting cat-and-dog player run") || message?.includes("Starting chess-com player run")) {
         run.status = "running";
       }
       return;
     }
 
-    const completedMatch = line.match(/Completed cat-and-dog player run ([0-9a-f-]+)/i);
+    const completedMatch = line.match(/Completed (?:cat-and-dog|chess-com) player run ([0-9a-f-]+)/i);
     if (completedMatch?.[1]) {
       run.cliRunId = completedMatch[1];
     }
@@ -306,7 +302,7 @@ export class BotRunManager {
   ): LiveRunState {
     const cliRunId = run.cliRunId;
     const latestScreenshotPath = screenshotPaths[screenshotPaths.length - 1] ?? eventState?.latestScreenshotPath ?? null;
-    const summaryPath = cliRunId && summary ? getSummaryRelativePathForRun(cliRunId) : null;
+    const summaryPath = cliRunId && summary ? summary.relativeSourcePath : null;
     const latestAttempt = summary?.attempts.at(-1) ?? eventState?.latestAttempt ?? null;
     const shotHistory = summary?.attempts.flatMap((attempt) => [...attempt.shotHistory]) ?? eventState?.shotHistory ?? [];
     const latestObservation = eventState?.latestObservation ?? buildObservationFromAttempt(latestAttempt);
@@ -326,6 +322,7 @@ export class BotRunManager {
       currentAttemptNumber: eventState?.currentAttemptNumber ?? latestAttempt?.attemptNumber ?? null,
       latestAction: eventState?.latestAction ?? null,
       latestShotPlan: eventState?.latestShotPlan ?? null,
+      latestChess: (summary?.chess ? (summary.chess as unknown as JsonRecord) : null) ?? eventState?.latestChess ?? null,
       latestObservation,
       latestAttempt,
       shotHistory,
@@ -345,6 +342,7 @@ interface DerivedEventState {
   readonly currentAttemptNumber: number | null;
   readonly latestAction: JsonRecord | null;
   readonly latestShotPlan: JsonRecord | null;
+  readonly latestChess: JsonRecord | null;
   readonly latestObservation: LiveObservation | null;
   readonly latestAttempt: NormalizedAttempt | null;
   readonly shotHistory: readonly NormalizedShot[];
@@ -356,6 +354,7 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
   let currentAttemptNumber: number | null = null;
   let latestAction: JsonRecord | null = null;
   let latestShotPlan: JsonRecord | null = null;
+  let latestChess: JsonRecord | null = null;
   let latestObservation: LiveObservation | null = null;
   let latestAttempt: NormalizedAttempt | null = null;
   let latestScreenshotPath: string | null = null;
@@ -369,12 +368,25 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
     if (type === "observation.captured") {
       const observationKind = readString(event, "observationKind");
       const payload = recordAt(event, "payload");
-      currentAttemptNumber = numberAt(payload, "attemptNumber") ?? currentAttemptNumber;
+      currentAttemptNumber = numberAt(payload, "attemptNumber") ?? numberAt(payload, "moveNumber") ?? currentAttemptNumber;
       if (observationKind === "attempt.completed") {
         latestAttempt = normalizeAttempt(payload);
         shotHistory.push(...arrayAt(payload, "shotHistory").map(normalizeShot));
       }
       const semanticState = recordAt(payload, "gameSemanticState");
+      if (observationKind?.startsWith("chess.")) {
+        latestChess = {
+          ...(latestChess ?? {}),
+          fen: readString(semanticState, "fen"),
+          sideToMove: readString(semanticState, "sideToMove"),
+          botColor: readString(semanticState, "botColor"),
+          orientation: readString(semanticState, "orientation"),
+          lastMove: readString(semanticState, "lastMove"),
+          outcome: readString(semanticState, "outcome"),
+          boardDetected: booleanAt(semanticState, "boardDetected"),
+          unsafeHumanMatchmaking: booleanAt(semanticState, "unsafeHumanMatchmaking")
+        };
+      }
       const observation = buildObservationFromSemanticState(semanticState);
       latestObservation = observation ?? latestObservation;
     }
@@ -390,6 +402,14 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
       if (readString(payload, "semanticActionId") === "execute-planned-shot" && Object.keys(semanticParams).length > 0) {
         latestShotPlan = semanticParams;
       }
+      if (readString(payload, "semanticActionId") === "execute-chess-move" && Object.keys(semanticParams).length > 0) {
+        latestChess = {
+          ...(latestChess ?? {}),
+          plannedMove: readString(semanticParams, "lan"),
+          legalMoveCount: numberAt(semanticParams, "legalMoveCount"),
+          moveReason: readString(semanticParams, "reason")
+        };
+      }
     }
     if (type === "artifact.stored") {
       const artifact = recordAt(event, "artifact");
@@ -404,6 +424,7 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
     currentAttemptNumber,
     latestAction,
     latestShotPlan,
+    latestChess,
     latestObservation,
     latestAttempt,
     shotHistory,
@@ -413,12 +434,34 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
 
 function normalizeStartRequest(input: StartBotRunRequest): StartBotRunRequest {
   return {
+    gameId: input.gameId === "chess-com-web" ? "chess-com-web" : "cat-and-dog-web",
     difficulty: ["easy", "normal", "hard", "impossible"].includes(input.difficulty) ? input.difficulty : "easy",
     maxAttempts: Number.isInteger(input.maxAttempts) ? Math.max(1, Math.min(50, input.maxAttempts)) : 3,
+    maxMoves: Number.isInteger(input.maxMoves) ? Math.max(1, Math.min(120, input.maxMoves)) : 80,
     strategyMode: input.strategyMode === "explore" ? "explore" : "baseline",
     stopOnWin: input.stopOnWin === true,
     headless: input.headless !== false
   };
+}
+
+function buildCliArgs(settings: StartBotRunRequest): readonly string[] {
+  if (settings.gameId === "chess-com-web") {
+    return [
+      "run-player-chess-com",
+      "--opponent=computer",
+      `--max-moves=${settings.maxMoves}`,
+      settings.headless ? "--headless=true" : "--visible"
+    ];
+  }
+
+  return [
+    "run-player-cat-and-dog",
+    `--difficulty=${settings.difficulty}`,
+    `--max-attempts=${settings.maxAttempts}`,
+    `--strategy-mode=${settings.strategyMode}`,
+    `--stop-on-win=${settings.stopOnWin ? "true" : "false"}`,
+    settings.headless ? "--headless=true" : "--visible"
+  ];
 }
 
 function buildSpawnSpec(cliArgs: readonly string[]): {

@@ -1,5 +1,6 @@
 import type { GamePlugin } from "@game-bots/game-sdk";
 import { catAndDogWebPlugin } from "@game-bots/cat-and-dog-web";
+import { chessComWebPlugin } from "@game-bots/chess-com-web";
 import { play2048WebPlugin } from "@game-bots/play2048-web";
 import { wordleWebPlugin } from "@game-bots/wordle-web";
 
@@ -11,6 +12,7 @@ export interface TesterDefaults {
 const gamePlugins = new Map<string, GamePlugin>([
   [wordleWebPlugin.manifest.gameId, wordleWebPlugin],
   [catAndDogWebPlugin.manifest.gameId, catAndDogWebPlugin],
+  [chessComWebPlugin.manifest.gameId, chessComWebPlugin],
   [play2048WebPlugin.manifest.gameId, play2048WebPlugin]
 ]);
 
@@ -26,6 +28,13 @@ const testerDefaultsByGame = new Map<string, TesterDefaults>([
     catAndDogWebPlugin.manifest.gameId,
     {
       profileId: "cat-and-dog-web.tester.smoke",
+      scenarioId: "smoke"
+    }
+  ],
+  [
+    chessComWebPlugin.manifest.gameId,
+    {
+      profileId: "chess-com-web.tester.smoke",
       scenarioId: "smoke"
     }
   ],

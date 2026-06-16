@@ -50,6 +50,9 @@
       "path": "./games/cat-and-dog-web"
     },
     {
+      "path": "./games/chess-com-web"
+    },
+    {
       "path": "./apps/bot-cli"
     },
     {

@@ -43,6 +43,9 @@
       "path": "../../games/cat-and-dog-web"
     },
     {
+      "path": "../../games/chess-com-web"
+    },
+    {
       "path": "../../games/play2048-web"
     }
   ],

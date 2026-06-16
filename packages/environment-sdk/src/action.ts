@@ -11,6 +11,28 @@ const ClickActionSchema = z.object({
   target: SelectorTargetSchema
 });
 
+const ClickIfVisibleActionSchema = z.object({
+  kind: z.literal("click-if-visible"),
+  target: SelectorTargetSchema
+});
+
+const CoordinatePointSchema = z.object({
+  x: z.number(),
+  y: z.number()
+});
+
+const MouseClickActionSchema = z.object({
+  kind: z.literal("mouse-click"),
+  point: CoordinatePointSchema
+});
+
+const MouseDragActionSchema = z.object({
+  kind: z.literal("mouse-drag"),
+  from: CoordinatePointSchema,
+  to: CoordinatePointSchema,
+  steps: z.number().int().positive().max(80).optional()
+});
+
 const TypeActionSchema = z.object({
   kind: z.literal("type"),
   target: SelectorTargetSchema,
@@ -40,6 +62,9 @@ const ScrollActionSchema = z.object({
 
 export const EnvironmentActionSchema = z.discriminatedUnion("kind", [
   ClickActionSchema,
+  ClickIfVisibleActionSchema,
+  MouseClickActionSchema,
+  MouseDragActionSchema,
   TypeActionSchema,
   KeyPressActionSchema,
   NavigateActionSchema,

@@ -10,7 +10,7 @@ pnpm run gui
 
 Open the printed local URL, usually `http://127.0.0.1:5178`.
 
-Use the Live Runner panel to choose difficulty, max attempts, strategy mode, browser mode, and stop-on-win, then click Start Run. Browser mode defaults to Headless. Select Visible to open a real Playwright-controlled browser window on the desktop while the bot plays.
+Use the Live Runner panel to choose game, browser mode, and the game-specific bounded settings, then click Start Run. Browser mode defaults to Headless. Select Visible to open a real Playwright-controlled browser window on the desktop while the bot plays.
 
 The server starts the existing CLI command as a child process, equivalent to:
 
@@ -26,9 +26,17 @@ pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 
 
 You can also use `--headless=false` directly from the CLI.
 
-The live panel polls the local API for the current process status, run id, run phase, browser mode, latest action, shot plan, HP, wind, wall state, screenshot artifact, and growing shot history. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`, which also closes the visible browser launched by that process tree.
+Chess.com computer mode can be started with:
 
-The replay dashboard still automatically scans `artifacts/**/reports/02-player-attempt-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
+```powershell
+pnpm run dev -- run-player-chess-com --opponent=computer --max-moves=80 --visible
+```
+
+Chess.com runs are computer-only. The runner navigates to `https://www.chess.com/play/computer`, aborts if it detects online/live human matchmaking, reads Chess.com board piece classes into FEN, and uses `chess.js` to choose from real legal moves with a simple beginner preference list. It does not use Stockfish.
+
+The live panel polls the local API for the current process status, run id, run phase, browser mode, latest action, screenshot artifact, and game telemetry. Cat-and-Dog shows HP, wind, wall state, shot plan, and shot history. Chess.com shows board FEN, side to move, bot color, last move, planned move, legal move count, and outcome. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`, which also closes the visible browser launched by that process tree.
+
+The replay dashboard still automatically scans `artifacts/**/reports/02-player-attempt-summary.json` and `artifacts/**/reports/02-chess-com-player-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json

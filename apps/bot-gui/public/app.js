@@ -19,8 +19,10 @@ const els = {
   runnerForm: document.querySelector("#runner-form"),
   startRun: document.querySelector("#start-run"),
   stopRun: document.querySelector("#stop-run"),
+  gameId: document.querySelector("#run-game-id"),
   difficulty: document.querySelector("#run-difficulty"),
   maxAttempts: document.querySelector("#run-max-attempts"),
+  maxMoves: document.querySelector("#run-max-moves"),
   strategyMode: document.querySelector("#run-strategy-mode"),
   browserMode: document.querySelector("#run-browser-mode"),
   stopOnWin: document.querySelector("#run-stop-on-win"),
@@ -80,8 +82,10 @@ async function loadSummary(summaryPath) {
 
 async function startRun() {
   const payload = {
+    gameId: els.gameId.value,
     difficulty: els.difficulty.value,
     maxAttempts: Number(els.maxAttempts.value),
+    maxMoves: Number(els.maxMoves.value),
     strategyMode: els.strategyMode.value,
     stopOnWin: els.stopOnWin.checked,
     headless: els.browserMode.value !== "visible"
@@ -197,6 +201,7 @@ function renderLive(live) {
   els.stopRun.disabled = !canStop;
   const observation = live.latestObservation ?? {};
   const shotPlan = live.latestShotPlan ?? {};
+  const chess = live.latestChess ?? {};
   const latestAction = live.latestAction ?? {};
   const latestScreenshot = live.latestScreenshotUrl
     ? `${live.latestScreenshotUrl}${live.latestScreenshotUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
@@ -208,11 +213,27 @@ function renderLive(live) {
       ${metric("Phase", live.phase)}
       ${metric("Latest run id", live.cliRunId ?? live.botRunId)}
       ${metric("Attempt", live.currentAttemptNumber)}
+      ${metric("Game", live.settings?.gameId)}
       ${metric("Difficulty", live.settings?.difficulty)}
       ${metric("Max attempts", live.settings?.maxAttempts)}
+      ${metric("Max moves", live.settings?.maxMoves)}
       ${metric("Strategy mode", live.settings?.strategyMode)}
       ${metric("Browser mode", live.settings?.headless === false ? "Visible" : "Headless")}
       ${metric("Stop on win", live.settings?.stopOnWin)}
+      ${
+        live.settings?.gameId === "chess-com-web"
+          ? `
+            ${metric("Board FEN", chess.currentFen ?? chess.fen)}
+            ${metric("Side to move", chess.sideToMove)}
+            ${metric("Bot color", chess.botColor)}
+            ${metric("Last move", chess.lastMove)}
+            ${metric("Planned move", chess.plannedMove)}
+            ${metric("Legal move count", chess.legalMoveCount)}
+            ${metric("Move applied", chess.moveApplied)}
+            ${metric("Chess outcome", chess.outcome)}
+          `
+          : ""
+      }
       ${metric("Latest action", actionText(latestAction))}
       ${metric("Selected weapon", observation.selectedWeapon)}
       ${metric("Planned weapon", shotPlan.weaponKey)}
@@ -268,6 +289,7 @@ function renderSummary() {
 
   const attempts = summary.attempts ?? [];
   const selectedAttempt = attempts[state.selectedAttemptIndex] ?? attempts[0] ?? null;
+  const chess = summary.chess ?? null;
   els.runDetail.classList.remove("hidden");
   els.runDetail.innerHTML = `
     <section class="detail-header">
@@ -281,23 +303,31 @@ function renderSummary() {
         ${metric("Stop on win", summary.stopOnWin)}
         ${metric("Strategy mode", summary.strategyMode)}
         ${metric("Attempt count", summary.attemptCount)}
+        ${chess ? metric("Moves played", chess.movesPlayed) : ""}
+        ${chess ? metric("Outcome", chess.outcome) : ""}
         ${metric("Source", summary.relativeSourcePath)}
       </div>
     </section>
 
-    <nav class="attempt-tabs">
-      ${attempts
-        .map(
-          (attempt, index) => `
-            <button class="attempt-tab${index === state.selectedAttemptIndex ? " active" : ""}" data-attempt-index="${index}" type="button">
-              Attempt ${escapeHtml(attempt.attemptNumber ?? index + 1)}: ${escapeHtml(attempt.outcome ?? "UNKNOWN")}
-            </button>
-          `
-        )
-        .join("")}
-    </nav>
+    ${
+      chess
+        ? renderChessSummary(chess)
+        : `
+          <nav class="attempt-tabs">
+            ${attempts
+              .map(
+                (attempt, index) => `
+                  <button class="attempt-tab${index === state.selectedAttemptIndex ? " active" : ""}" data-attempt-index="${index}" type="button">
+                    Attempt ${escapeHtml(attempt.attemptNumber ?? index + 1)}: ${escapeHtml(attempt.outcome ?? "UNKNOWN")}
+                  </button>
+                `
+              )
+              .join("")}
+          </nav>
 
-    <div id="attempt-detail">${selectedAttempt ? renderAttempt(selectedAttempt) : "<div class=\"status\">No attempts in this summary.</div>"}</div>
+          <div id="attempt-detail">${selectedAttempt ? renderAttempt(selectedAttempt) : "<div class=\"status\">No attempts in this summary.</div>"}</div>
+        `
+    }
   `;
 
   els.runDetail.querySelectorAll("[data-attempt-index]").forEach((button) => {
@@ -306,6 +336,64 @@ function renderSummary() {
       renderSummary();
     });
   });
+}
+
+function renderChessSummary(chess) {
+  return `
+    <section class="panel">
+      <h3>Chess.com Summary</h3>
+      <div class="grid">
+        ${metric("Opponent", chess.opponent)}
+        ${metric("Max moves", chess.maxMoves)}
+        ${metric("Moves played", chess.movesPlayed)}
+        ${metric("Current FEN", chess.currentFen)}
+        ${metric("Side to move", chess.sideToMove)}
+        ${metric("Bot color", chess.botColor)}
+        ${metric("Last move", chess.lastMove)}
+        ${metric("Planned move", chess.plannedMove)}
+        ${metric("Legal move count", chess.legalMoveCount)}
+        ${metric("Move applied", chess.moveApplied)}
+        ${metric("Outcome", chess.outcome)}
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Move Timeline</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Move</th>
+              <th>Before FEN</th>
+              <th>After FEN</th>
+              <th>Reason</th>
+              <th>Applied</th>
+              <th>Screenshots</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(chess.moves ?? [])
+              .map((move) => {
+                const selected = move.selectedMove ?? {};
+                return `
+                  <tr>
+                    <td>${escapeHtml(move.moveNumber)}</td>
+                    <td>${escapeHtml(selected.lan)}</td>
+                    <td>${escapeHtml(move.beforeFen)}</td>
+                    <td>${escapeHtml(move.afterFen)}</td>
+                    <td>${escapeHtml(selected.reason)}</td>
+                    <td>${escapeHtml(move.moveApplied)}</td>
+                    <td>${escapeHtml([move.beforeScreenshotPath, move.afterScreenshotPath].filter(Boolean).join("\\n"))}</td>
+                  </tr>
+                `;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
 }
 
 function renderAttempt(attempt) {
