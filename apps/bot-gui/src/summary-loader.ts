@@ -31,7 +31,9 @@ export interface NormalizedChessSummary {
   readonly movesPlayed: number;
   readonly outcome: string | null;
   readonly stopReason: string | null;
+  readonly drawReason: string | null;
   readonly finalLoopState: string | null;
+  readonly engineEnabled: boolean | null;
   readonly turnTimeoutMs: number | null;
   readonly pollMs: number | null;
   readonly currentFen: string | null;
@@ -52,11 +54,18 @@ export interface NormalizedChessSummary {
   readonly selectedMoveUci: string | null;
   readonly selectedMoveScore: number | null;
   readonly selectedMoveReason: string | null;
+  readonly searchDepth: number | null;
+  readonly evaluatedNodeCount: number | null;
   readonly selectedMovePromotion: string | null;
   readonly promotionPiece: string | null;
   readonly promotionChoiceApplied: boolean | null;
   readonly legalMoveCount: number | null;
   readonly materialBalance: number | null;
+  readonly materialBalanceAfter: number | null;
+  readonly repetitionCount: number | null;
+  readonly givesCheck: boolean | null;
+  readonly givesCheckmate: boolean | null;
+  readonly avoidsStalemate: boolean | null;
   readonly inCheck: boolean | null;
   readonly checkEvasionRequired: boolean | null;
   readonly checkEvasionMoveType: string | null;
@@ -254,7 +263,9 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     movesPlayed: numberAt(summary, "movesPlayed") ?? moves.length,
     outcome: stringAt(summary, "outcome") ?? stringAt(latestMove, "outcome"),
     stopReason: stringAt(summary, "stopReason"),
+    drawReason: stringAt(summary, "drawReason"),
     finalLoopState: stringAt(summary, "finalLoopState") ?? stringAt(latestObservation, "loopState"),
+    engineEnabled: booleanAt(summary, "engineEnabled"),
     turnTimeoutMs: numberAt(summary, "turnTimeoutMs"),
     pollMs: numberAt(summary, "pollMs"),
     currentFen: stringAt(latestObservation, "fen") ?? stringAt(latestMove, "afterFen") ?? stringAt(latestMove, "beforeFen"),
@@ -275,11 +286,19 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     selectedMoveUci: stringAt(latestMove, "selectedMoveUci") ?? stringAt(selectedMove, "uci") ?? stringAt(selectedMove, "lan"),
     selectedMoveScore: numberAt(latestMove, "selectedMoveScore") ?? numberAt(selectedMove, "score"),
     selectedMoveReason: stringAt(latestMove, "selectedMoveReason") ?? stringAt(selectedMove, "reason"),
+    searchDepth: numberAt(latestMove, "searchDepth") ?? numberAt(selectedMove, "searchDepth") ?? numberAt(summary, "searchDepth"),
+    evaluatedNodeCount:
+      numberAt(latestMove, "evaluatedNodeCount") ?? numberAt(selectedMove, "evaluatedNodeCount") ?? numberAt(summary, "evaluatedNodeCount"),
     selectedMovePromotion: stringAt(latestMove, "selectedMovePromotion") ?? stringAt(selectedMove, "promotion"),
     promotionPiece: stringAt(latestMove, "promotionPiece") ?? stringAt(selectedMove, "promotionPiece"),
     promotionChoiceApplied: booleanAt(latestMove, "promotionChoiceApplied"),
     legalMoveCount: numberAt(selectedMove, "legalMoveCount"),
     materialBalance: numberAt(latestMove, "materialBalanceBefore") ?? numberAt(selectedMove, "materialBalanceBefore"),
+    materialBalanceAfter: numberAt(latestMove, "materialBalanceAfter") ?? numberAt(selectedMove, "materialBalanceAfter"),
+    repetitionCount: numberAt(latestMove, "repetitionCount") ?? numberAt(selectedMove, "repetitionCount"),
+    givesCheck: booleanAt(latestMove, "givesCheck") ?? booleanAt(selectedMove, "givesCheck"),
+    givesCheckmate: booleanAt(latestMove, "givesCheckmate") ?? booleanAt(selectedMove, "givesCheckmate"),
+    avoidsStalemate: booleanAt(latestMove, "avoidsStalemate") ?? booleanAt(selectedMove, "avoidsStalemate"),
     inCheck: booleanAt(latestMove, "inCheck") ?? booleanAt(selectedMove, "inCheck"),
     checkEvasionRequired: booleanAt(latestMove, "checkEvasionRequired") ?? booleanAt(selectedMove, "checkEvasionRequired"),
     checkEvasionMoveType: stringAt(latestMove, "checkEvasionMoveType") ?? stringAt(selectedMove, "checkEvasionMoveType"),

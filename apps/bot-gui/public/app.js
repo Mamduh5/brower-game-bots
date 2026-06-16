@@ -241,12 +241,15 @@ function renderLive(live) {
             ${metric("Promotion", promotionText(chess))}
             ${metric("Move score", chess.selectedMoveScore)}
             ${metric("Move reason", firstText([chess.selectedMoveReason, chess.moveReason]))}
+            ${metric("Search", searchText(chess))}
             ${metric("Legal move count", chess.legalMoveCount)}
-            ${metric("Material balance", chess.materialBalance)}
+            ${metric("Material balance", materialText(chess))}
+            ${metric("Repetition", repetitionText(chess))}
             ${metric("Check / mate", checkText(chess))}
             ${metric("Check evasion", checkEvasionText(chess))}
             ${metric("Move applied", chess.moveApplied)}
             ${metric("Chess outcome", chess.outcome)}
+            ${metric("Draw reason", chess.drawReason)}
             ${metric("Stop reason", chess.stopReason)}
           `
           : ""
@@ -391,12 +394,15 @@ function renderChessSummary(chess) {
         ${metric("Promotion", promotionText(chess))}
         ${metric("Move score", chess.selectedMoveScore)}
         ${metric("Move reason", chess.selectedMoveReason)}
+        ${metric("Search", searchText(chess))}
         ${metric("Legal move count", chess.legalMoveCount)}
-        ${metric("Material balance", chess.materialBalance)}
+        ${metric("Material balance", materialText(chess))}
+        ${metric("Repetition", repetitionText(chess))}
         ${metric("Check / mate", checkText(chess))}
         ${metric("Check evasion", checkEvasionText(chess))}
         ${metric("Move applied", chess.moveApplied)}
         ${metric("Outcome", chess.outcome)}
+        ${metric("Draw reason", chess.drawReason)}
         ${metric("Stop reason", chess.stopReason)}
       </div>
     </section>
@@ -413,6 +419,9 @@ function renderChessSummary(chess) {
               <th>After FEN</th>
               <th>Score</th>
               <th>Reason</th>
+              <th>Search</th>
+              <th>Material</th>
+              <th>Repetition</th>
               <th>Promotion</th>
               <th>Check evasion</th>
               <th>Top Candidates</th>
@@ -432,6 +441,9 @@ function renderChessSummary(chess) {
                     <td>${escapeHtml(move.afterFen)}</td>
                     <td>${escapeHtml(move.selectedMoveScore ?? selected.score)}</td>
                     <td>${escapeHtml(firstText([move.selectedMoveReason, selected.reason]))}</td>
+                    <td>${escapeHtml(searchText(move.selectedMove ? selected : move))}</td>
+                    <td>${escapeHtml(materialText(move.selectedMove ? { ...selected, materialBalance: move.materialBalanceBefore } : move))}</td>
+                    <td>${escapeHtml(repetitionText(move.selectedMove ? selected : move))}</td>
                     <td>${escapeHtml(promotionText(move))}</td>
                     <td>${escapeHtml(checkEvasionText(move))}</td>
                     <td>${renderCandidateList(move.topCandidateMoves ?? selected.topCandidates ?? [])}</td>
@@ -515,6 +527,8 @@ function renderCandidateTable(candidates) {
             <th>SAN</th>
             <th>Score</th>
             <th>Reason</th>
+            <th>Search</th>
+            <th>Repetition</th>
           </tr>
         </thead>
         <tbody>
@@ -526,6 +540,8 @@ function renderCandidateTable(candidates) {
                   <td>${escapeHtml(candidate.san)}</td>
                   <td>${escapeHtml(candidate.score)}</td>
                   <td>${escapeHtml(candidate.reason)}</td>
+                  <td>${escapeHtml(searchText(candidate))}</td>
+                  <td>${escapeHtml(repetitionText(candidate))}</td>
                 </tr>
               `
             )
@@ -769,7 +785,7 @@ function checkText(chess) {
   if (!chess) {
     return null;
   }
-  return `check ${chess.inCheck ?? "n/a"} / mate ${chess.isCheckmate ?? "n/a"} / stalemate ${chess.isStalemate ?? "n/a"}`;
+  return `check ${chess.inCheck ?? "n/a"} / gives ${chess.givesCheck ?? "n/a"} / mate ${chess.isCheckmate ?? "n/a"} / gives mate ${chess.givesCheckmate ?? "n/a"} / stale ${chess.isStalemate ?? "n/a"} / avoids stale ${chess.avoidsStalemate ?? "n/a"}`;
 }
 
 function checkEvasionText(chess) {
@@ -788,6 +804,38 @@ function promotionText(chess) {
     return null;
   }
   return `${piece ?? "none"} / UI ${chess.promotionUiDetected ?? "n/a"} / choice ${chess.promotionChoiceApplied ?? "n/a"}`;
+}
+
+function searchText(chess) {
+  if (!chess) {
+    return null;
+  }
+  const depth = chess.searchDepth ?? "n/a";
+  const nodes = chess.evaluatedNodeCount ?? "n/a";
+  return `depth ${depth} / nodes ${nodes}`;
+}
+
+function materialText(chess) {
+  if (!chess) {
+    return null;
+  }
+  const before = chess.materialBalance ?? chess.materialBalanceBefore;
+  const after = chess.materialBalanceAfter;
+  if (after === null || after === undefined) {
+    return before ?? null;
+  }
+  return `${before ?? "n/a"} -> ${after}`;
+}
+
+function repetitionText(chess) {
+  if (!chess) {
+    return null;
+  }
+  const count = chess.repetitionCount;
+  if (count === null || count === undefined) {
+    return null;
+  }
+  return count >= 3 ? `${count} / warning` : String(count);
 }
 
 function actionText(action) {
