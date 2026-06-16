@@ -87,7 +87,9 @@ async function main(): Promise<void> {
       await runPlayerChessCom(container, {
         opponent: parseChessOpponentFlag(),
         maxMoves: parseNumberFlag("--max-moves", 80),
-        headless: parseHeadlessFlag()
+        headless: parseHeadlessFlag(),
+        turnTimeoutMs: parseNumberFlag("--turn-timeout-ms", 30000),
+        pollMs: parseNumberFlag("--poll-ms", 750)
       });
       break;
     case "run-tester":
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
       process.stdout.write(
         "Usage: game-bots <run-player|run-player-cat-and-dog|run-player-chess-com|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n" +
           "Cat-and-Dog player flags: --difficulty=easy|normal|hard|impossible --max-attempts=3 --strategy-mode=baseline|explore --stop-on-win=true|false --headless=true|false --visible\n" +
-          "Chess.com player flags: --opponent=computer --max-moves=80 --headless=true|false --visible\n"
+          "Chess.com player flags: --opponent=computer --max-moves=80 --turn-timeout-ms=30000 --poll-ms=750 --headless=true|false --visible\n"
       );
   }
 }

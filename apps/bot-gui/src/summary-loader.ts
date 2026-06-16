@@ -30,9 +30,18 @@ export interface NormalizedChessSummary {
   readonly maxMoves: number | null;
   readonly movesPlayed: number;
   readonly outcome: string | null;
+  readonly stopReason: string | null;
+  readonly finalLoopState: string | null;
+  readonly turnTimeoutMs: number | null;
+  readonly pollMs: number | null;
   readonly currentFen: string | null;
   readonly sideToMove: string | null;
   readonly botColor: string | null;
+  readonly botTurnStatus: string | null;
+  readonly botTurnConfidence: string | null;
+  readonly turnReason: string | null;
+  readonly boardChangedSinceLastObservation: boolean | null;
+  readonly elapsedWaitMs: number | null;
   readonly lastMove: string | null;
   readonly plannedMove: string | null;
   readonly selectedMoveSan: string | null;
@@ -47,6 +56,7 @@ export interface NormalizedChessSummary {
   readonly topCandidateMoves: readonly JsonRecord[];
   readonly moveApplied: boolean | null;
   readonly moves: readonly JsonRecord[];
+  readonly observations: readonly JsonRecord[];
 }
 
 export interface NormalizedAttempt {
@@ -222,19 +232,30 @@ export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoo
 function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
   const summary = recordAt(raw, "summary");
   const moves = arrayAt(raw, "moves").map(asRecord);
+  const observations = arrayAt(raw, "observations").map(asRecord);
   if (moves.length === 0 && stringAt(summary, "gameId") !== "chess-com-web") {
     return null;
   }
   const latestMove = moves.at(-1) ?? {};
+  const latestObservation = observations.at(-1) ?? {};
   const selectedMove = recordAt(latestMove, "selectedMove");
   return {
     opponent: stringAt(summary, "opponent"),
     maxMoves: numberAt(summary, "maxMoves"),
     movesPlayed: numberAt(summary, "movesPlayed") ?? moves.length,
     outcome: stringAt(summary, "outcome") ?? stringAt(latestMove, "outcome"),
-    currentFen: stringAt(latestMove, "afterFen") ?? stringAt(latestMove, "beforeFen"),
-    sideToMove: stringAt(latestMove, "sideToMove"),
+    stopReason: stringAt(summary, "stopReason"),
+    finalLoopState: stringAt(summary, "finalLoopState") ?? stringAt(latestObservation, "loopState"),
+    turnTimeoutMs: numberAt(summary, "turnTimeoutMs"),
+    pollMs: numberAt(summary, "pollMs"),
+    currentFen: stringAt(latestObservation, "fen") ?? stringAt(latestMove, "afterFen") ?? stringAt(latestMove, "beforeFen"),
+    sideToMove: stringAt(latestObservation, "sideToMove") ?? stringAt(latestMove, "sideToMove"),
     botColor: stringAt(latestMove, "botColor"),
+    botTurnStatus: stringAt(latestObservation, "botTurnStatus"),
+    botTurnConfidence: stringAt(latestObservation, "botTurnConfidence"),
+    turnReason: stringAt(latestObservation, "reason"),
+    boardChangedSinceLastObservation: booleanAt(latestObservation, "boardChangedSinceLastObservation"),
+    elapsedWaitMs: numberAt(latestObservation, "elapsedWaitMs"),
     lastMove: stringAt(latestMove, "lastMove"),
     plannedMove: stringAt(selectedMove, "lan"),
     selectedMoveSan: stringAt(latestMove, "selectedMoveSan") ?? stringAt(selectedMove, "san"),
@@ -248,7 +269,8 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     isStalemate: booleanAt(latestMove, "isStalemate") ?? booleanAt(selectedMove, "isStalemate"),
     topCandidateMoves: arrayAt(latestMove, "topCandidateMoves").map(asRecord),
     moveApplied: booleanAt(latestMove, "moveApplied"),
-    moves
+    moves,
+    observations
   };
 }
 

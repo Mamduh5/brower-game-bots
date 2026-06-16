@@ -4,10 +4,14 @@ import { randomUUID } from "node:crypto";
 import type { ArtifactRef, JsonObject, JsonValue, RunEvent, RunRecord, RunReport, RunRequest } from "@game-bots/contracts";
 import {
   chooseBeginnerChessMove,
+  inferChessTurnState,
   type ChessBoardState,
+  type ChessBotTurnStatus,
   type ChessColor,
   type ChessMoveChoice,
-  type ChessPiece
+  type ChessPiece,
+  type ChessTurnConfidence,
+  type ChessTurnState
 } from "@game-bots/agent-player";
 import { PlaywrightEnvironmentPort } from "@game-bots/environment-playwright";
 import type { GameSnapshot } from "@game-bots/game-sdk";
@@ -26,6 +30,39 @@ export interface ChessComPlayerRunOptions {
   readonly opponent?: "computer";
   readonly maxMoves?: number;
   readonly headless?: boolean;
+  readonly turnTimeoutMs?: number;
+  readonly pollMs?: number;
+}
+
+type ChessComLoopState =
+  | "bootstrapping"
+  | "choosing-computer-mode"
+  | "waiting-for-board"
+  | "bot-turn-ready"
+  | "executing-move"
+  | "waiting-for-move-apply"
+  | "waiting-for-opponent"
+  | "waiting-for-bot-turn"
+  | "game-ended"
+  | "max-moves-reached"
+  | "stopped-uncertain"
+  | "failed";
+
+export interface ChessComObservationRecord {
+  readonly timestamp: string;
+  readonly moveNumber: number;
+  readonly loopState: ChessComLoopState;
+  readonly fen: string | null;
+  readonly boardHash: string | null;
+  readonly sideToMove: ChessColor | null;
+  readonly botTurnStatus: ChessBotTurnStatus;
+  readonly botTurnConfidence: ChessTurnConfidence;
+  readonly reason: string;
+  readonly lastMove: string | null;
+  readonly moveListLength: number | null;
+  readonly boardChangedSinceLastObservation: boolean;
+  readonly elapsedWaitMs: number;
+  readonly screenshotPath: string | null;
 }
 
 export interface ChessComMoveRecord {
@@ -64,6 +101,8 @@ export interface ChessComRunResult {
 }
 
 const DEFAULT_MAX_MOVES = 80;
+const DEFAULT_TURN_TIMEOUT_MS = 30_000;
+const DEFAULT_POLL_MS = 750;
 
 export async function runPlayerChessCom(
   container: AppContainer,
@@ -76,6 +115,8 @@ export async function runPlayerChessCom(
 
   const maxMoves = Math.max(1, Math.min(120, options.maxMoves ?? DEFAULT_MAX_MOVES));
   const headless = options.headless ?? true;
+  const turnTimeoutMs = Math.max(2_000, Math.min(120_000, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS));
+  const pollMs = Math.max(250, Math.min(5_000, options.pollMs ?? DEFAULT_POLL_MS));
   const plugin = resolveGamePlugin("chess-com-web");
   const environmentPort = new PlaywrightEnvironmentPort({
     artifactStore: container.artifactStore
@@ -90,6 +131,8 @@ export async function runPlayerChessCom(
       opponent,
       maxMoves,
       headless,
+      turnTimeoutMs,
+      pollMs,
       safety: "computer-only"
     }
   };
@@ -105,8 +148,13 @@ export async function runPlayerChessCom(
   const environmentSession = await environmentPort.openSession();
   const capturedArtifacts: ArtifactRef[] = [];
   const moves: ChessComMoveRecord[] = [];
+  const observations: ChessComObservationRecord[] = [];
   let report: RunReport | null = null;
   let recentEvents: readonly RunEvent[] = [];
+  let lastBotMoveFen: string | null = null;
+  let lastObservationFen: string | null = null;
+  let stopReason: string | null = null;
+  let finalLoopState: ChessComLoopState = "bootstrapping";
 
   const appendTrackedEvent = async (event: RunEvent): Promise<void> => {
     await container.runEngine.appendEvent(event);
@@ -138,7 +186,135 @@ export async function runPlayerChessCom(
     return artifact;
   };
 
-  logger.info({ opponent, maxMoves, headless }, "Starting chess-com player run.");
+  const observeAndRecord = async (
+    moveNumber: number,
+    loopState: ChessComLoopState,
+    waitStartedAt: number,
+    observationKind = "chess.turn.observed"
+  ): Promise<{
+    readonly snapshot: GameSnapshot;
+    readonly board: ChessBoardState;
+    readonly turn: ChessTurnState;
+    readonly record: ChessComObservationRecord;
+  }> => {
+    finalLoopState = loopState;
+    const frame = await environmentSession.observe({
+      modes: ["dom", "screenshot", "console"],
+      runtimeProbe: CHESS_COM_BOARD_RUNTIME_PROBE
+    });
+    const snapshot = await session.translate(frame);
+    const board = applyTurnInference(boardStateFromSnapshot(snapshot), lastBotMoveFen, lastObservationFen);
+    const outcome = readString(snapshot.semanticState.outcome);
+    const turn = inferChessTurnState({
+      boardDetected: snapshot.semanticState.boardDetected === true,
+      fen: board.fen,
+      sideToMove: board.sideToMove,
+      botColor: board.botColor,
+      lastBotMoveFen,
+      previousObservationFen: lastObservationFen,
+      outcome
+    });
+    const record: ChessComObservationRecord = {
+      timestamp: clock.now().toISOString(),
+      moveNumber,
+      loopState,
+      fen: board.fen,
+      boardHash: turn.boardHash,
+      sideToMove: board.sideToMove,
+      botTurnStatus: turn.botTurnStatus,
+      botTurnConfidence: turn.confidence,
+      reason: turn.reason,
+      lastMove: readString(snapshot.semanticState.lastMove),
+      moveListLength: readNumber(snapshot.semanticState.moveListLength),
+      boardChangedSinceLastObservation: turn.boardChangedSinceLastObservation,
+      elapsedWaitMs: Date.now() - waitStartedAt,
+      screenshotPath: null
+    };
+    observations.push(record);
+    if (board.fen) {
+      lastObservationFen = board.fen;
+    }
+    await appendBoardEvent({
+      appendTrackedEvent,
+      nextSequence: () => container.runEngine.nextSequence(run.runId),
+      run,
+      clock,
+      moveNumber,
+      observationKind,
+      snapshot,
+      summary: `Chess.com ${loopState} observation for move ${moveNumber}.`,
+      turn: record
+    });
+    return { snapshot, board, turn, record };
+  };
+
+  const waitForBotTurn = async (moveNumber: number): Promise<{
+    readonly snapshot: GameSnapshot;
+    readonly board: ChessBoardState;
+    readonly turn: ChessTurnState;
+    readonly record: ChessComObservationRecord;
+  } | null> => {
+    const waitStartedAt = Date.now();
+    while (Date.now() - waitStartedAt <= turnTimeoutMs) {
+      const state = await observeAndRecord(
+        moveNumber,
+        lastBotMoveFen ? "waiting-for-bot-turn" : "waiting-for-board",
+        waitStartedAt
+      );
+      const safetyReason = readString(state.snapshot.semanticState.safetyReason);
+      if (state.snapshot.semanticState.unsafeHumanMatchmaking === true) {
+        throw new Error(`Refusing to continue: ${safetyReason ?? "Chess.com human matchmaking risk detected."}`);
+      }
+      if (state.snapshot.semanticState.outcome) {
+        finalLoopState = "game-ended";
+        stopReason = `game-ended:${readString(state.snapshot.semanticState.outcome) ?? "unknown"}`;
+        return null;
+      }
+      if (state.turn.botTurnStatus === "bot-turn") {
+        finalLoopState = "bot-turn-ready";
+        return state;
+      }
+      await environmentSession.execute({ kind: "wait", durationMs: pollMs });
+    }
+
+    finalLoopState = "stopped-uncertain";
+    stopReason = "turn-uncertain-timeout";
+    const timeoutScreenshot = await captureArtifact(moveNumber, "turn-uncertain-timeout", "screenshot").catch(() => null);
+    if (timeoutScreenshot && observations.length > 0) {
+      const latest = observations[observations.length - 1];
+      if (latest) {
+        observations[observations.length - 1] = {
+          ...latest,
+          screenshotPath: timeoutScreenshot.relativePath
+        };
+      }
+    }
+    logger.info({ moveNumber, turnTimeoutMs }, "Stopped chess-com run because bot turn could not be proven.");
+    return null;
+  };
+
+  const waitForMoveApply = async (moveNumber: number, beforeFen: string | null): Promise<{
+    readonly snapshot: GameSnapshot;
+    readonly afterFen: string | null;
+  }> => {
+    const waitStartedAt = Date.now();
+    let latest: { readonly snapshot: GameSnapshot; readonly board: ChessBoardState } | null = null;
+    while (Date.now() - waitStartedAt <= Math.min(10_000, turnTimeoutMs)) {
+      const observed = await observeAndRecord(moveNumber, "waiting-for-move-apply", waitStartedAt, "chess.move.apply.observed");
+      latest = observed;
+      const afterFen = observed.board.fen;
+      if (afterFen && beforeFen && afterFen !== beforeFen) {
+        return { snapshot: observed.snapshot, afterFen };
+      }
+      await environmentSession.execute({ kind: "wait", durationMs: pollMs });
+    }
+    return {
+      snapshot: latest?.snapshot ?? (await observeAndRecord(moveNumber, "waiting-for-move-apply", waitStartedAt, "chess.move.apply.observed")).snapshot,
+      afterFen: latest?.board.fen ?? null
+    };
+  };
+
+  logger.info({ opponent, maxMoves, headless, turnTimeoutMs, pollMs }, "Starting chess-com player run.");
 
   try {
     run = await container.runEngine.transitionPhase(run, "preparing");
@@ -157,41 +333,22 @@ export async function runPlayerChessCom(
     run = await container.runEngine.transitionPhase(run, "executing");
 
     for (let moveNumber = 1; moveNumber <= maxMoves; moveNumber += 1) {
-      const beforeFrame = await environmentSession.observe({
-        modes: ["dom", "screenshot", "console"],
-        runtimeProbe: CHESS_COM_BOARD_RUNTIME_PROBE
-      });
-      const beforeSnapshot = await session.translate(beforeFrame);
-      await appendBoardEvent({
-        appendTrackedEvent,
-        nextSequence: () => container.runEngine.nextSequence(run.runId),
-        run,
-        clock,
-        moveNumber,
-        observationKind: "chess.board",
-        snapshot: beforeSnapshot,
-        summary: `Chess.com board observed before move ${moveNumber}.`
-      });
-
-      const safetyReason = readString(beforeSnapshot.semanticState.safetyReason);
-      if (beforeSnapshot.semanticState.unsafeHumanMatchmaking === true) {
-        throw new Error(`Refusing to continue: ${safetyReason ?? "Chess.com human matchmaking risk detected."}`);
-      }
-      if (beforeSnapshot.semanticState.boardDetected !== true) {
-        if (moveNumber === 1) {
-          await environmentSession.execute({ kind: "wait", durationMs: 2500 });
-          continue;
-        }
+      const readyState = await waitForBotTurn(moveNumber);
+      if (!readyState) {
         break;
       }
 
-      const board = inferComputerTurnIfNeeded(boardStateFromSnapshot(beforeSnapshot), moves);
+      const beforeSnapshot = readyState.snapshot;
+      const board = readyState.board;
       const selectedMove = chooseBeginnerChessMove(board);
       if (!selectedMove) {
+        finalLoopState = "stopped-uncertain";
+        stopReason = "no-legal-move-for-proven-bot-turn";
         logger.info({ moveNumber, fen: board.fen }, "No conservative Chess.com move available; stopping safely.");
         break;
       }
 
+      finalLoopState = "executing-move";
       const bounds = asRecord(beforeSnapshot.semanticState.boardBounds);
       const orientation = readString(beforeSnapshot.semanticState.orientation) === "black" ? "black" : "white";
       const fromPoint = squareCenter(selectedMove.from, boundsFromRecord(bounds), orientation);
@@ -228,14 +385,11 @@ export async function runPlayerChessCom(
         }
       });
 
-      await environmentSession.execute({ kind: "wait", durationMs: 2200 });
-      const afterFrame = await environmentSession.observe({
-        modes: ["dom", "screenshot", "console"],
-        runtimeProbe: CHESS_COM_BOARD_RUNTIME_PROBE
-      });
-      const afterSnapshot = await session.translate(afterFrame);
+      finalLoopState = "waiting-for-move-apply";
+      const applied = await waitForMoveApply(moveNumber, board.fen);
+      const afterSnapshot = applied.snapshot;
       const afterScreenshot = await captureArtifact(moveNumber, "after-move", "screenshot");
-      const afterFen = readString(afterSnapshot.semanticState.fen);
+      const afterFen = applied.afterFen ?? readString(afterSnapshot.semanticState.fen);
       const moveApplied = Boolean(afterFen && board.fen && afterFen !== board.fen);
       await appendBoardEvent({
         appendTrackedEvent,
@@ -282,7 +436,20 @@ export async function runPlayerChessCom(
       logger.info({ moveNumber, selectedMove, beforeFen: board.fen, afterFen: moveRecord.afterFen, moveApplied }, "Played chess-com move.");
 
       if (moveRecord.outcome) {
+        finalLoopState = "game-ended";
+        stopReason = `game-ended:${moveRecord.outcome}`;
         break;
+      }
+      if (!moveApplied) {
+        finalLoopState = "stopped-uncertain";
+        stopReason = "move-apply-timeout";
+        break;
+      }
+      lastBotMoveFen = afterFen;
+      finalLoopState = "waiting-for-opponent";
+      if (moveNumber === maxMoves) {
+        finalLoopState = "max-moves-reached";
+        stopReason = "max-moves-reached";
       }
     }
 
@@ -315,7 +482,23 @@ export async function runPlayerChessCom(
         relativePath: "reports/02-chess-com-player-summary.json",
         contentType: "application/json"
       },
-      Buffer.from(JSON.stringify(buildChessSummaryJson({ run, report, moves, artifacts: capturedArtifacts, options: { opponent, maxMoves, headless } }), null, 2), "utf8")
+      Buffer.from(
+        JSON.stringify(
+          buildChessSummaryJson({
+            run,
+            report,
+            moves,
+            observations,
+            artifacts: capturedArtifacts,
+            stopReason,
+            finalLoopState,
+            options: { opponent, maxMoves, headless, turnTimeoutMs, pollMs }
+          }),
+          null,
+          2
+        ),
+        "utf8"
+      )
     );
     await storeArtifactEvent(summaryArtifact);
 
@@ -379,19 +562,20 @@ function boardStateFromSnapshot(snapshot: GameSnapshot): ChessBoardState {
   };
 }
 
-function inferComputerTurnIfNeeded(board: ChessBoardState, moves: readonly ChessComMoveRecord[]): ChessBoardState {
-  if (board.sideToMove || !board.fen) {
-    return board;
-  }
-  let latestAppliedMove: ChessComMoveRecord | null = null;
-  for (let index = moves.length - 1; index >= 0; index -= 1) {
-    const move = moves[index];
-    if (move?.moveApplied && move.afterFen) {
-      latestAppliedMove = move;
-      break;
-    }
-  }
-  if (!latestAppliedMove?.afterFen || latestAppliedMove.afterFen === board.fen) {
+function applyTurnInference(
+  board: ChessBoardState,
+  lastBotMoveFen: string | null,
+  previousObservationFen: string | null
+): ChessBoardState {
+  const turn = inferChessTurnState({
+    boardDetected: Boolean(board.fen),
+    fen: board.fen,
+    sideToMove: board.sideToMove,
+    botColor: board.botColor,
+    lastBotMoveFen,
+    previousObservationFen
+  });
+  if (board.sideToMove || !board.fen || turn.botTurnStatus !== "bot-turn") {
     return board;
   }
   return {
@@ -414,7 +598,10 @@ function buildChessSummaryJson(input: {
   readonly run: RunRecord;
   readonly report: RunReport;
   readonly moves: readonly ChessComMoveRecord[];
+  readonly observations: readonly ChessComObservationRecord[];
   readonly artifacts: readonly ArtifactRef[];
+  readonly stopReason: string | null;
+  readonly finalLoopState: ChessComLoopState;
   readonly options: Required<ChessComPlayerRunOptions>;
 }): JsonObject {
   return {
@@ -425,11 +612,16 @@ function buildChessSummaryJson(input: {
       opponent: input.options.opponent,
       maxMoves: input.options.maxMoves,
       headless: input.options.headless,
+      turnTimeoutMs: input.options.turnTimeoutMs,
+      pollMs: input.options.pollMs,
       movesPlayed: input.moves.length,
       outcome: input.moves.at(-1)?.outcome ?? null,
+      stopReason: input.stopReason,
+      finalLoopState: input.finalLoopState,
       safety: "computer-only"
     },
     moves: input.moves as unknown as JsonValue,
+    observations: input.observations as unknown as JsonValue,
     artifacts: input.artifacts.map((artifact) => ({
       artifactId: artifact.artifactId,
       kind: artifact.kind,
@@ -449,6 +641,7 @@ async function appendBoardEvent(input: {
   readonly observationKind: string;
   readonly snapshot: GameSnapshot;
   readonly summary: string;
+  readonly turn?: ChessComObservationRecord;
 }): Promise<void> {
   await input.appendTrackedEvent({
     eventId: randomUUID(),
@@ -460,7 +653,8 @@ async function appendBoardEvent(input: {
     summary: input.summary,
     payload: {
       moveNumber: input.moveNumber,
-      gameSemanticState: toJsonValue(input.snapshot.semanticState)
+      gameSemanticState: toJsonValue(input.snapshot.semanticState),
+      ...(input.turn ? { chessTurn: toJsonValue(input.turn) } : {})
     }
   });
 }
@@ -475,6 +669,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function boundsFromRecord(record: Record<string, unknown>): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {

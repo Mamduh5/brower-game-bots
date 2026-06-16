@@ -224,9 +224,16 @@ function renderLive(live) {
         live.settings?.gameId === "chess-com-web"
           ? `
             ${metric("Board FEN", chess.currentFen ?? chess.fen)}
+            ${metric("Loop state", firstText([chess.finalLoopState, chess.loopState]))}
+            ${metric("Turn status", chess.botTurnStatus)}
+            ${metric("Turn confidence", chess.botTurnConfidence)}
+            ${metric("Waiting reason", chess.turnReason)}
+            ${metric("Board changed", chess.boardChangedSinceLastObservation)}
+            ${metric("Elapsed wait", chess.elapsedWaitMs === null || chess.elapsedWaitMs === undefined ? null : `${chess.elapsedWaitMs} ms`)}
             ${metric("Side to move", chess.sideToMove)}
             ${metric("Bot color", chess.botColor)}
             ${metric("Last move", chess.lastMove)}
+            ${metric("Move list length", chess.moveListLength)}
             ${metric("Planned move", chess.plannedMove)}
             ${metric("Move SAN", chess.selectedMoveSan)}
             ${metric("Move score", chess.selectedMoveScore)}
@@ -236,6 +243,7 @@ function renderLive(live) {
             ${metric("Check / mate", checkText(chess))}
             ${metric("Move applied", chess.moveApplied)}
             ${metric("Chess outcome", chess.outcome)}
+            ${metric("Stop reason", chess.stopReason)}
           `
           : ""
       }
@@ -362,6 +370,12 @@ function renderChessSummary(chess) {
         ${metric("Opponent", chess.opponent)}
         ${metric("Max moves", chess.maxMoves)}
         ${metric("Moves played", chess.movesPlayed)}
+        ${metric("Loop state", chess.finalLoopState)}
+        ${metric("Turn status", chess.botTurnStatus)}
+        ${metric("Turn confidence", chess.botTurnConfidence)}
+        ${metric("Turn reason", chess.turnReason)}
+        ${metric("Board changed", chess.boardChangedSinceLastObservation)}
+        ${metric("Elapsed wait", chess.elapsedWaitMs === null || chess.elapsedWaitMs === undefined ? null : `${chess.elapsedWaitMs} ms`)}
         ${metric("Current FEN", chess.currentFen)}
         ${metric("Side to move", chess.sideToMove)}
         ${metric("Bot color", chess.botColor)}
@@ -375,6 +389,7 @@ function renderChessSummary(chess) {
         ${metric("Check / mate", checkText(chess))}
         ${metric("Move applied", chess.moveApplied)}
         ${metric("Outcome", chess.outcome)}
+        ${metric("Stop reason", chess.stopReason)}
       </div>
     </section>
 
@@ -418,6 +433,54 @@ function renderChessSummary(chess) {
         </table>
       </div>
     </section>
+
+    <section class="panel">
+      <h3>Turn Observations</h3>
+      ${renderTurnObservationTable(chess.observations ?? [])}
+    </section>
+  `;
+}
+
+function renderTurnObservationTable(observations) {
+  if (!Array.isArray(observations) || observations.length === 0) {
+    return "<div class=\"status\">No turn observation telemetry recorded.</div>";
+  }
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>State</th>
+            <th>Move</th>
+            <th>Turn</th>
+            <th>Confidence</th>
+            <th>Reason</th>
+            <th>Changed</th>
+            <th>Wait</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${observations
+            .slice(-40)
+            .map(
+              (observation) => `
+                <tr>
+                  <td>${escapeHtml(observation.timestamp)}</td>
+                  <td>${escapeHtml(observation.loopState)}</td>
+                  <td>${escapeHtml(observation.moveNumber)}</td>
+                  <td>${escapeHtml(observation.botTurnStatus)}</td>
+                  <td>${escapeHtml(observation.botTurnConfidence)}</td>
+                  <td>${escapeHtml(observation.reason)}</td>
+                  <td>${escapeHtml(observation.boardChangedSinceLastObservation)}</td>
+                  <td>${escapeHtml(observation.elapsedWaitMs)} ms</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 

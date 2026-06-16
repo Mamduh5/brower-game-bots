@@ -375,6 +375,7 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
       }
       const semanticState = recordAt(payload, "gameSemanticState");
       if (observationKind?.startsWith("chess.")) {
+        const turn = recordAt(payload, "chessTurn");
         latestChess = {
           ...(latestChess ?? {}),
           fen: readString(semanticState, "fen"),
@@ -382,9 +383,16 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
           botColor: readString(semanticState, "botColor"),
           orientation: readString(semanticState, "orientation"),
           lastMove: readString(semanticState, "lastMove"),
+          moveListLength: numberAt(semanticState, "moveListLength"),
           outcome: readString(semanticState, "outcome"),
           boardDetected: booleanAt(semanticState, "boardDetected"),
-          unsafeHumanMatchmaking: booleanAt(semanticState, "unsafeHumanMatchmaking")
+          unsafeHumanMatchmaking: booleanAt(semanticState, "unsafeHumanMatchmaking"),
+          loopState: readString(turn, "loopState"),
+          botTurnStatus: readString(turn, "botTurnStatus"),
+          botTurnConfidence: readString(turn, "botTurnConfidence"),
+          turnReason: readString(turn, "reason"),
+          boardChangedSinceLastObservation: booleanAt(turn, "boardChangedSinceLastObservation"),
+          elapsedWaitMs: numberAt(turn, "elapsedWaitMs")
         };
       }
       const observation = buildObservationFromSemanticState(semanticState);

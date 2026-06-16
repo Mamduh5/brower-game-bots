@@ -26,6 +26,7 @@ export interface ChessComBoardState {
   readonly safetyReason: string | null;
   readonly outcome: string | null;
   readonly lastMove: string | null;
+  readonly moveListLength: number | null;
 }
 
 interface RuntimeProbePiece {
@@ -41,6 +42,7 @@ interface RuntimeProbePayload {
   readonly pieces?: unknown;
   readonly sideToMoveText?: unknown;
   readonly lastMoveText?: unknown;
+  readonly moveListLength?: unknown;
 }
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
@@ -74,7 +76,8 @@ return (() => {
   const uniquePieces = Array.from(new Map(pieces.map((piece) => [piece.className, piece])).values());
   const bodyText = document.body?.innerText ?? "";
   const turnNode = document.querySelector("[class*='clock-player-turn'], [class*='clock'][class*='turn']");
-  const lastMoveNode = document.querySelector(".move-list-row:last-child, [class*='move-list'] [class*='move']:last-child");
+  const moveNodes = Array.from(document.querySelectorAll(".move-list-row, [class*='move-list'] [class*='move']"));
+  const lastMoveNode = moveNodes[moveNodes.length - 1] ?? null;
   return {
     url: location.href,
     title: document.title,
@@ -88,7 +91,8 @@ return (() => {
     } : null,
     pieces: uniquePieces,
     sideToMoveText: turnNode?.textContent ?? "",
-    lastMoveText: lastMoveNode?.textContent ?? ""
+    lastMoveText: lastMoveNode?.textContent ?? "",
+    moveListLength: moveNodes.length
   };
 })();`
 } as const;
@@ -122,7 +126,8 @@ export function parseChessComBoard(input: {
     unsafeHumanMatchmaking: safety.unsafe,
     safetyReason: safety.reason,
     outcome: detectOutcome(bodyText),
-    lastMove: readString(probe.lastMoveText)
+    lastMove: readString(probe.lastMoveText),
+    moveListLength: readNumber(probe.moveListLength)
   };
 }
 
