@@ -96,7 +96,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       difficulty: body.difficulty === "normal" || body.difficulty === "hard" || body.difficulty === "impossible" ? body.difficulty : "easy",
       maxAttempts: typeof body.maxAttempts === "number" ? body.maxAttempts : 3,
       strategyMode: body.strategyMode === "explore" ? "explore" : "baseline",
-      stopOnWin: body.stopOnWin === true
+      stopOnWin: body.stopOnWin === true,
+      headless: body.headless !== false
     }));
     return;
   }

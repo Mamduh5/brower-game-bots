@@ -97,6 +97,7 @@ pnpm run dev -- run-player-cat-and-dog --max-attempts=15 --strategy-mode=explore
 pnpm run dev -- run-player-cat-and-dog --max-attempts=5 --stop-on-win=false
 
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false
+pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false --visible
 
 ## Cat-and-Dog Bot GUI
 
@@ -106,7 +107,7 @@ Start the local live runner and completed-run replay dashboard:
 pnpm run gui
 ```
 
-Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start the existing `run-player-cat-and-dog` CLI with selectable difficulty, max attempts, strategy mode, and stop-on-win. The dashboard also scans `artifacts/**/reports/02-player-attempt-summary.json` and can load a manually entered summary path such as:
+Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start the existing `run-player-cat-and-dog` CLI with selectable difficulty, max attempts, strategy mode, browser mode, and stop-on-win. Browser mode defaults to Headless; select Visible to launch a real Playwright-controlled browser window while the bot plays. The dashboard also scans `artifacts/**/reports/02-player-attempt-summary.json` and can load a manually entered summary path such as:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json

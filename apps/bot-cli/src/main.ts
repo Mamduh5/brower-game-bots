@@ -38,6 +38,18 @@ function parseBooleanFlag(flag: string, fallback: boolean): boolean {
   return fallback;
 }
 
+function hasFlag(flag: string): boolean {
+  return process.argv.includes(flag);
+}
+
+function parseHeadlessFlag(): boolean {
+  if (hasFlag("--visible")) {
+    return false;
+  }
+
+  return parseBooleanFlag("--headless", true);
+}
+
 function parseCatAndDogDifficultyFlag(): "easy" | "normal" | "hard" | "impossible" {
   const raw = parseStringFlag("--difficulty") ?? "easy";
   return CAT_AND_DOG_DIFFICULTIES.has(raw)
@@ -58,7 +70,8 @@ async function main(): Promise<void> {
         difficulty: parseCatAndDogDifficultyFlag(),
         maxAttempts: parseNumberFlag("--max-attempts", 3),
         stopOnWin: parseBooleanFlag("--stop-on-win", true),
-        strategyMode: parseStringFlag("--strategy-mode") === "explore" ? "explore" : "baseline"
+        strategyMode: parseStringFlag("--strategy-mode") === "explore" ? "explore" : "baseline",
+        headless: parseHeadlessFlag()
       });
       break;
     case "run-tester":
@@ -83,7 +96,8 @@ async function main(): Promise<void> {
       break;
     default:
       process.stdout.write(
-        "Usage: game-bots <run-player|run-player-cat-and-dog|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n"
+        "Usage: game-bots <run-player|run-player-cat-and-dog|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n" +
+          "Cat-and-Dog player flags: --difficulty=easy|normal|hard|impossible --max-attempts=3 --strategy-mode=baseline|explore --stop-on-win=true|false --headless=true|false --visible\n"
       );
   }
 }

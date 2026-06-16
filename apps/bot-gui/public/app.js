@@ -22,6 +22,7 @@ const els = {
   difficulty: document.querySelector("#run-difficulty"),
   maxAttempts: document.querySelector("#run-max-attempts"),
   strategyMode: document.querySelector("#run-strategy-mode"),
+  browserMode: document.querySelector("#run-browser-mode"),
   stopOnWin: document.querySelector("#run-stop-on-win"),
   livePanel: document.querySelector("#live-panel")
 };
@@ -82,22 +83,28 @@ async function startRun() {
     difficulty: els.difficulty.value,
     maxAttempts: Number(els.maxAttempts.value),
     strategyMode: els.strategyMode.value,
-    stopOnWin: els.stopOnWin.checked
+    stopOnWin: els.stopOnWin.checked,
+    headless: els.browserMode.value !== "visible"
   };
   els.startRun.disabled = true;
   renderLiveStatus("Starting bot process...");
-  const response = await fetch("/api/bot-runs/start", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-  const live = await readPayload(response);
-  state.liveRunId = live.botRunId;
-  state.live = live;
-  renderLive(live);
-  startLivePolling();
+  try {
+    const response = await fetch("/api/bot-runs/start", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const live = await readPayload(response);
+    state.liveRunId = live.botRunId;
+    state.live = live;
+    renderLive(live);
+    startLivePolling();
+  } catch (error) {
+    els.startRun.disabled = false;
+    renderLiveStatus(error instanceof Error ? error.message : String(error), "error");
+  }
 }
 
 async function stopRun() {
@@ -204,6 +211,7 @@ function renderLive(live) {
       ${metric("Difficulty", live.settings?.difficulty)}
       ${metric("Max attempts", live.settings?.maxAttempts)}
       ${metric("Strategy mode", live.settings?.strategyMode)}
+      ${metric("Browser mode", live.settings?.headless === false ? "Visible" : "Headless")}
       ${metric("Stop on win", live.settings?.stopOnWin)}
       ${metric("Latest action", actionText(latestAction))}
       ${metric("Selected weapon", observation.selectedWeapon)}
@@ -248,8 +256,8 @@ function renderLive(live) {
   `;
 }
 
-function renderLiveStatus(message) {
-  els.livePanel.innerHTML = `<div class="status">${escapeHtml(message)}</div>`;
+function renderLiveStatus(message, kind = "") {
+  els.livePanel.innerHTML = `<div class="status ${escapeHtml(kind)}">${escapeHtml(message)}</div>`;
 }
 
 function renderSummary() {

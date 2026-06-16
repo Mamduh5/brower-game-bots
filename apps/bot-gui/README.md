@@ -10,13 +10,23 @@ pnpm run gui
 
 Open the printed local URL, usually `http://127.0.0.1:5178`.
 
-Use the Live Runner panel to choose difficulty, max attempts, strategy mode, and stop-on-win, then click Start Run. The server starts the existing CLI command as a child process, equivalent to:
+Use the Live Runner panel to choose difficulty, max attempts, strategy mode, browser mode, and stop-on-win, then click Start Run. Browser mode defaults to Headless. Select Visible to open a real Playwright-controlled browser window on the desktop while the bot plays.
+
+The server starts the existing CLI command as a child process, equivalent to:
 
 ```powershell
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false
 ```
 
-The live panel polls the local API for the current process status, run id, run phase, latest action, shot plan, HP, wind, wall state, screenshot artifact, and growing shot history. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`.
+Visible mode adds the `--visible` alias:
+
+```powershell
+pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false --visible
+```
+
+You can also use `--headless=false` directly from the CLI.
+
+The live panel polls the local API for the current process status, run id, run phase, browser mode, latest action, shot plan, HP, wind, wall state, screenshot artifact, and growing shot history. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`, which also closes the visible browser launched by that process tree.
 
 The replay dashboard still automatically scans `artifacts/**/reports/02-player-attempt-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
 

@@ -180,6 +180,7 @@ export interface CatAndDogPlayerRunOptions {
   maxAttempts?: number;
   stopOnWin?: boolean;
   strategyMode?: CatAndDogStrategyMode;
+  headless?: boolean;
   maxStepsPerAttempt?: number;
 }
 
@@ -1594,6 +1595,7 @@ export async function runPlayerCatAndDog(
   const stopOnWin = options.stopOnWin ?? true;
   const strategyMode = options.strategyMode ?? "baseline";
   const difficulty = options.difficulty ?? "easy";
+  const headless = options.headless ?? true;
   const maxStepsPerAttempt = options.maxStepsPerAttempt ?? DEFAULT_MAX_STEPS_PER_ATTEMPT;
   const plugin = resolveGamePlugin("cat-and-dog-web");
   const brain = createPlayerBrain();
@@ -1612,6 +1614,7 @@ export async function runPlayerCatAndDog(
       stopOnWin,
       strategyMode,
       difficulty,
+      headless,
       maxStepsPerAttempt
     }
   };
@@ -1660,7 +1663,7 @@ export async function runPlayerCatAndDog(
     return artifact;
   };
 
-  logger.info({ maxAttempts, stopOnWin, strategyMode, difficulty }, "Starting cat-and-dog player run.");
+  logger.info({ maxAttempts, stopOnWin, strategyMode, difficulty, headless }, "Starting cat-and-dog player run.");
 
   try {
     await brain.initialize({ run });
@@ -1669,7 +1672,7 @@ export async function runPlayerCatAndDog(
     run = await container.runEngine.transitionPhase(run, "environment_starting");
     await environmentSession.start({
       runId: run.runId,
-      headless: true,
+      headless,
       viewport: {
         width: 1280,
         height: 720

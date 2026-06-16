@@ -25,6 +25,7 @@ export interface StartBotRunRequest {
   readonly maxAttempts: number;
   readonly strategyMode: CatAndDogStrategyMode;
   readonly stopOnWin: boolean;
+  readonly headless: boolean;
 }
 
 export interface LiveRunState {
@@ -121,7 +122,8 @@ export class BotRunManager {
       `--difficulty=${normalizedSettings.difficulty}`,
       `--max-attempts=${normalizedSettings.maxAttempts}`,
       `--strategy-mode=${normalizedSettings.strategyMode}`,
-      `--stop-on-win=${normalizedSettings.stopOnWin ? "true" : "false"}`
+      `--stop-on-win=${normalizedSettings.stopOnWin ? "true" : "false"}`,
+      normalizedSettings.headless ? "--headless=true" : "--visible"
     ];
     const spawnSpec = buildSpawnSpec(cliArgs);
     const child = spawn(spawnSpec.command, spawnSpec.args, {
@@ -414,7 +416,8 @@ function normalizeStartRequest(input: StartBotRunRequest): StartBotRunRequest {
     difficulty: ["easy", "normal", "hard", "impossible"].includes(input.difficulty) ? input.difficulty : "easy",
     maxAttempts: Number.isInteger(input.maxAttempts) ? Math.max(1, Math.min(50, input.maxAttempts)) : 3,
     strategyMode: input.strategyMode === "explore" ? "explore" : "baseline",
-    stopOnWin: input.stopOnWin === true
+    stopOnWin: input.stopOnWin === true,
+    headless: input.headless !== false
   };
 }
 
