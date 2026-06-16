@@ -228,7 +228,12 @@ function renderLive(live) {
             ${metric("Bot color", chess.botColor)}
             ${metric("Last move", chess.lastMove)}
             ${metric("Planned move", chess.plannedMove)}
+            ${metric("Move SAN", chess.selectedMoveSan)}
+            ${metric("Move score", chess.selectedMoveScore)}
+            ${metric("Move reason", firstText([chess.selectedMoveReason, chess.moveReason]))}
             ${metric("Legal move count", chess.legalMoveCount)}
+            ${metric("Material balance", chess.materialBalance)}
+            ${metric("Check / mate", checkText(chess))}
             ${metric("Move applied", chess.moveApplied)}
             ${metric("Chess outcome", chess.outcome)}
           `
@@ -261,6 +266,17 @@ function renderLive(live) {
       <h3>Live Shot History</h3>
       ${renderShotTable(live.shotHistory ?? [])}
     </section>
+
+    ${
+      live.settings?.gameId === "chess-com-web"
+        ? `
+          <section>
+            <h3>Live Chess Candidates</h3>
+            ${renderCandidateTable(chess.topCandidateMoves ?? [])}
+          </section>
+        `
+        : ""
+    }
 
     ${live.error ? `<div class="status error">${escapeHtml(live.error)}</div>` : ""}
 
@@ -351,7 +367,12 @@ function renderChessSummary(chess) {
         ${metric("Bot color", chess.botColor)}
         ${metric("Last move", chess.lastMove)}
         ${metric("Planned move", chess.plannedMove)}
+        ${metric("Move SAN", chess.selectedMoveSan)}
+        ${metric("Move score", chess.selectedMoveScore)}
+        ${metric("Move reason", chess.selectedMoveReason)}
         ${metric("Legal move count", chess.legalMoveCount)}
+        ${metric("Material balance", chess.materialBalance)}
+        ${metric("Check / mate", checkText(chess))}
         ${metric("Move applied", chess.moveApplied)}
         ${metric("Outcome", chess.outcome)}
       </div>
@@ -367,7 +388,9 @@ function renderChessSummary(chess) {
               <th>Move</th>
               <th>Before FEN</th>
               <th>After FEN</th>
+              <th>Score</th>
               <th>Reason</th>
+              <th>Top Candidates</th>
               <th>Applied</th>
               <th>Screenshots</th>
             </tr>
@@ -382,7 +405,9 @@ function renderChessSummary(chess) {
                     <td>${escapeHtml(selected.lan)}</td>
                     <td>${escapeHtml(move.beforeFen)}</td>
                     <td>${escapeHtml(move.afterFen)}</td>
-                    <td>${escapeHtml(selected.reason)}</td>
+                    <td>${escapeHtml(move.selectedMoveScore ?? selected.score)}</td>
+                    <td>${escapeHtml(firstText([move.selectedMoveReason, selected.reason]))}</td>
+                    <td>${renderCandidateList(move.topCandidateMoves ?? selected.topCandidates ?? [])}</td>
                     <td>${escapeHtml(move.moveApplied)}</td>
                     <td>${escapeHtml([move.beforeScreenshotPath, move.afterScreenshotPath].filter(Boolean).join("\\n"))}</td>
                   </tr>
@@ -394,6 +419,50 @@ function renderChessSummary(chess) {
       </div>
     </section>
   `;
+}
+
+function renderCandidateTable(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return "<div class=\"status\">No chess candidate scores recorded yet.</div>";
+  }
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Move</th>
+            <th>SAN</th>
+            <th>Score</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${candidates
+            .map(
+              (candidate) => `
+                <tr>
+                  <td>${escapeHtml(candidate.uci ?? candidate.lan)}</td>
+                  <td>${escapeHtml(candidate.san)}</td>
+                  <td>${escapeHtml(candidate.score)}</td>
+                  <td>${escapeHtml(candidate.reason)}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderCandidateList(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return "n/a";
+  }
+  return candidates
+    .slice(0, 5)
+    .map((candidate) => `${escapeHtml(candidate.uci ?? candidate.lan)} (${escapeHtml(candidate.score)}): ${escapeHtml(candidate.reason)}`)
+    .join("<br />");
 }
 
 function renderAttempt(attempt) {
@@ -613,6 +682,13 @@ function wallText(wall) {
     return null;
   }
   return `HP ${wall.hp ?? "n/a"} / ${wall.destroyed === null || wall.destroyed === undefined ? "unknown" : wall.destroyed ? "destroyed" : "standing"}`;
+}
+
+function checkText(chess) {
+  if (!chess) {
+    return null;
+  }
+  return `check ${chess.inCheck ?? "n/a"} / mate ${chess.isCheckmate ?? "n/a"} / stalemate ${chess.isStalemate ?? "n/a"}`;
 }
 
 function actionText(action) {

@@ -406,7 +406,16 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
         latestChess = {
           ...(latestChess ?? {}),
           plannedMove: readString(semanticParams, "lan"),
+          selectedMoveSan: readString(semanticParams, "san"),
+          selectedMoveUci: readString(semanticParams, "uci") ?? readString(semanticParams, "lan"),
+          selectedMoveScore: numberAt(semanticParams, "score"),
+          selectedMoveReason: readString(semanticParams, "reason"),
           legalMoveCount: numberAt(semanticParams, "legalMoveCount"),
+          materialBalance: numberAt(semanticParams, "materialBalanceBefore"),
+          inCheck: booleanAt(semanticParams, "inCheck"),
+          isCheckmate: booleanAt(semanticParams, "isCheckmate"),
+          isStalemate: booleanAt(semanticParams, "isStalemate"),
+          topCandidateMoves: arrayAt(semanticParams, "topCandidates").map(asRecord),
           moveReason: readString(semanticParams, "reason")
         };
       }

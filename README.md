@@ -110,7 +110,7 @@ pnpm run gui
 
 Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start Cat-and-Dog or Chess.com with selectable game, browser mode, and bounded run settings. Browser mode defaults to Headless; select Visible to launch a real Playwright-controlled browser window while the bot plays.
 
-Chess.com support is computer-only. The runner navigates to `https://www.chess.com/play/computer`, refuses online/live human matchmaking signals, records board FEN/moves/screenshots, and uses `chess.js` to choose from real legal moves with a simple beginner preference list. It does not use Stockfish.
+Chess.com support is computer-only. The runner navigates to `https://www.chess.com/play/computer`, refuses online/live human matchmaking signals, records board FEN/moves/screenshots, and uses `chess.js` to choose from real legal moves. The current policy is a basic explainable evaluator: it scores legal moves for checkmate, check, captures, material, simple capture safety, opening development, center control, king safety, and promotion. It records the selected move score/reason plus top candidate moves; it does not use Stockfish.
 
 The dashboard scans `artifacts/**/reports/02-player-attempt-summary.json` and `artifacts/**/reports/02-chess-com-player-summary.json` and can load a manually entered summary path such as:
 

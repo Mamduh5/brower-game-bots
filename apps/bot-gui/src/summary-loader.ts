@@ -35,7 +35,16 @@ export interface NormalizedChessSummary {
   readonly botColor: string | null;
   readonly lastMove: string | null;
   readonly plannedMove: string | null;
+  readonly selectedMoveSan: string | null;
+  readonly selectedMoveUci: string | null;
+  readonly selectedMoveScore: number | null;
+  readonly selectedMoveReason: string | null;
   readonly legalMoveCount: number | null;
+  readonly materialBalance: number | null;
+  readonly inCheck: boolean | null;
+  readonly isCheckmate: boolean | null;
+  readonly isStalemate: boolean | null;
+  readonly topCandidateMoves: readonly JsonRecord[];
   readonly moveApplied: boolean | null;
   readonly moves: readonly JsonRecord[];
 }
@@ -228,7 +237,16 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     botColor: stringAt(latestMove, "botColor"),
     lastMove: stringAt(latestMove, "lastMove"),
     plannedMove: stringAt(selectedMove, "lan"),
+    selectedMoveSan: stringAt(latestMove, "selectedMoveSan") ?? stringAt(selectedMove, "san"),
+    selectedMoveUci: stringAt(latestMove, "selectedMoveUci") ?? stringAt(selectedMove, "uci") ?? stringAt(selectedMove, "lan"),
+    selectedMoveScore: numberAt(latestMove, "selectedMoveScore") ?? numberAt(selectedMove, "score"),
+    selectedMoveReason: stringAt(latestMove, "selectedMoveReason") ?? stringAt(selectedMove, "reason"),
     legalMoveCount: numberAt(selectedMove, "legalMoveCount"),
+    materialBalance: numberAt(latestMove, "materialBalanceBefore") ?? numberAt(selectedMove, "materialBalanceBefore"),
+    inCheck: booleanAt(latestMove, "inCheck") ?? booleanAt(selectedMove, "inCheck"),
+    isCheckmate: booleanAt(latestMove, "isCheckmate") ?? booleanAt(selectedMove, "isCheckmate"),
+    isStalemate: booleanAt(latestMove, "isStalemate") ?? booleanAt(selectedMove, "isStalemate"),
+    topCandidateMoves: arrayAt(latestMove, "topCandidateMoves").map(asRecord),
     moveApplied: booleanAt(latestMove, "moveApplied"),
     moves
   };

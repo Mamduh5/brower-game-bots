@@ -36,6 +36,15 @@ export interface ChessComMoveRecord {
   readonly beforeFen: string | null;
   readonly afterFen: string | null;
   readonly selectedMove: ChessMoveChoice;
+  readonly selectedMoveSan: string;
+  readonly selectedMoveUci: string;
+  readonly selectedMoveScore: number;
+  readonly selectedMoveReason: string;
+  readonly topCandidateMoves: readonly JsonObject[];
+  readonly materialBalanceBefore: number;
+  readonly inCheck: boolean;
+  readonly isCheckmate: boolean;
+  readonly isStalemate: boolean;
   readonly boardBounds: JsonObject;
   readonly attemptedCoordinates: JsonObject;
   readonly moveApplied: boolean;
@@ -176,7 +185,7 @@ export async function runPlayerChessCom(
         break;
       }
 
-      const board = boardStateFromSnapshot(beforeSnapshot);
+      const board = inferComputerTurnIfNeeded(boardStateFromSnapshot(beforeSnapshot), moves);
       const selectedMove = chooseBeginnerChessMove(board);
       if (!selectedMove) {
         logger.info({ moveNumber, fen: board.fen }, "No conservative Chess.com move available; stopping safely.");
@@ -247,6 +256,15 @@ export async function runPlayerChessCom(
         beforeFen: board.fen,
         afterFen,
         selectedMove,
+        selectedMoveSan: selectedMove.san,
+        selectedMoveUci: selectedMove.uci,
+        selectedMoveScore: selectedMove.score,
+        selectedMoveReason: selectedMove.reason,
+        topCandidateMoves: selectedMove.topCandidates.map((candidate) => toJsonValue(candidate) as JsonObject),
+        materialBalanceBefore: selectedMove.materialBalanceBefore,
+        inCheck: selectedMove.inCheck,
+        isCheckmate: selectedMove.isCheckmate,
+        isStalemate: selectedMove.isStalemate,
         boardBounds: bounds as JsonObject,
         attemptedCoordinates: {
           from: fromPoint,
@@ -359,6 +377,37 @@ function boardStateFromSnapshot(snapshot: GameSnapshot): ChessBoardState {
     sideToMove: sideToMove === "white" || sideToMove === "black" ? sideToMove : null,
     fen: readString(snapshot.semanticState.fen)
   };
+}
+
+function inferComputerTurnIfNeeded(board: ChessBoardState, moves: readonly ChessComMoveRecord[]): ChessBoardState {
+  if (board.sideToMove || !board.fen) {
+    return board;
+  }
+  let latestAppliedMove: ChessComMoveRecord | null = null;
+  for (let index = moves.length - 1; index >= 0; index -= 1) {
+    const move = moves[index];
+    if (move?.moveApplied && move.afterFen) {
+      latestAppliedMove = move;
+      break;
+    }
+  }
+  if (!latestAppliedMove?.afterFen || latestAppliedMove.afterFen === board.fen) {
+    return board;
+  }
+  return {
+    ...board,
+    sideToMove: board.botColor,
+    fen: withActiveColor(board.fen, board.botColor)
+  };
+}
+
+function withActiveColor(fen: string, color: ChessColor): string {
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 2) {
+    return fen;
+  }
+  parts[1] = color === "black" ? "b" : "w";
+  return parts.join(" ");
 }
 
 function buildChessSummaryJson(input: {
