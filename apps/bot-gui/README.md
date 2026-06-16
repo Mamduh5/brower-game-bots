@@ -1,6 +1,6 @@
 # Cat-and-Dog Bot GUI
 
-This app is a local completed-run replay and artifact viewer for Cat-and-Dog player runs.
+This app is a local live runner plus completed-run replay and artifact viewer for Cat-and-Dog player runs.
 
 Start it from the repository root:
 
@@ -10,13 +10,31 @@ pnpm run gui
 
 Open the printed local URL, usually `http://127.0.0.1:5178`.
 
-The dashboard automatically scans `artifacts/**/reports/02-player-attempt-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
+Use the Live Runner panel to choose difficulty, max attempts, strategy mode, and stop-on-win, then click Start Run. The server starts the existing CLI command as a child process, equivalent to:
+
+```powershell
+pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false
+```
+
+The live panel polls the local API for the current process status, run id, run phase, latest action, shot plan, HP, wind, wall state, screenshot artifact, and growing shot history. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`.
+
+The replay dashboard still automatically scans `artifacts/**/reports/02-player-attempt-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json
 ```
 
-The first version is intentionally read-only. It displays run metadata, attempt outcomes, final HP, damage, wind, wall state, planned shots, shot feedback, action history, artifact paths, and screenshot artifacts from the existing JSON reports.
+Completed replay mode displays run metadata, attempt outcomes, final HP, damage, wind, wall state, planned shots, shot feedback, action history, artifact paths, and screenshot artifacts from the existing JSON reports.
+
+## Local API
+
+- `GET /api/runs`
+- `GET /api/runs/:runId`
+- `GET /api/runs/:runId/summary`
+- `GET /api/runs/:runId/latest-screenshot`
+- `POST /api/bot-runs/start`
+- `POST /api/bot-runs/:runId/stop`
+- `GET /api/bot-runs/:runId/live`
 
 ## Future Human-vs-Bot Seam
 

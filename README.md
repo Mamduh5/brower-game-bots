@@ -100,13 +100,13 @@ pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 
 
 ## Cat-and-Dog Bot GUI
 
-Start the local completed-run replay dashboard:
+Start the local live runner and completed-run replay dashboard:
 
 ```powershell
 pnpm run gui
 ```
 
-Open the printed URL, usually `http://127.0.0.1:5178`. The dashboard scans `artifacts/**/reports/02-player-attempt-summary.json` and can also load a manually entered summary path such as:
+Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start the existing `run-player-cat-and-dog` CLI with selectable difficulty, max attempts, strategy mode, and stop-on-win. The dashboard also scans `artifacts/**/reports/02-player-attempt-summary.json` and can load a manually entered summary path such as:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json

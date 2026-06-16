@@ -106,6 +106,14 @@ type JsonRecord = Record<string, unknown>;
 
 const PLAYER_SUMMARY_FILE = "02-player-attempt-summary.json";
 
+export function getSummaryRelativePathForRun(runId: string): string {
+  return path.posix.join("artifacts", runId, "reports", PLAYER_SUMMARY_FILE);
+}
+
+export async function loadCatAndDogSummaryByRunId(repoRoot: string, runId: string): Promise<NormalizedRunSummary> {
+  return loadCatAndDogSummary(repoRoot, getSummaryRelativePathForRun(runId));
+}
+
 export async function discoverCatAndDogSummaries(repoRoot: string): Promise<DiscoveredRunSummary[]> {
   const artifactsRoot = path.join(repoRoot, "artifacts");
   const summaryPaths = await findSummaryFiles(artifactsRoot);
@@ -138,7 +146,7 @@ export function resolveArtifactPath(repoRoot: string, artifactPath: string): str
   return resolvedPath;
 }
 
-function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoot: string): NormalizedRunSummary {
+export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoot: string): NormalizedRunSummary {
   const run = recordAt(raw, "run");
   const summary = recordAt(raw, "summary");
   const attempts = arrayAt(raw, "attempts").map(normalizeAttempt);
@@ -167,7 +175,7 @@ function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoot: stri
   };
 }
 
-function normalizeAttempt(value: unknown): NormalizedAttempt {
+export function normalizeAttempt(value: unknown): NormalizedAttempt {
   const attempt = asRecord(value);
   const strategy = recordAt(attempt, "strategy");
   const diagnostics = recordAt(attempt, "diagnostics");
@@ -232,7 +240,7 @@ function normalizeAttempt(value: unknown): NormalizedAttempt {
   };
 }
 
-function normalizeShot(value: unknown): NormalizedShot {
+export function normalizeShot(value: unknown): NormalizedShot {
   const shot = asRecord(value);
   const strategy = recordAt(shot, "strategy");
   const feedback = recordAt(shot, "feedback");
@@ -376,4 +384,3 @@ function booleanAt(record: JsonRecord, key: string): boolean | null {
 function firstText(values: readonly (string | null)[]): string | null {
   return values.find((value): value is string => typeof value === "string" && value.length > 0) ?? null;
 }
-

@@ -3,8 +3,11 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { BotRunManager, discoverScreenshotPaths } from "./live-runner.js";
 import {
   discoverCatAndDogSummaries,
+  getSummaryRelativePathForRun,
+  loadCatAndDogSummaryByRunId,
   loadCatAndDogSummary,
   resolveArtifactPath,
   resolveSummaryPath
@@ -16,6 +19,7 @@ const sourcePublicRoot = path.resolve(fileURLToPath(new URL("../public", import.
 const staticRoot = publicRoot.endsWith(`${path.sep}dist${path.sep}public`) ? sourcePublicRoot : path.join(repoRoot, "apps", "bot-gui", "public");
 
 const options = parseServerOptions(process.argv.slice(2));
+const botRunManager = new BotRunManager(repoRoot);
 
 const server = createServer((request, response) => {
   void handleRequest(request, response).catch((error: unknown) => {
@@ -31,13 +35,93 @@ server.listen(options.port, options.host, () => {
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  const route = parseRoute(requestUrl.pathname);
 
-  if (requestUrl.pathname === "/api/runs") {
+  if (request.method === "GET" && requestUrl.pathname === "/api/runs") {
     sendJson(response, 200, { runs: await discoverCatAndDogSummaries(repoRoot) });
     return;
   }
 
-  if (requestUrl.pathname === "/api/summary") {
+  if (request.method === "GET" && route?.area === "runs" && route.rest.length === 1) {
+    const runId = route.rest[0];
+    if (!runId) {
+      sendJson(response, 404, { error: "Run not found." });
+      return;
+    }
+    const live = botRunManager.findRun(runId);
+    if (live) {
+      sendJson(response, 200, await botRunManager.getLiveState(runId));
+      return;
+    }
+    sendJson(response, 200, await loadCatAndDogSummaryByRunId(repoRoot, runId));
+    return;
+  }
+
+  if (request.method === "GET" && route?.area === "runs" && route.rest.length === 2 && route.rest[1] === "summary") {
+    const runId = route.rest[0];
+    if (!runId) {
+      sendJson(response, 404, { error: "Run not found." });
+      return;
+    }
+    sendJson(response, 200, await loadCatAndDogSummaryByRunId(repoRoot, runId));
+    return;
+  }
+
+  if (request.method === "GET" && route?.area === "runs" && route.rest.length === 2 && route.rest[1] === "latest-screenshot") {
+    const runId = route.rest[0];
+    if (!runId) {
+      sendJson(response, 404, { error: "Run not found." });
+      return;
+    }
+    const live = botRunManager.findRun(runId);
+    const liveState = live ? await botRunManager.getLiveState(runId) : null;
+    const completedScreenshots = liveState ? [] : await discoverScreenshotPaths(repoRoot, runId);
+    const completedPath = completedScreenshots[completedScreenshots.length - 1] ?? null;
+    sendJson(response, 200, {
+      runId,
+      path: liveState?.latestScreenshotPath ?? completedPath,
+      url: liveState?.latestScreenshotUrl ?? (completedPath ? `/artifact?path=${encodeURIComponent(completedPath)}` : null)
+    });
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/bot-runs") {
+    sendJson(response, 200, { runs: await Promise.all(botRunManager.getAllRuns().map((run) => botRunManager.getLiveState(run.botRunId))) });
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/bot-runs/start") {
+    const body = await readRequestJson(request);
+    sendJson(response, 201, botRunManager.start({
+      difficulty: body.difficulty === "normal" || body.difficulty === "hard" || body.difficulty === "impossible" ? body.difficulty : "easy",
+      maxAttempts: typeof body.maxAttempts === "number" ? body.maxAttempts : 3,
+      strategyMode: body.strategyMode === "explore" ? "explore" : "baseline",
+      stopOnWin: body.stopOnWin === true
+    }));
+    return;
+  }
+
+  if (request.method === "POST" && route?.area === "bot-runs" && route.rest.length === 2 && route.rest[1] === "stop") {
+    const runId = route.rest[0];
+    if (!runId) {
+      sendJson(response, 404, { error: "Run not found." });
+      return;
+    }
+    sendJson(response, 200, await botRunManager.stop(runId));
+    return;
+  }
+
+  if (request.method === "GET" && route?.area === "bot-runs" && route.rest.length === 2 && route.rest[1] === "live") {
+    const runId = route.rest[0];
+    if (!runId) {
+      sendJson(response, 404, { error: "Run not found." });
+      return;
+    }
+    sendJson(response, 200, await botRunManager.getLiveState(runId));
+    return;
+  }
+
+  if (request.method === "GET" && requestUrl.pathname === "/api/summary") {
     const requestedPath = requestUrl.searchParams.get("path");
     if (!requestedPath) {
       sendJson(response, 400, { error: "Missing summary path." });
@@ -48,7 +132,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
-  if (requestUrl.pathname === "/artifact") {
+  if (request.method === "GET" && requestUrl.pathname === "/artifact") {
     const artifactPath = requestUrl.searchParams.get("path");
     if (!artifactPath) {
       sendJson(response, 400, { error: "Missing artifact path." });
@@ -58,8 +142,48 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
+  if (request.method === "GET" && route?.area === "artifact-summary-path" && route.rest.length === 1) {
+    const runId = route.rest[0];
+    if (!runId) {
+      sendJson(response, 404, { error: "Run not found." });
+      return;
+    }
+    sendJson(response, 200, { path: getSummaryRelativePathForRun(runId) });
+    return;
+  }
+
   const staticPath = requestUrl.pathname === "/" ? "index.html" : requestUrl.pathname.slice(1);
   await sendStaticFile(response, staticPath);
+}
+
+function parseRoute(pathname: string): { readonly area: string; readonly rest: readonly string[] } | null {
+  const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] !== "api") {
+    return null;
+  }
+  if (parts[1] === "runs") {
+    return { area: "runs", rest: parts.slice(2) };
+  }
+  if (parts[1] === "bot-runs") {
+    return { area: "bot-runs", rest: parts.slice(2) };
+  }
+  if (parts[1] === "artifact-summary-path") {
+    return { area: "artifact-summary-path", rest: parts.slice(2) };
+  }
+  return null;
+}
+
+async function readRequestJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+  if (chunks.length === 0) {
+    return {};
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  const parsed: unknown = JSON.parse(raw);
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
 }
 
 async function sendStaticFile(response: ServerResponse, relativePath: string): Promise<void> {
@@ -125,4 +249,3 @@ function parseServerOptions(args: readonly string[]): { readonly host: string; r
     port: Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5178
   };
 }
-

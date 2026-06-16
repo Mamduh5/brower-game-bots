@@ -2,7 +2,10 @@ const state = {
   runs: [],
   selectedPath: null,
   summary: null,
-  selectedAttemptIndex: 0
+  selectedAttemptIndex: 0,
+  liveRunId: null,
+  livePollTimer: null,
+  live: null
 };
 
 const els = {
@@ -12,11 +15,19 @@ const els = {
   runCount: document.querySelector("#run-count"),
   runList: document.querySelector("#run-list"),
   status: document.querySelector("#status"),
-  runDetail: document.querySelector("#run-detail")
+  runDetail: document.querySelector("#run-detail"),
+  runnerForm: document.querySelector("#runner-form"),
+  startRun: document.querySelector("#start-run"),
+  stopRun: document.querySelector("#stop-run"),
+  difficulty: document.querySelector("#run-difficulty"),
+  maxAttempts: document.querySelector("#run-max-attempts"),
+  strategyMode: document.querySelector("#run-strategy-mode"),
+  stopOnWin: document.querySelector("#run-stop-on-win"),
+  livePanel: document.querySelector("#live-panel")
 };
 
 els.refreshRuns.addEventListener("click", () => {
-  void loadRuns();
+  void loadRuns({ preserveSelection: true });
 });
 
 els.manualLoadForm.addEventListener("submit", (event) => {
@@ -27,18 +38,28 @@ els.manualLoadForm.addEventListener("submit", (event) => {
   }
 });
 
+els.startRun.addEventListener("click", () => {
+  void startRun();
+});
+
+els.stopRun.addEventListener("click", () => {
+  void stopRun();
+});
+
 void loadRuns();
 
-async function loadRuns() {
-  setStatus("Loading run artifacts...");
+async function loadRuns(options = {}) {
+  if (!options.preserveSelection) {
+    setStatus("Loading run artifacts...");
+  }
   const response = await fetch("/api/runs");
   const payload = await readPayload(response);
   state.runs = payload.runs ?? [];
   renderRunList();
 
-  if (state.runs.length > 0) {
+  if (!options.preserveSelection && state.runs.length > 0) {
     await loadSummary(state.runs[0].relativeSourcePath);
-  } else {
+  } else if (!options.preserveSelection) {
     setStatus("No Cat-and-Dog player summaries found under artifacts/.");
   }
 }
@@ -54,6 +75,80 @@ async function loadSummary(summaryPath) {
   renderRunList();
   renderSummary();
   clearStatus();
+}
+
+async function startRun() {
+  const payload = {
+    difficulty: els.difficulty.value,
+    maxAttempts: Number(els.maxAttempts.value),
+    strategyMode: els.strategyMode.value,
+    stopOnWin: els.stopOnWin.checked
+  };
+  els.startRun.disabled = true;
+  renderLiveStatus("Starting bot process...");
+  const response = await fetch("/api/bot-runs/start", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const live = await readPayload(response);
+  state.liveRunId = live.botRunId;
+  state.live = live;
+  renderLive(live);
+  startLivePolling();
+}
+
+async function stopRun() {
+  if (!state.liveRunId) {
+    return;
+  }
+  els.stopRun.disabled = true;
+  renderLiveStatus("Stopping bot process...");
+  const response = await fetch(`/api/bot-runs/${encodeURIComponent(state.liveRunId)}/stop`, {
+    method: "POST"
+  });
+  const live = await readPayload(response);
+  state.live = live;
+  renderLive(live);
+}
+
+function startLivePolling() {
+  if (state.livePollTimer) {
+    window.clearInterval(state.livePollTimer);
+  }
+  state.livePollTimer = window.setInterval(() => {
+    void pollLive();
+  }, 1500);
+  void pollLive();
+}
+
+async function pollLive() {
+  if (!state.liveRunId) {
+    return;
+  }
+  const response = await fetch(`/api/bot-runs/${encodeURIComponent(state.liveRunId)}/live`);
+  const live = await readPayload(response);
+  state.live = live;
+  renderLive(live);
+
+  if (live.summaryPath && live.summary) {
+    state.selectedPath = live.summaryPath;
+    state.summary = live.summary;
+    state.selectedAttemptIndex = Math.max(0, (live.summary.attempts?.length ?? 1) - 1);
+    els.summaryPath.value = live.summaryPath;
+    renderSummary();
+    clearStatus();
+    await loadRuns({ preserveSelection: true });
+  }
+
+  if (["completed", "failed", "stopped"].includes(live.status)) {
+    if (state.livePollTimer) {
+      window.clearInterval(state.livePollTimer);
+      state.livePollTimer = null;
+    }
+  }
 }
 
 async function readPayload(response) {
@@ -87,6 +182,74 @@ function renderRunList() {
       return button;
     })
   );
+}
+
+function renderLive(live) {
+  const canStop = live.status === "starting" || live.status === "running";
+  els.startRun.disabled = canStop;
+  els.stopRun.disabled = !canStop;
+  const observation = live.latestObservation ?? {};
+  const shotPlan = live.latestShotPlan ?? {};
+  const latestAction = live.latestAction ?? {};
+  const latestScreenshot = live.latestScreenshotUrl
+    ? `${live.latestScreenshotUrl}${live.latestScreenshotUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
+    : null;
+
+  els.livePanel.innerHTML = `
+    <div class="grid">
+      ${metric("Active status", live.status, live.status === "failed" ? "outcome-loss" : live.status === "completed" ? "outcome-win" : "")}
+      ${metric("Phase", live.phase)}
+      ${metric("Latest run id", live.cliRunId ?? live.botRunId)}
+      ${metric("Attempt", live.currentAttemptNumber)}
+      ${metric("Difficulty", live.settings?.difficulty)}
+      ${metric("Max attempts", live.settings?.maxAttempts)}
+      ${metric("Strategy mode", live.settings?.strategyMode)}
+      ${metric("Stop on win", live.settings?.stopOnWin)}
+      ${metric("Latest action", actionText(latestAction))}
+      ${metric("Selected weapon", observation.selectedWeapon)}
+      ${metric("Planned weapon", shotPlan.weaponKey)}
+      ${metric("Target angle", shotPlan.targetAngle)}
+      ${metric("Target power", shotPlan.targetPower)}
+      ${metric("Prepared/current angle", firstText([observation.preparedAngle, observation.currentAngle]))}
+      ${metric("Prepared/current power", firstText([observation.preparedPower, observation.currentPower]))}
+      ${metric("Player HP", observation.playerHp)}
+      ${metric("CPU/Dog HP", observation.cpuHp)}
+      ${metric("Wind", windText({ value: observation.windValue, direction: observation.windDirection, normalized: observation.windNormalized }))}
+      ${metric("Wall", wallText({ hp: observation.wallHp, destroyed: observation.wallDestroyed }))}
+      ${metric("Outcome", observation.outcome ?? live.latestAttempt?.outcome)}
+      ${metric("Final report", live.summaryPath)}
+    </div>
+
+    <div class="live-visual">
+      ${
+        latestScreenshot
+          ? `<img src="${latestScreenshot}" alt="Latest Cat-and-Dog run screenshot" />`
+          : `<div class="status">Waiting for the first screenshot artifact...</div>`
+      }
+    </div>
+
+    <section>
+      <h3>Live Shot History</h3>
+      ${renderShotTable(live.shotHistory ?? [])}
+    </section>
+
+    ${live.error ? `<div class="status error">${escapeHtml(live.error)}</div>` : ""}
+
+    <div class="log-grid">
+      <div class="log-box">
+        <h4>stdout</h4>
+        <pre>${escapeHtml((live.stdoutTail ?? []).slice(-12).join("\n"))}</pre>
+      </div>
+      <div class="log-box">
+        <h4>stderr</h4>
+        <pre>${escapeHtml((live.stderrTail ?? []).slice(-12).join("\n"))}</pre>
+      </div>
+    </div>
+  `;
+}
+
+function renderLiveStatus(message) {
+  els.livePanel.innerHTML = `<div class="status">${escapeHtml(message)}</div>`;
 }
 
 function renderSummary() {
@@ -210,7 +373,7 @@ function renderAttempt(attempt) {
 
 function renderShotTable(shots) {
   if (shots.length === 0) {
-    return "<div class=\"status\">No shot history recorded for this attempt.</div>";
+    return "<div class=\"status\">No shot history recorded yet.</div>";
   }
   return `
     <div class="table-wrap">
@@ -326,6 +489,9 @@ function showError(error) {
   els.status.textContent = error instanceof Error ? error.message : String(error);
   els.status.classList.remove("hidden");
   els.status.classList.add("error");
+  renderLiveStatus(error instanceof Error ? error.message : String(error));
+  els.startRun.disabled = false;
+  els.stopRun.disabled = true;
 }
 
 function artifactHref(path) {
@@ -353,6 +519,10 @@ function wallText(wall) {
   return `HP ${wall.hp ?? "n/a"} / ${wall.destroyed === null || wall.destroyed === undefined ? "unknown" : wall.destroyed ? "destroyed" : "standing"}`;
 }
 
+function actionText(action) {
+  return firstText([action.semanticActionId, action.actionKind, action.status]);
+}
+
 function outcomeClass(outcome) {
   if (outcome === "WIN") {
     return "outcome-win";
@@ -364,7 +534,7 @@ function outcomeClass(outcome) {
 }
 
 function firstText(values) {
-  return values.find((value) => typeof value === "string" && value.length > 0) ?? null;
+  return values.find((value) => value !== null && value !== undefined && value !== "") ?? null;
 }
 
 function escapeHtml(value) {

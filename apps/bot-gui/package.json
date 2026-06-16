@@ -10,5 +10,11 @@
     "clean": "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue",
     "dev": "pnpm run build && node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@types/sql.js": "^1.4.9"
   }
 }

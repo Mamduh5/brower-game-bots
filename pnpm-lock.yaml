@@ -82,6 +82,16 @@ importers:
         specifier: ^4.19.2
         version: 4.21.0
 
+  apps/bot-gui:
+    dependencies:
+      sql.js:
+        specifier: ^1.13.0
+        version: 1.14.1
+    devDependencies:
+      '@types/sql.js':
+        specifier: ^1.4.9
+        version: 1.4.11
+
   games/cat-and-dog-web:
     dependencies:
       '@game-bots/contracts':
