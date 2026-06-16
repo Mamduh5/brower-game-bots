@@ -22,6 +22,7 @@ export interface NormalizedRunSummary extends DiscoveredRunSummary {
   readonly artifactPaths: readonly string[];
   readonly screenshotPaths: readonly string[];
   readonly chess: NormalizedChessSummary | null;
+  readonly minesweeper: NormalizedMinesweeperSummary | null;
   readonly raw: JsonRecord;
 }
 
@@ -73,6 +74,30 @@ export interface NormalizedChessSummary {
   readonly isStalemate: boolean | null;
   readonly topCandidateMoves: readonly JsonRecord[];
   readonly moveApplied: boolean | null;
+  readonly moves: readonly JsonRecord[];
+  readonly observations: readonly JsonRecord[];
+}
+
+export interface NormalizedMinesweeperSummary {
+  readonly difficulty: string | null;
+  readonly maxMoves: number | null;
+  readonly movesPlayed: number;
+  readonly outcome: string | null;
+  readonly stopReason: string | null;
+  readonly finalLoopState: string | null;
+  readonly boardWidth: number | null;
+  readonly boardHeight: number | null;
+  readonly mineCount: number | null;
+  readonly remainingMines: number | null;
+  readonly revealedCount: number | null;
+  readonly flaggedCount: number | null;
+  readonly hiddenCount: number | null;
+  readonly boardHash: string | null;
+  readonly boardChangedSinceLastObservation: boolean | null;
+  readonly latestAction: string | null;
+  readonly latestCell: string | null;
+  readonly latestReason: string | null;
+  readonly latestRiskEstimate: number | null;
   readonly moves: readonly JsonRecord[];
   readonly observations: readonly JsonRecord[];
 }
@@ -159,7 +184,8 @@ type JsonRecord = Record<string, unknown>;
 
 const PLAYER_SUMMARY_FILE = "02-player-attempt-summary.json";
 const CHESS_PLAYER_SUMMARY_FILE = "02-chess-com-player-summary.json";
-const SUMMARY_FILES = new Set([PLAYER_SUMMARY_FILE, CHESS_PLAYER_SUMMARY_FILE]);
+const MINESWEEPER_PLAYER_SUMMARY_FILE = "02-minesweeper-online-player-summary.json";
+const SUMMARY_FILES = new Set([PLAYER_SUMMARY_FILE, CHESS_PLAYER_SUMMARY_FILE, MINESWEEPER_PLAYER_SUMMARY_FILE]);
 
 export function getSummaryRelativePathForRun(runId: string): string {
   return path.posix.join("artifacts", runId, "reports", PLAYER_SUMMARY_FILE);
@@ -168,7 +194,8 @@ export function getSummaryRelativePathForRun(runId: string): string {
 export function getSummaryRelativePathsForRun(runId: string): readonly string[] {
   return [
     path.posix.join("artifacts", runId, "reports", PLAYER_SUMMARY_FILE),
-    path.posix.join("artifacts", runId, "reports", CHESS_PLAYER_SUMMARY_FILE)
+    path.posix.join("artifacts", runId, "reports", CHESS_PLAYER_SUMMARY_FILE),
+    path.posix.join("artifacts", runId, "reports", MINESWEEPER_PLAYER_SUMMARY_FILE)
   ];
 }
 
@@ -221,6 +248,7 @@ export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoo
   const summary = recordAt(raw, "summary");
   const attempts = arrayAt(raw, "attempts").map(normalizeAttempt);
   const chess = normalizeChessSummary(raw);
+  const minesweeper = normalizeMinesweeperSummary(raw);
   const artifactPaths = collectArtifactPaths(arrayAt(raw, "artifacts"));
   const screenshotPaths = artifactPaths.filter(isScreenshotPath);
 
@@ -228,14 +256,20 @@ export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoo
     runId: stringAt(run, "runId") ?? stringAt(raw, "runId") ?? inferRunId(sourcePath),
     gameId: stringAt(run, "gameId") ?? stringAt(summary, "gameId") ?? stringAt(raw, "gameId"),
     profileId: stringAt(run, "profileId") ?? stringAt(raw, "profileId"),
-    requestedDifficulty: stringAt(summary, "requestedDifficulty") ?? stringAt(raw, "requestedDifficulty"),
+    requestedDifficulty: stringAt(summary, "requestedDifficulty") ?? stringAt(summary, "difficulty") ?? stringAt(raw, "requestedDifficulty"),
     runtimeDifficulty:
       stringAt(summary, "runtimeCpuDifficulty") ?? attempts.find((attempt) => attempt.runtimeDifficulty)?.runtimeDifficulty ?? null,
     maxAttempts: numberAt(summary, "maxAttempts") ?? numberAt(raw, "maxAttempts"),
     stopOnWin: booleanAt(summary, "stopOnWin") ?? booleanAt(raw, "stopOnWin"),
     strategyMode: stringAt(summary, "strategyMode") ?? stringAt(raw, "strategyMode"),
     attemptCount: numberAt(summary, "attemptsRun") ?? numberAt(summary, "movesPlayed") ?? attempts.length,
-    hadWin: booleanAt(summary, "hadWin") ?? (chess?.outcome === "WIN" ? true : attempts.some((attempt) => attempt.outcome === "WIN") ? true : null),
+    hadWin:
+      booleanAt(summary, "hadWin") ??
+      (chess?.outcome === "WIN" || minesweeper?.outcome === "WIN"
+        ? true
+        : attempts.some((attempt) => attempt.outcome === "WIN")
+          ? true
+          : null),
     sourcePath,
     relativeSourcePath: path.relative(repoRoot, sourcePath),
     updatedAt: stringAt(run, "updatedAt") ?? stringAt(raw, "updatedAt"),
@@ -243,6 +277,7 @@ export function normalizeRunSummary(raw: JsonRecord, sourcePath: string, repoRoo
     artifactPaths,
     screenshotPaths,
     chess,
+    minesweeper,
     raw
   };
 }
@@ -306,6 +341,43 @@ function normalizeChessSummary(raw: JsonRecord): NormalizedChessSummary | null {
     isStalemate: booleanAt(latestMove, "isStalemate") ?? booleanAt(selectedMove, "isStalemate"),
     topCandidateMoves: arrayAt(latestMove, "topCandidateMoves").map(asRecord),
     moveApplied: booleanAt(latestMove, "moveApplied"),
+    moves,
+    observations
+  };
+}
+
+function normalizeMinesweeperSummary(raw: JsonRecord): NormalizedMinesweeperSummary | null {
+  const summary = recordAt(raw, "summary");
+  const moves = arrayAt(raw, "moves").map(asRecord);
+  const observations = arrayAt(raw, "observations").map(asRecord);
+  if (moves.length === 0 && stringAt(summary, "gameId") !== "minesweeper-online-web") {
+    return null;
+  }
+  const latestMove = moves.at(-1) ?? {};
+  const latestObservation = observations.at(-1) ?? {};
+  const latestX = numberAt(latestMove, "x");
+  const latestY = numberAt(latestMove, "y");
+
+  return {
+    difficulty: stringAt(summary, "difficulty") ?? stringAt(summary, "requestedDifficulty"),
+    maxMoves: numberAt(summary, "maxMoves"),
+    movesPlayed: numberAt(summary, "movesPlayed") ?? moves.length,
+    outcome: stringAt(summary, "outcome") ?? stringAt(latestMove, "outcome"),
+    stopReason: stringAt(summary, "stopReason"),
+    finalLoopState: stringAt(summary, "finalLoopState") ?? stringAt(latestObservation, "loopState"),
+    boardWidth: numberAt(summary, "boardWidth") ?? numberAt(latestObservation, "width"),
+    boardHeight: numberAt(summary, "boardHeight") ?? numberAt(latestObservation, "height"),
+    mineCount: numberAt(summary, "mineCount") ?? numberAt(latestObservation, "mineCount"),
+    remainingMines: numberAt(latestObservation, "remainingMines"),
+    revealedCount: numberAt(summary, "revealedCount") ?? numberAt(latestObservation, "revealedCount"),
+    flaggedCount: numberAt(summary, "flaggedCount") ?? numberAt(latestObservation, "flaggedCount"),
+    hiddenCount: numberAt(summary, "hiddenCount") ?? numberAt(latestObservation, "hiddenCount"),
+    boardHash: stringAt(latestObservation, "boardHash"),
+    boardChangedSinceLastObservation: booleanAt(latestObservation, "boardChangedSinceLastObservation"),
+    latestAction: stringAt(latestMove, "action"),
+    latestCell: latestX !== null && latestY !== null ? `${latestX},${latestY}` : null,
+    latestReason: stringAt(latestMove, "reason"),
+    latestRiskEstimate: numberAt(latestMove, "riskEstimate"),
     moves,
     observations
   };

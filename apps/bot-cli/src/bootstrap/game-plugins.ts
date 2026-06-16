@@ -1,6 +1,7 @@
 import type { GamePlugin } from "@game-bots/game-sdk";
 import { catAndDogWebPlugin } from "@game-bots/cat-and-dog-web";
 import { chessComWebPlugin } from "@game-bots/chess-com-web";
+import { minesweeperOnlineWebPlugin } from "@game-bots/minesweeper-online-web";
 import { play2048WebPlugin } from "@game-bots/play2048-web";
 import { wordleWebPlugin } from "@game-bots/wordle-web";
 
@@ -13,6 +14,7 @@ const gamePlugins = new Map<string, GamePlugin>([
   [wordleWebPlugin.manifest.gameId, wordleWebPlugin],
   [catAndDogWebPlugin.manifest.gameId, catAndDogWebPlugin],
   [chessComWebPlugin.manifest.gameId, chessComWebPlugin],
+  [minesweeperOnlineWebPlugin.manifest.gameId, minesweeperOnlineWebPlugin],
   [play2048WebPlugin.manifest.gameId, play2048WebPlugin]
 ]);
 
@@ -35,6 +37,13 @@ const testerDefaultsByGame = new Map<string, TesterDefaults>([
     chessComWebPlugin.manifest.gameId,
     {
       profileId: "chess-com-web.tester.smoke",
+      scenarioId: "smoke"
+    }
+  ],
+  [
+    minesweeperOnlineWebPlugin.manifest.gameId,
+    {
+      profileId: "minesweeper-online-web.tester.smoke",
       scenarioId: "smoke"
     }
   ],

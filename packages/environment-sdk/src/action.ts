@@ -23,7 +23,8 @@ const CoordinatePointSchema = z.object({
 
 const MouseClickActionSchema = z.object({
   kind: z.literal("mouse-click"),
-  point: CoordinatePointSchema
+  point: CoordinatePointSchema,
+  button: z.enum(["left", "right", "middle"]).optional()
 });
 
 const MouseDragActionSchema = z.object({

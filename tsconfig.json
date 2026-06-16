@@ -53,6 +53,9 @@
       "path": "./games/chess-com-web"
     },
     {
+      "path": "./games/minesweeper-online-web"
+    },
+    {
       "path": "./apps/bot-cli"
     },
     {

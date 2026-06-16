@@ -176,7 +176,9 @@ class PlaywrightEnvironmentSession implements EnvironmentSession {
         break;
       }
       case "mouse-click":
-        await page.mouse.click(action.point.x, action.point.y);
+        await page.mouse.click(action.point.x, action.point.y, {
+          button: action.button ?? "left"
+        });
         break;
       case "mouse-drag":
         await page.mouse.move(action.from.x, action.from.y);

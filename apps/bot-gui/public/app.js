@@ -63,7 +63,7 @@ async function loadRuns(options = {}) {
   if (!options.preserveSelection && state.runs.length > 0) {
     await loadSummary(state.runs[0].relativeSourcePath);
   } else if (!options.preserveSelection) {
-    setStatus("No Cat-and-Dog player summaries found under artifacts/.");
+    setStatus("No supported player summaries found under artifacts/.");
   }
 }
 
@@ -202,6 +202,7 @@ function renderLive(live) {
   const observation = live.latestObservation ?? {};
   const shotPlan = live.latestShotPlan ?? {};
   const chess = live.latestChess ?? {};
+  const minesweeper = live.latestMinesweeper ?? {};
   const latestAction = live.latestAction ?? {};
   const latestScreenshot = live.latestScreenshotUrl
     ? `${live.latestScreenshotUrl}${live.latestScreenshotUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
@@ -254,6 +255,30 @@ function renderLive(live) {
           `
           : ""
       }
+      ${
+        live.settings?.gameId === "minesweeper-online-web"
+          ? `
+            ${metric("Loop state", firstText([minesweeper.finalLoopState, minesweeper.loopState]))}
+            ${metric("Board", minesweeper.width && minesweeper.height ? `${minesweeper.width}x${minesweeper.height}` : null)}
+            ${metric("Mine count", minesweeper.mineCount)}
+            ${metric("Remaining mines", minesweeper.remainingMines)}
+            ${metric("Revealed", minesweeper.revealedCount)}
+            ${metric("Flagged", minesweeper.flaggedCount)}
+            ${metric("Hidden", minesweeper.hiddenCount)}
+            ${metric("Board hash", minesweeper.boardHash)}
+            ${metric("Board changed", minesweeper.boardChangedSinceLastObservation)}
+            ${metric("Selected action", minesweeper.selectedAction)}
+            ${metric("Executed action", minesweeper.executedAction)}
+            ${metric("Selected cell", minesweeper.selectedCell)}
+            ${metric("Risk estimate", minesweeper.riskEstimate)}
+            ${metric("Safe moves", minesweeper.safeMoveCount)}
+            ${metric("Known mines", minesweeper.knownMineCount)}
+            ${metric("Move reason", minesweeper.selectedReason)}
+            ${metric("Minesweeper status", minesweeper.status)}
+            ${metric("Stop reason", minesweeper.stopReason)}
+          `
+          : ""
+      }
       ${metric("Latest action", actionText(latestAction))}
       ${metric("Selected weapon", observation.selectedWeapon)}
       ${metric("Planned weapon", shotPlan.weaponKey)}
@@ -293,6 +318,17 @@ function renderLive(live) {
         : ""
     }
 
+    ${
+      live.settings?.gameId === "minesweeper-online-web"
+        ? `
+          <section>
+            <h3>Live Minesweeper Board</h3>
+            ${renderMinesweeperBoard(minesweeper.cells ?? [])}
+          </section>
+        `
+        : ""
+    }
+
     ${live.error ? `<div class="status error">${escapeHtml(live.error)}</div>` : ""}
 
     <div class="log-grid">
@@ -321,6 +357,7 @@ function renderSummary() {
   const attempts = summary.attempts ?? [];
   const selectedAttempt = attempts[state.selectedAttemptIndex] ?? attempts[0] ?? null;
   const chess = summary.chess ?? null;
+  const minesweeper = summary.minesweeper ?? null;
   els.runDetail.classList.remove("hidden");
   els.runDetail.innerHTML = `
     <section class="detail-header">
@@ -336,6 +373,8 @@ function renderSummary() {
         ${metric("Attempt count", summary.attemptCount)}
         ${chess ? metric("Moves played", chess.movesPlayed) : ""}
         ${chess ? metric("Outcome", chess.outcome) : ""}
+        ${minesweeper ? metric("Moves played", minesweeper.movesPlayed) : ""}
+        ${minesweeper ? metric("Outcome", minesweeper.outcome) : ""}
         ${metric("Source", summary.relativeSourcePath)}
       </div>
     </section>
@@ -343,6 +382,8 @@ function renderSummary() {
     ${
       chess
         ? renderChessSummary(chess)
+        : minesweeper
+          ? renderMinesweeperSummary(minesweeper, summary)
         : `
           <nav class="attempt-tabs">
             ${attempts
@@ -463,6 +504,162 @@ function renderChessSummary(chess) {
       ${renderTurnObservationTable(chess.observations ?? [])}
     </section>
   `;
+}
+
+function renderMinesweeperSummary(minesweeper, summary) {
+  return `
+    <section class="panel">
+      <h3>Minesweeper Online Summary</h3>
+      <div class="grid">
+        ${metric("Difficulty", minesweeper.difficulty)}
+        ${metric("Max moves", minesweeper.maxMoves)}
+        ${metric("Moves played", minesweeper.movesPlayed)}
+        ${metric("Loop state", minesweeper.finalLoopState)}
+        ${metric("Board", minesweeper.boardWidth && minesweeper.boardHeight ? `${minesweeper.boardWidth}x${minesweeper.boardHeight}` : null)}
+        ${metric("Mine count", minesweeper.mineCount)}
+        ${metric("Remaining mines", minesweeper.remainingMines)}
+        ${metric("Revealed", minesweeper.revealedCount)}
+        ${metric("Flagged", minesweeper.flaggedCount)}
+        ${metric("Hidden", minesweeper.hiddenCount)}
+        ${metric("Board hash", minesweeper.boardHash)}
+        ${metric("Board changed", minesweeper.boardChangedSinceLastObservation)}
+        ${metric("Latest action", minesweeper.latestAction)}
+        ${metric("Latest cell", minesweeper.latestCell)}
+        ${metric("Latest risk", minesweeper.latestRiskEstimate)}
+        ${metric("Latest reason", minesweeper.latestReason)}
+        ${metric("Outcome", minesweeper.outcome, outcomeClass(minesweeper.outcome))}
+        ${metric("Stop reason", minesweeper.stopReason)}
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Move Timeline</h3>
+      ${renderMinesweeperMoveTable(minesweeper.moves ?? [])}
+    </section>
+
+    <section class="panel">
+      <h3>Board Observations</h3>
+      ${renderMinesweeperObservationTable(minesweeper.observations ?? [])}
+    </section>
+
+    <section class="panel">
+      <h3>Screenshots</h3>
+      ${renderScreenshots(summary.screenshotPaths ?? [])}
+    </section>
+
+    <section class="panel">
+      <h3>Artifact Paths</h3>
+      ${renderPathList(summary.artifactPaths ?? [])}
+    </section>
+  `;
+}
+
+function renderMinesweeperMoveTable(moves) {
+  if (!Array.isArray(moves) || moves.length === 0) {
+    return "<div class=\"status\">No Minesweeper moves recorded.</div>";
+  }
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Action</th>
+            <th>Cell</th>
+            <th>Risk</th>
+            <th>Safe / mines</th>
+            <th>Reason</th>
+            <th>Status</th>
+            <th>Applied</th>
+            <th>Screenshots</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${moves
+            .map(
+              (move) => `
+                <tr>
+                  <td>${escapeHtml(move.moveNumber)}</td>
+                  <td>${escapeHtml(move.action)} / ${escapeHtml(move.executedAction)}</td>
+                  <td>${escapeHtml(move.x)},${escapeHtml(move.y)}</td>
+                  <td>${escapeHtml(move.riskEstimate)}</td>
+                  <td>${escapeHtml(move.safeMoveCount)} / ${escapeHtml(move.knownMineCount)}</td>
+                  <td>${escapeHtml(move.reason)}</td>
+                  <td>${escapeHtml(move.beforeStatus)} -> ${escapeHtml(move.afterStatus)}</td>
+                  <td>${escapeHtml(move.moveApplied)}</td>
+                  <td>${escapeHtml([move.beforeScreenshotPath, move.afterScreenshotPath].filter(Boolean).join("\\n"))}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMinesweeperObservationTable(observations) {
+  if (!Array.isArray(observations) || observations.length === 0) {
+    return "<div class=\"status\">No Minesweeper observations recorded.</div>";
+  }
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>State</th>
+            <th>Move</th>
+            <th>Status</th>
+            <th>Counts</th>
+            <th>Remaining</th>
+            <th>Changed</th>
+            <th>Board hash</th>
+            <th>Screenshot</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${observations
+            .slice(-80)
+            .map(
+              (observation) => `
+                <tr>
+                  <td>${escapeHtml(observation.timestamp)}</td>
+                  <td>${escapeHtml(observation.loopState)}</td>
+                  <td>${escapeHtml(observation.moveNumber)}</td>
+                  <td>${escapeHtml(observation.status)}</td>
+                  <td>r ${escapeHtml(observation.revealedCount)} / f ${escapeHtml(observation.flaggedCount)} / h ${escapeHtml(observation.hiddenCount)}</td>
+                  <td>${escapeHtml(observation.remainingMines)}</td>
+                  <td>${escapeHtml(observation.boardChangedSinceLastObservation)}</td>
+                  <td>${escapeHtml(observation.boardHash)}</td>
+                  <td>${escapeHtml(observation.screenshotPath)}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMinesweeperBoard(cells) {
+  if (!Array.isArray(cells) || cells.length === 0) {
+    return "<div class=\"status\">Waiting for parsed Minesweeper cells...</div>";
+  }
+  const width = Math.max(...cells.map((cell) => Number(cell.x) || 0));
+  const height = Math.max(...cells.map((cell) => Number(cell.y) || 0));
+  const byKey = new Map(cells.map((cell) => [`${cell.x},${cell.y}`, cell]));
+  const rows = [];
+  for (let y = 1; y <= height; y += 1) {
+    const columns = [];
+    for (let x = 1; x <= width; x += 1) {
+      const cell = byKey.get(`${x},${y}`) ?? {};
+      columns.push(`<span class="mine-cell mine-${escapeHtml(cell.state ?? "unknown")}">${escapeHtml(minesweeperCellText(cell))}</span>`);
+    }
+    rows.push(`<div class="mine-row">${columns.join("")}</div>`);
+  }
+  return `<div class="mine-board">${rows.join("")}</div>`;
 }
 
 function renderTurnObservationTable(observations) {
@@ -840,6 +1037,27 @@ function repetitionText(chess) {
 
 function actionText(action) {
   return firstText([action.semanticActionId, action.actionKind, action.status]);
+}
+
+function minesweeperCellText(cell) {
+  if (!cell) {
+    return "?";
+  }
+  if (cell.state === "flagged") {
+    return "F";
+  }
+  if (cell.state === "hidden") {
+    return ".";
+  }
+  if (cell.state === "exploded") {
+    return "X";
+  }
+  if (cell.state === "revealed") {
+    return cell.adjacentMineCount === 0 || cell.adjacentMineCount === null || cell.adjacentMineCount === undefined
+      ? ""
+      : String(cell.adjacentMineCount);
+  }
+  return "?";
 }
 
 function outcomeClass(outcome) {

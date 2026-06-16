@@ -35,7 +35,8 @@
       "@game-bots/wordle-web": ["./games/wordle-web/src/index.ts"],
       "@game-bots/play2048-web": ["./games/play2048-web/src/index.ts"],
       "@game-bots/cat-and-dog-web": ["./games/cat-and-dog-web/src/index.ts"],
-      "@game-bots/chess-com-web": ["./games/chess-com-web/src/index.ts"]
+      "@game-bots/chess-com-web": ["./games/chess-com-web/src/index.ts"],
+      "@game-bots/minesweeper-online-web": ["./games/minesweeper-online-web/src/index.ts"]
     },
     "types": [
       "node"

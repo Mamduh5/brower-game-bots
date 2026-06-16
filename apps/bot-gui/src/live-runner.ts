@@ -15,9 +15,9 @@ import {
   type NormalizedShot
 } from "./summary-loader.js";
 
-export type CatAndDogDifficulty = "easy" | "normal" | "hard" | "impossible";
+export type CatAndDogDifficulty = "easy" | "normal" | "hard" | "impossible" | "beginner";
 export type CatAndDogStrategyMode = "baseline" | "explore";
-export type BotGameId = "cat-and-dog-web" | "chess-com-web";
+export type BotGameId = "cat-and-dog-web" | "chess-com-web" | "minesweeper-online-web";
 export type LiveRunStatus = "starting" | "running" | "stopping" | "stopped" | "completed" | "failed";
 
 export interface StartBotRunRequest {
@@ -45,6 +45,7 @@ export interface LiveRunState {
   readonly latestAction: JsonRecord | null;
   readonly latestShotPlan: JsonRecord | null;
   readonly latestChess: JsonRecord | null;
+  readonly latestMinesweeper: JsonRecord | null;
   readonly latestObservation: LiveObservation | null;
   readonly latestAttempt: NormalizedAttempt | null;
   readonly shotHistory: readonly NormalizedShot[];
@@ -248,13 +249,17 @@ export class BotRunManager {
         run.phase = eventType;
       }
       const message = readString(parsed, "msg");
-      if (message?.includes("Starting cat-and-dog player run") || message?.includes("Starting chess-com player run")) {
+      if (
+        message?.includes("Starting cat-and-dog player run") ||
+        message?.includes("Starting chess-com player run") ||
+        message?.includes("Starting minesweeper-online player run")
+      ) {
         run.status = "running";
       }
       return;
     }
 
-    const completedMatch = line.match(/Completed (?:cat-and-dog|chess-com) player run ([0-9a-f-]+)/i);
+    const completedMatch = line.match(/Completed (?:cat-and-dog|chess-com|minesweeper-online) player run ([0-9a-f-]+)/i);
     if (completedMatch?.[1]) {
       run.cliRunId = completedMatch[1];
     }
@@ -323,6 +328,7 @@ export class BotRunManager {
       latestAction: eventState?.latestAction ?? null,
       latestShotPlan: eventState?.latestShotPlan ?? null,
       latestChess: (summary?.chess ? (summary.chess as unknown as JsonRecord) : null) ?? eventState?.latestChess ?? null,
+      latestMinesweeper: (summary?.minesweeper ? (summary.minesweeper as unknown as JsonRecord) : null) ?? eventState?.latestMinesweeper ?? null,
       latestObservation,
       latestAttempt,
       shotHistory,
@@ -343,6 +349,7 @@ interface DerivedEventState {
   readonly latestAction: JsonRecord | null;
   readonly latestShotPlan: JsonRecord | null;
   readonly latestChess: JsonRecord | null;
+  readonly latestMinesweeper: JsonRecord | null;
   readonly latestObservation: LiveObservation | null;
   readonly latestAttempt: NormalizedAttempt | null;
   readonly shotHistory: readonly NormalizedShot[];
@@ -355,6 +362,7 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
   let latestAction: JsonRecord | null = null;
   let latestShotPlan: JsonRecord | null = null;
   let latestChess: JsonRecord | null = null;
+  let latestMinesweeper: JsonRecord | null = null;
   let latestObservation: LiveObservation | null = null;
   let latestAttempt: NormalizedAttempt | null = null;
   let latestScreenshotPath: string | null = null;
@@ -397,6 +405,27 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
           promotionUiDetected: booleanAt(turn, "promotionUiDetected") ?? booleanAt(semanticState, "promotionUiDetected"),
           promotionChoiceCount: numberAt(turn, "promotionChoiceCount") ?? numberAt(semanticState, "promotionChoiceCount"),
           elapsedWaitMs: numberAt(turn, "elapsedWaitMs")
+        };
+      }
+      if (observationKind?.startsWith("minesweeper.")) {
+        const minesweeper = recordAt(payload, "minesweeper");
+        latestMinesweeper = {
+          ...(latestMinesweeper ?? {}),
+          status: readString(semanticState, "status") ?? readString(minesweeper, "status"),
+          difficulty: readString(semanticState, "difficulty") ?? readString(minesweeper, "difficulty"),
+          width: numberAt(semanticState, "width") ?? numberAt(minesweeper, "width"),
+          height: numberAt(semanticState, "height") ?? numberAt(minesweeper, "height"),
+          mineCount: numberAt(semanticState, "mineCount") ?? numberAt(minesweeper, "mineCount"),
+          remainingMines: numberAt(semanticState, "remainingMines") ?? numberAt(minesweeper, "remainingMines"),
+          revealedCount: numberAt(semanticState, "revealedCount") ?? numberAt(minesweeper, "revealedCount"),
+          flaggedCount: numberAt(semanticState, "flaggedCount") ?? numberAt(minesweeper, "flaggedCount"),
+          hiddenCount: numberAt(semanticState, "hiddenCount") ?? numberAt(minesweeper, "hiddenCount"),
+          boardHash: readString(minesweeper, "boardHash"),
+          boardChangedSinceLastObservation: booleanAt(minesweeper, "boardChangedSinceLastObservation"),
+          loopState: readString(minesweeper, "loopState"),
+          moveNumber: numberAt(minesweeper, "moveNumber"),
+          faceClass: readString(semanticState, "faceClass"),
+          cells: arrayAt(semanticState, "cells").map(asRecord)
         };
       }
       const observation = buildObservationFromSemanticState(semanticState);
@@ -451,6 +480,19 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
           promotionChoiceApplied: true
         };
       }
+      if (readString(payload, "semanticActionId") === "execute-minesweeper-move") {
+        latestMinesweeper = {
+          ...(latestMinesweeper ?? {}),
+          selectedAction: readString(semanticParams, "action"),
+          executedAction: readString(payload, "executedAction"),
+          selectedCell: `${numberAt(semanticParams, "x") ?? "?"},${numberAt(semanticParams, "y") ?? "?"}`,
+          selectedReason: readString(semanticParams, "reason"),
+          riskEstimate: numberAt(semanticParams, "riskEstimate"),
+          safeMoveCount: numberAt(semanticParams, "safeMoveCount"),
+          knownMineCount: numberAt(semanticParams, "knownMineCount"),
+          firstClick: booleanAt(semanticParams, "firstClick")
+        };
+      }
     }
     if (type === "artifact.stored") {
       const artifact = recordAt(event, "artifact");
@@ -466,6 +508,7 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
     latestAction,
     latestShotPlan,
     latestChess,
+    latestMinesweeper,
     latestObservation,
     latestAttempt,
     shotHistory,
@@ -474,11 +517,22 @@ function deriveEventState(events: readonly JsonRecord[]): DerivedEventState {
 }
 
 function normalizeStartRequest(input: StartBotRunRequest): StartBotRunRequest {
+  const gameId =
+    input.gameId === "chess-com-web"
+      ? "chess-com-web"
+      : input.gameId === "minesweeper-online-web"
+        ? "minesweeper-online-web"
+        : "cat-and-dog-web";
   return {
-    gameId: input.gameId === "chess-com-web" ? "chess-com-web" : "cat-and-dog-web",
-    difficulty: ["easy", "normal", "hard", "impossible"].includes(input.difficulty) ? input.difficulty : "easy",
+    gameId,
+    difficulty:
+      gameId === "minesweeper-online-web"
+        ? "beginner"
+        : ["easy", "normal", "hard", "impossible"].includes(input.difficulty)
+          ? input.difficulty
+          : "easy",
     maxAttempts: Number.isInteger(input.maxAttempts) ? Math.max(1, Math.min(50, input.maxAttempts)) : 3,
-    maxMoves: Number.isInteger(input.maxMoves) ? Math.max(1, Math.min(120, input.maxMoves)) : 80,
+    maxMoves: Number.isInteger(input.maxMoves) ? Math.max(1, Math.min(500, input.maxMoves)) : 80,
     strategyMode: input.strategyMode === "explore" ? "explore" : "baseline",
     stopOnWin: input.stopOnWin === true,
     headless: input.headless !== false
@@ -490,6 +544,15 @@ function buildCliArgs(settings: StartBotRunRequest): readonly string[] {
     return [
       "run-player-chess-com",
       "--opponent=computer",
+      `--max-moves=${settings.maxMoves}`,
+      settings.headless ? "--headless=true" : "--visible"
+    ];
+  }
+
+  if (settings.gameId === "minesweeper-online-web") {
+    return [
+      "run-player-minesweeper-online",
+      "--difficulty=beginner",
       `--max-moves=${settings.maxMoves}`,
       settings.headless ? "--headless=true" : "--visible"
     ];

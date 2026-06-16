@@ -2,6 +2,7 @@ import { createContainer } from "./bootstrap/container.js";
 import { rebuildReport } from "./commands/rebuild-report.js";
 import { runPlayerChessCom } from "./commands/run-player-chess-com.js";
 import { runPlayerCatAndDog } from "./commands/run-player-cat-and-dog.js";
+import { runPlayerMinesweeperOnline } from "./commands/run-player-minesweeper-online.js";
 import { runPlayer } from "./commands/run-player.js";
 import { runTester } from "./commands/run-tester.js";
 
@@ -98,6 +99,13 @@ async function main(): Promise<void> {
         pollMs: parseNumberFlag(args, "--poll-ms", 750)
       });
       break;
+    case "run-player-minesweeper-online":
+      await runPlayerMinesweeperOnline(container, {
+        difficulty: "beginner",
+        maxMoves: parseNumberFlag(args, "--max-moves", 200),
+        headless: parseHeadlessFlag(args)
+      });
+      break;
     case "run-tester":
       await runTester(container);
       break;
@@ -122,7 +130,8 @@ async function main(): Promise<void> {
       process.stdout.write(
         "Usage: game-bots <run-player|run-player-cat-and-dog|run-player-chess-com|run-tester|run-tester-2048|run-tester-cat-and-dog|rebuild-report>\n" +
           "Cat-and-Dog player flags: --difficulty=easy|normal|hard|impossible --max-attempts=3 --strategy-mode=baseline|explore --stop-on-win=true|false --headless=true|false --visible\n" +
-          "Chess.com player flags: --opponent=computer --max-moves=80 --turn-timeout-ms=30000 --poll-ms=750 --headless=true|false --visible\n"
+          "Chess.com player flags: --opponent=computer --max-moves=80 --turn-timeout-ms=30000 --poll-ms=750 --headless=true|false --visible\n" +
+          "Minesweeper Online player flags: --difficulty=beginner --max-moves=200 --headless=true|false --visible\n"
       );
   }
 }

@@ -1,6 +1,6 @@
-# Cat-and-Dog Bot GUI
+# Game Bot GUI
 
-This app is a local live runner plus completed-run replay and artifact viewer for Cat-and-Dog player runs.
+This app is a local live runner plus completed-run replay and artifact viewer for Cat-and-Dog, Chess.com, and Minesweeper Online player runs.
 
 Start it from the repository root:
 
@@ -34,9 +34,17 @@ pnpm run dev -- run-player-chess-com --opponent=computer --max-moves=80 --visibl
 
 Chess.com runs are computer-only. The runner navigates to `https://www.chess.com/play/computer`, aborts if it detects online/live human matchmaking, reads Chess.com board piece classes into FEN, and uses `chess.js` to choose from real legal moves. The current policy scores legal moves for checkmate, check, captures, material, simple capture safety, opening development, center control, king safety, promotion, bounded shallow search, endgame progress, and anti-repetition. It records the selected move score/reason, search depth, node count, material balance, repetition count, draw reason, and top candidate moves. It does not use Stockfish.
 
-The live panel polls the local API for the current process status, run id, run phase, browser mode, latest action, screenshot artifact, and game telemetry. Cat-and-Dog shows HP, wind, wall state, shot plan, and shot history. Chess.com shows board FEN, side to move, bot color, last move, planned move, selected move reason, selected move score, search depth, node count, repetition warning, draw reason, top candidate moves, material balance, legal move count, and outcome. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`, which also closes the visible browser launched by that process tree.
+Minesweeper Online Beginner mode can be started with:
 
-The replay dashboard still automatically scans `artifacts/**/reports/02-player-attempt-summary.json` and `artifacts/**/reports/02-chess-com-player-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
+```powershell
+pnpm run dev -- run-player-minesweeper-online --difficulty=beginner --max-moves=200 --visible
+```
+
+Minesweeper runs open `https://minesweeperonline.com/`, select Beginner through the visible Game options UI, parse visible DOM cell classes, and use deterministic Minesweeper rules plus bounded-risk guesses. They do not read hidden mine data, import, export, or page internals that expose mines.
+
+The live panel polls the local API for the current process status, run id, run phase, browser mode, latest action, screenshot artifact, and game telemetry. Cat-and-Dog shows HP, wind, wall state, shot plan, and shot history. Chess.com shows board FEN, side to move, bot color, last move, planned move, selected move reason, selected move score, search depth, node count, repetition warning, draw reason, top candidate moves, material balance, legal move count, and outcome. Minesweeper shows board size, mine counts, remaining mines, revealed/flagged/hidden counts, selected cell/action, risk estimate, deduction reason, board hash, and a compact parsed board. Stop Run terminates the CLI process tree on Windows via `taskkill /T /F`, which also closes the visible browser launched by that process tree.
+
+The replay dashboard still automatically scans `artifacts/**/reports/02-player-attempt-summary.json`, `artifacts/**/reports/02-chess-com-player-summary.json`, and `artifacts/**/reports/02-minesweeper-online-player-summary.json`. You can also paste a specific summary path into the Summary path field, for example:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json

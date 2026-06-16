@@ -65,6 +65,9 @@ importers:
       '@game-bots/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@game-bots/minesweeper-online-web':
+        specifier: workspace:*
+        version: link:../../games/minesweeper-online-web
       '@game-bots/persistence-sqlite':
         specifier: workspace:*
         version: link:../../packages/persistence-sqlite
@@ -115,6 +118,21 @@ importers:
 
   games/chess-com-web:
     dependencies:
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../../packages/environment-sdk
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../../packages/game-sdk
+      '@game-bots/runtime-core':
+        specifier: workspace:*
+        version: link:../../packages/runtime-core
+
+  games/minesweeper-online-web:
+    dependencies:
+      '@game-bots/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@game-bots/environment-sdk':
         specifier: workspace:*
         version: link:../../packages/environment-sdk

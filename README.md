@@ -99,8 +99,9 @@ pnpm run dev -- run-player-cat-and-dog --max-attempts=5 --stop-on-win=false
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false
 pnpm run dev -- run-player-cat-and-dog --difficulty=impossible --max-attempts=5 --strategy-mode=explore --stop-on-win=false --visible
 pnpm run dev -- run-player-chess-com --opponent=computer --max-moves=80 --visible
+pnpm run dev -- run-player-minesweeper-online --difficulty=beginner --max-moves=200 --visible
 
-## Cat-and-Dog Bot GUI
+## Bot GUI
 
 Start the local live runner and completed-run replay dashboard:
 
@@ -108,14 +109,16 @@ Start the local live runner and completed-run replay dashboard:
 pnpm run gui
 ```
 
-Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start Cat-and-Dog or Chess.com with selectable game, browser mode, and bounded run settings. Browser mode defaults to Headless; select Visible to launch a real Playwright-controlled browser window while the bot plays.
+Open the printed URL, usually `http://127.0.0.1:5178`. The Live Runner panel can start Cat-and-Dog, Chess.com, or Minesweeper Online with selectable game, browser mode, and bounded run settings. Browser mode defaults to Headless; select Visible to launch a real Playwright-controlled browser window while the bot plays.
 
 Chess.com support is computer-only. The runner navigates to `https://www.chess.com/play/computer`, refuses online/live human matchmaking signals, records board FEN/moves/screenshots, and uses `chess.js` to choose from real legal moves. The current policy is a basic explainable evaluator: it scores legal moves for checkmate, check, captures, material, simple capture safety, opening development, center control, king safety, and promotion. It records the selected move score/reason plus top candidate moves; it does not use Stockfish.
 
-The dashboard scans `artifacts/**/reports/02-player-attempt-summary.json` and `artifacts/**/reports/02-chess-com-player-summary.json` and can load a manually entered summary path such as:
+Minesweeper Online support targets Beginner 9x9/10 mines. It opens `https://minesweeperonline.com/`, selects Beginner through the visible Game options UI, parses only visible DOM cell classes, applies deterministic reveal/flag rules, and records bounded-risk guesses when no deterministic move is available.
+
+The dashboard scans `artifacts/**/reports/02-player-attempt-summary.json`, `artifacts/**/reports/02-chess-com-player-summary.json`, and `artifacts/**/reports/02-minesweeper-online-player-summary.json`. It can load a manually entered summary path such as:
 
 ```text
 artifacts/<runId>/reports/02-player-attempt-summary.json
 ```
 
-It displays run id, game/profile ids, requested and runtime difficulty, max attempts, stop-on-win, strategy mode, attempt outcomes, final HP and damage, wind, wall state, selected/planned/prepared shot values, shot history, planner/adaptation reasons, final notes, artifact paths, and screenshot paths. See `apps/bot-gui/README.md` for the read-only replay scope and future human-vs-bot seam.
+It displays run id, game/profile ids, requested and runtime difficulty, max attempts/moves, stop-on-win, strategy mode, attempt outcomes, final HP and damage, wind, wall state, selected/planned/prepared shot values, shot history, Minesweeper move/board timelines, planner/adaptation/deduction reasons, final notes, artifact paths, and screenshot paths. See `apps/bot-gui/README.md` for the replay scope and future human-vs-bot seam.

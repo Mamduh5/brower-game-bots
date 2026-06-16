@@ -46,6 +46,9 @@
       "path": "../../games/chess-com-web"
     },
     {
+      "path": "../../games/minesweeper-online-web"
+    },
+    {
       "path": "../../games/play2048-web"
     }
   ],

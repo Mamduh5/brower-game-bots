@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cat-and-Dog Bot Runs</title>
+    <title>Game Bot Runs</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <h1>Cat-and-Dog Bot Runs</h1>
+        <h1>Game Bot Runs</h1>
         <p>Local live bot runner, spectator, and completed-run replay viewer.</p>
       </div>
       <button id="refresh-runs" type="button">Refresh</button>
@@ -44,7 +44,7 @@
           <div class="runner-heading">
             <div>
               <h2>Live Runner</h2>
-              <p class="muted">Start the existing Cat-and-Dog CLI and watch real run artifacts update.</p>
+              <p class="muted">Start a visible or headless bot CLI run and watch real telemetry update.</p>
             </div>
             <div class="runner-actions">
               <button id="start-run" type="button">Start Run</button>
@@ -58,12 +58,14 @@
               <select id="run-game-id" name="gameId">
                 <option value="cat-and-dog-web">Cat and Dog</option>
                 <option value="chess-com-web">Chess.com Computer</option>
+                <option value="minesweeper-online-web">Minesweeper Online</option>
               </select>
             </label>
             <label>
               Difficulty
               <select id="run-difficulty" name="difficulty">
                 <option value="easy">easy</option>
+                <option value="beginner">beginner</option>
                 <option value="normal">normal</option>
                 <option value="hard">hard</option>
                 <option value="impossible">impossible</option>
@@ -75,7 +77,7 @@
             </label>
             <label>
               Max moves
-              <input id="run-max-moves" name="maxMoves" type="number" min="1" max="120" value="80" />
+              <input id="run-max-moves" name="maxMoves" type="number" min="1" max="500" value="80" />
             </label>
             <label>
               Strategy mode

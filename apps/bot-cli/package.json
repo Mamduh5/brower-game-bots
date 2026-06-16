@@ -27,6 +27,7 @@
     "@game-bots/environment-playwright": "workspace:*",
     "@game-bots/game-sdk": "workspace:*",
     "@game-bots/logging": "workspace:*",
+    "@game-bots/minesweeper-online-web": "workspace:*",
     "@game-bots/play2048-web": "workspace:*",
     "@game-bots/persistence-sqlite": "workspace:*",
     "@game-bots/reporting": "workspace:*",
