@@ -51,9 +51,11 @@ class DesktopBridge {
     static long Beat, Deadline, LastInput, HeldSince;
     static int MaxHoldMs = 5500;
     internal static bool ControllerResponsive { get { return !Parent.HasExited && Clock.ElapsedMilliseconds - Beat <= 2500; } }
-    static bool Armed, Bound, Closing, Emergency;
+    static bool Armed, Bound, Emergency;
+    static volatile bool Closing;
     static Process Parent;
     static Mutex Lease;
+    static EventWaitHandle ShutdownRequested;
 
     static void Main(string[] args) {
         Console.SetIn(new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false)));
@@ -61,6 +63,10 @@ class DesktopBridge {
         try {
             if (!SetProcessDpiAwarenessContext(new IntPtr(-4))) throw new Exception("Cannot enable per-monitor DPI awareness v2 (Windows 10 1703+ required).");
             Parent = Process.GetProcessById(int.Parse(args[0]));
+            // Capture the process handle now so a reused parent PID cannot keep us alive.
+            var parentHandle = Parent.Handle;
+            ShutdownRequested = new EventWaitHandle(false, EventResetMode.ManualReset,
+                "Local\\GameBotsDesktopBridgeShutdown-" + Process.GetCurrentProcess().Id);
             Beat = Clock.ElapsedMilliseconds;
             var watch = new Thread(Watch) { IsBackground = true }; watch.Start();
             string line;
@@ -80,7 +86,7 @@ class DesktopBridge {
                 }
             }
         } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
-        finally { lock (Gate) { Disarm("Helper closed"); } DesktopRecorder.Shutdown(); if (Lease != null) { Lease.ReleaseMutex(); Lease.Dispose(); } }
+        finally { Closing = true; lock (Gate) { Disarm("Helper closed"); } DesktopRecorder.Shutdown(); if (Lease != null) { Lease.ReleaseMutex(); Lease.Dispose(); } }
     }
     static object Dispatch(Dictionary<string, object> c) {
         string op = (string)c["op"];
@@ -252,9 +258,16 @@ class DesktopBridge {
     static void Watch() {
         while (!Closing) {
             Thread.Sleep(20);
-            lock (Gate) {
+            // Check even when idle/unbound, and outside Gate: Dispatch may be blocked.
+            if (Parent.HasExited || Clock.ElapsedMilliseconds - Interlocked.Read(ref Beat) > 10000 || ShutdownRequested.WaitOne(0)) {
+                // A stuck dispatcher must not leave a detached executable alive forever.
+                new Thread(delegate() { Thread.Sleep(3000); Environment.Exit(1); }) { IsBackground = true }.Start();
+                lock (Gate) { Disarm("Controller stopped or setup requested shutdown"); }
+                try { DesktopRecorder.Shutdown(); } finally { Environment.Exit(0); }
+            }
+            if (!Monitor.TryEnter(Gate, 20)) continue;
+            try {
               try {
-                if (Parent.HasExited) { Disarm("Controller process exited"); Environment.Exit(0); }
                 if ((GetAsyncKeyState(0x77) & 0x8000) != 0) { Emergency = true; Disarm("F8 emergency stop"); }
                 if (Armed) try {
                     CheckActive();
@@ -262,7 +275,7 @@ class DesktopBridge {
                 } catch (Exception e) { Disarm(e.Message); }
                 else if (Keys.Count + Buttons.Count > 0) Release();
               } catch (Exception e) { Disarm("Watchdog failed: " + e.Message); }
-            }
+            } finally { Monitor.Exit(Gate); }
         }
     }
 }

@@ -217,6 +217,12 @@ export class BotRunManager {
     return this.getLiveState(id);
   }
 
+  async close(): Promise<void> {
+    await Promise.allSettled([...this.runs.values()]
+      .filter(run => run.child.exitCode === null && run.child.signalCode === null)
+      .map(run => this.stop(run.botRunId)));
+  }
+
   async getLiveState(id: string): Promise<LiveRunState> {
     const run = this.findRun(id);
     if (!run) {

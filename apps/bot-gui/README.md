@@ -12,6 +12,21 @@ pnpm run gui
 
 Open the printed local URL, usually `http://127.0.0.1:5178`.
 
+Closing the browser tab leaves the GUI server running. Stop it with Ctrl+C in its
+terminal. A repeated `pnpm gui` launch recognizes this checkout's running server
+and exits successfully with an already-running message. An unrelated server, or
+an older GUI without the identity endpoint, produces a handled port-conflict
+message; it is never killed. `BOT_GUI_PORT` can select another port.
+
+GUI shutdown stops its desktop controllers and waits for native helpers to exit,
+with bounded cleanup for stuck helpers. Detached helpers also exit when their
+controller dies or stops sending heartbeats. `pnpm desktop:setup` compiles to a
+temporary directory before replacing the binaries, stopping only bridges whose
+full executable path matches this checkout. It requests graceful shutdown first
+and can terminate an older or stuck matching bridge. This interrupts any desktop
+session still using that bridge; run setup between sessions. An open desktop
+fixture must be closed before its executable can be replaced.
+
 Use the Live Runner panel to choose game, browser mode, and the game-specific bounded settings, then click Start Run. Browser mode defaults to Headless. Select Visible to open a real Playwright-controlled browser window on the desktop while the bot plays.
 
 The server starts the existing CLI command as a child process, equivalent to:

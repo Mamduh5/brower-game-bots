@@ -10,6 +10,12 @@ import { DesktopHotkeysSchema, RecordingOptionsSchema, RecordingStateSchema, typ
 const HealthSchema = z.object({ armed: z.boolean(), reason: z.string().nullable(), heldKeys: z.array(z.string()), heldButtons: z.array(z.string()) });
 const CaptureSchema = z.object({ window: DesktopWindowSchema, geometry: z.string(), png: z.string(), capturedAt: z.string() });
 
+const sessions = new Set<WindowsDesktopSession>();
+/** Includes short-lived preview/list sessions as well as persistent controllers. */
+export async function closeWindowsDesktopSessions(): Promise<void> {
+  await Promise.allSettled([...sessions].map(session => session.close()));
+}
+
 /** One persistent helper owns actual input and independently watches focus/F8/leases. */
 export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
   private readonly child: ChildProcessWithoutNullStreams;
@@ -20,12 +26,21 @@ export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
   private stderr = "";
   private actionActive = false;
   private currentAction: AbortController | undefined;
+  private closing: Promise<void> | undefined;
+  private readonly exited: Promise<void>;
+  private reapTimer: NodeJS.Timeout | undefined;
 
   constructor(helperPath = fileURLToPath(new URL("../bin/DesktopBridge.exe", import.meta.url))) {
     if (process.platform !== "win32") throw new Error("Desktop control requires Windows 10/11.");
     // A detached Windows process survives controller termination long enough to release input.
     // It remains supervised through stdin EOF, heartbeat, and parent PID checks.
     this.child = spawn(helperPath, [String(process.pid)], { stdio: "pipe", windowsHide: true, detached: true });
+    sessions.add(this);
+    this.exited = new Promise(resolve => {
+      const done = () => { clearTimeout(this.reapTimer); sessions.delete(this); resolve(); };
+      this.child.once("exit", done);
+      this.child.once("error", done);
+    });
     this.child.stderr.on("data", (data: Buffer) => { this.stderr = (this.stderr + data.toString()).slice(-4000); });
     createInterface({ input: this.child.stdout }).on("line", line => {
       try {
@@ -46,6 +61,12 @@ export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
     this.closed = true; clearInterval(this.heartbeat); this.currentAction?.abort(error);
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear(); this.child.stdin.end();
+    // EOF/heartbeat normally release input and exit; bound cleanup if native code hangs.
+    if (sessions.has(this) && !this.reapTimer) {
+      this.reapTimer = setTimeout(() => {
+        if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill();
+      }, 3000);
+    }
   }
 
   private request(command: Record<string, unknown>): Promise<unknown> {
@@ -84,12 +105,19 @@ export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
     const health = await this.health();
     if (health.heldKeys.length || health.heldButtons.length) throw new Error(health.reason ?? "Held input cleanup failed");
   }
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    return this.closing ??= this.closeHelper();
+  }
+
+  private async closeHelper(): Promise<void> {
     this.currentAction?.abort(new Error("Stopped"));
     clearInterval(this.heartbeat);
-    try { await this.releaseAll(); await this.request({ op: "close" }); }
-    finally { this.closed = true; this.child.stdin.end(); }
+    try {
+      if (!this.closed) await this.request({ op: "close" }); // Native close releases held input.
+    } finally {
+      this.fail(new Error("Native session is closed"));
+      await this.exited;
+    }
   }
 
   async execute(raw: DesktopAction, geometry: string, signal: AbortSignal): Promise<void> {

@@ -1,6 +1,8 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, get, type IncomingMessage, type ServerResponse } from "node:http";
+import { closeWindowsDesktopSessions } from "@game-bots/environment-windows";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BotRunManager, discoverScreenshotPaths } from "./live-runner.js";
@@ -26,15 +28,89 @@ const botRunManager = new BotRunManager(repoRoot);
 const desktopManager = new DesktopManager(repoRoot);
 const recordingManager = new DesktopRecordingManager(repoRoot, desktopManager);
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => {
-  void recordingManager.close().finally(() => { server.close(); process.exit(0); });
-});
+const canonicalRoot = realpathSync(repoRoot);
+const repositoryId = createHash("sha256").update(process.platform === "win32" ? canonicalRoot.toLowerCase() : canonicalRoot).digest("hex");
+const identityPath = "/api/gui-instance";
+let shuttingDown = false;
 
 const server = createServer((request, response) => {
+  if (shuttingDown) { sendJson(response, 503, { error: "GUI is shutting down." }); return; }
   void handleRequest(request, response).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : "Unexpected dashboard server error.";
     sendJson(response, 500, { error: message });
   });
+});
+
+async function shutdown(exitCode: number): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  server.close();
+  server.closeAllConnections();
+  // Bound shutdown even if a request or native dispatcher is stuck.
+  const deadline = setTimeout(() => process.exit(exitCode || 1), 15000);
+  const nativeDeadline = setTimeout(() => { void closeWindowsDesktopSessions(); }, 6000);
+  try {
+    await Promise.allSettled([botRunManager.close(), (async () => {
+      try { await recordingManager.close(); }
+      finally { await desktopManager.close(); }
+    })()]);
+  } finally {
+    await closeWindowsDesktopSessions();
+    clearTimeout(nativeDeadline);
+    clearTimeout(deadline);
+    process.exit(exitCode);
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"] as const) {
+  process.on(signal, () => { void shutdown(0); });
+}
+for (const event of ["uncaughtException", "unhandledRejection"] as const) {
+  process.on(event, (error: unknown) => {
+    console.error("GUI stopped after an unexpected error:", error);
+    void shutdown(1);
+  });
+}
+
+function existingInstanceMatches(): Promise<boolean> {
+  const hostname = options.host === "0.0.0.0" ? "127.0.0.1" : options.host === "::" ? "::1" : options.host;
+  return new Promise(resolve => {
+    const probe = get({ hostname, port: options.port, path: identityPath }, response => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        body += chunk;
+        if (body.length > 4096) { probe.destroy(); resolve(false); }
+      });
+      response.on("error", () => resolve(false));
+      response.on("end", () => {
+        try {
+          const identity = JSON.parse(body);
+          resolve(response.statusCode === 200 && identity.app === "bot-gui" && identity.repositoryId === repositoryId);
+        } catch { resolve(false); }
+      });
+    });
+    const timeout = setTimeout(() => { probe.destroy(); resolve(false); }, 1500);
+    probe.on("close", () => clearTimeout(timeout));
+    probe.on("error", () => resolve(false));
+  });
+}
+
+server.on("error", (error: NodeJS.ErrnoException) => {
+  void (async () => {
+    if (error.code === "EADDRINUSE") {
+      if (await existingInstanceMatches()) {
+        console.log(`This repository's bot GUI is already running on ${options.host}:${options.port}. Reuse the existing GUI.`);
+        await shutdown(0);
+      } else {
+        console.error(`Cannot start GUI: ${options.host}:${options.port} is occupied by an unidentified server (possibly an older GUI). Close that server or use BOT_GUI_PORT to choose another port. No process was stopped.`);
+        await shutdown(1);
+      }
+    } else {
+      console.error(`Cannot start GUI: ${error.message}`);
+      await shutdown(1);
+    }
+  })();
 });
 
 server.listen(options.port, options.host, () => {
@@ -45,6 +121,12 @@ server.listen(options.port, options.host, () => {
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const route = parseRoute(requestUrl.pathname);
+
+  if (request.method === "GET" && requestUrl.pathname === identityPath) {
+    response.setHeader("cache-control", "no-store");
+    sendJson(response, 200, { app: "bot-gui", repositoryId });
+    return;
+  }
 
   if (requestUrl.pathname.startsWith("/api/desktop/")) {
     if (!isLocalDesktopRequest(request)) { sendJson(response, 403, { error: "Desktop control requires a same-origin localhost request." }); return; }
