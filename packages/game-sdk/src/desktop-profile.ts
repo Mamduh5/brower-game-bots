@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DesktopActionSchema, DesktopWindowSchema } from "@game-bots/environment-sdk";
+import { LearnedRunOptionsSchema } from "./teaching.js";
 
 // Preserve the existing action objects; timing/editor metadata are optional additions.
 export const DesktopSequenceActionSchema = z.object({
@@ -23,6 +24,9 @@ export const DesktopProfileSchema = z.object({
   name: z.string().trim().min(1).max(80),
   mode: z.enum(["automation", "feedback"]).default("automation"),
   goal: z.string().max(2000).default(""),
+  learnedBehaviorId: z.string().uuid().optional(),
+  policyTimeoutMs: z.number().int().min(1000).max(120000).optional(),
+  learnedOptions: LearnedRunOptionsSchema.optional(),
   intervalMs: z.number().int().min(100).max(60000).default(1000),
   startDelayMs: z.number().int().min(0).max(60000).default(3000),
   maxActions: z.number().int().min(1).max(10000).default(100),

@@ -1,7 +1,8 @@
 import { mkdir, readdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { DesktopRunner, type DesktopRunState } from "@game-bots/agent-player";
+import { DesktopRunner, LearnedDesktopPolicy, createVisualModel, type DesktopRunState } from "@game-bots/agent-player";
+import { DesktopBehaviorStore } from "./desktop-teaching-manager.js";
 import { WindowsDesktopSession } from "@game-bots/environment-windows";
 import { DesktopProfileSchema, DesktopRunRequestSchema } from "@game-bots/game-sdk";
 import { FsArtifactStore } from "@game-bots/artifact-store-fs";
@@ -50,11 +51,20 @@ export class DesktopManager {
   async start(raw: unknown): Promise<DesktopRunState> {
     if (this.starting || (this.runner && !this.runner.state.endedAt)) throw new Error("A desktop run is already active");
     const request = DesktopRunRequestSchema.parse(raw);
-    if (request.profile.mode === "feedback") throw new Error("No visual reasoning provider is installed. Use automation or integrate a DesktopPolicy.");
     this.starting = true;
     try {
+      let policy: LearnedDesktopPolicy | undefined;
+      if (request.profile.mode === "feedback") {
+        if (!request.profile.learnedBehaviorId) throw new Error("Select a saved learned behavior for intelligent playback");
+        const store = new DesktopBehaviorStore(this.repoRoot); const behavior = await store.get(request.profile.learnedBehaviorId);
+        if (behavior.processName !== request.target.processName) throw new Error("Learned behavior belongs to a different application");
+        const model = createVisualModel();
+        policy = new LearnedDesktopPolicy(model, behavior, await store.references(behavior), request.profile.learnedOptions);
+        request.profile.goal = behavior.goal;
+        request.profile.name = behavior.name;
+      }
       const session = new WindowsDesktopSession();
-      const runner = new DesktopRunner(session, new FsArtifactStore({ rootDir: path.join(this.repoRoot, "artifacts") }), request.target, request.profile);
+      const runner = new DesktopRunner(session, new FsArtifactStore({ rootDir: path.join(this.repoRoot, "artifacts") }), request.target, request.profile, policy);
       this.runner = runner;
       void runner.start().catch(() => undefined); // Runner persists and exposes failures in its state.
       return runner.state;

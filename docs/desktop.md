@@ -1,8 +1,8 @@
 # Windows desktop automation
 
-The GUI can record your mouse/keyboard demonstration and configure bounded playback against a selected native Windows window. Start with the [recording and replay guide](recording.md) for separate start controls, hotkeys, editing and loops. The same controls expose a screenshot-driven policy boundary for future game agents. Browser Player, Tester, plugins, CLI commands and browser replay remain available.
+The GUI supports exact macro recording/replay and demonstration-guided intelligent behavior against a selected native Windows window. See [recording and replay](recording.md) for hotkeys, editing and loops, and [Teach Bot](teaching.md) for visual demonstrations, model configuration and intelligent playback. Browser Player, Tester, plugins, CLI commands and browser replay remain available.
 
-This release has **no general visual AI provider** and **no autonomous Roblox farming agent**. Goal text is saved as intent and passed to an installed `DesktopPolicy`; deterministic automation does not interpret it.
+The learned policy uses a real multimodal provider through `DesktopPolicy`, with OpenAI Responses and compatible Chat Completions integrations. It is a general demonstration-guided first version, not a validated Roblox farming agent. Deterministic automation does not interpret goal text and requires no provider.
 
 ## Setup and quick start
 
@@ -59,7 +59,7 @@ Keys: `KeyA`–`KeyZ`, `Digit0`–`Digit9`, Space, Enter, Tab, Escape, Backspace
 
 Blocking action durations are bounded to 5 seconds each. A continuous held-input episode is independently limited by maxHoldMs, including time between actions: 5.5 seconds by default for existing profiles, configurable up to 60 seconds. Recorded profiles use 60 seconds, and capture pauses held episodes at 59 seconds. Longer sessions require release boundaries. Key/button down steps can overlap with movement, other keys, or buttons. Chords are delivered in order a few milliseconds apart; this is overlapping state, not exact hardware simultaneity. Click/drag refuse a button already held by the session. Hold preserves pre-existing held state on success; errors release everything.
 
-The **Notes & reusable behaviors** section can save the current sequence as a named behavior and reuse it later. Save the enclosing configuration to persist behaviors. Game mappings live here or in a future game integration; the runtime contains no Roblox control rules. The native test profile's WASD/Space/E/right-button examples are editable mappings, not universal game semantics.
+The **Notes & reusable macro sequences** section saves exact action sequences inside the enclosing configuration. These differ from learned behaviors created by **Teach Bot**. Game mappings live in configuration/demonstration data or game integrations; the runtime contains no Roblox control rules. The native test profile's WASD/Space/E/right-button examples are editable mappings, not universal game semantics.
 
 ## Window and input safety
 
@@ -77,21 +77,21 @@ Desktop APIs and desktop evidence are localhost-only, validate Host/Origin, reje
 
 1. Capture the visible target client area, geometry token, timestamp and SHA-256.
 2. For automation, select the next configured action. For feedback, call `decide` with goal, pixels, 20 recent action/observation-history entries, configured skills, remaining actions and elapsed time.
-3. Validate the complete decision. Execute at most 16 proposed actions or a configured behavior of at most 32 actions; global attempt/time limits still apply. Capture after each action. Held state can overlap inside that bounded batch.
-4. Release held state before model calls. Call `verify` with the pre-batch observation and the latest observation/context. Record `progress`, `no-progress`, or `unknown` with the provider's reason. Three consecutive verified no-progress batches pause for inspection; a policy can choose a different action/skill on the next decision.
+3. Validate the complete decision. Generic policies retain the 16-action/32-action configured-skill limits. The learned policy opts into a short batch of at most eight primitives and two seconds requested duration, with observation after release rather than between input edges. Global attempt/time limits apply.
+4. Release held state before model calls. Generic policies call `verify` with before/after context and pause after three no-progress results. The learned policy combines visual verification with its next decision to save a model call and applies explicit stuck/recovery budgets; see [teaching limits](teaching.md#latency-and-cost).
 5. Complete, stop, continue, or pause for human recovery. Invalid provider output, provider timeout, input failure and target loss fail closed. No blind retries are performed because an interrupted action may already have taken effect.
 
-`DesktopPolicy` is a typed integration seam, not a bundled model. A provider has `decide(context, signal)` and `verify(context, before, lastAction, signal)` methods. `before` covers the bounded batch; `context.history` contains individual attempted steps, and `lastAction` identifies the most recent completed step. Providers can resolve a configured `skillId` without gaining access to the raw session. Calls have 15-second timeouts and cancellation; late responses are discarded. In-process providers must cooperate with cancellation for their own network/resource cleanup, but they cannot send physical input through the policy interface.
+`DesktopPolicy` has `decide(context, signal)` and `verify(context, before, lastAction, signal)` methods, plus optional bounded-batch, reset and telemetry hooks. `before` covers the batch; learned-batch history includes its constituent inputs and concise intent. Providers never receive a raw session. Calls default to a 15-second timeout, configurable through `policyTimeoutMs`; learned GUI runs use the provider timeout (45 seconds by default). Cancellation discards late responses. In-process providers must cooperate for their own resource cleanup; the built-in HTTP adapter aborts requests.
 
-The current GUI deliberately launches only automation. Programmatic integrations construct `DesktopRunner(session, artifactStore, target, profile, policy)` with `profile.mode = "feedback"`. Starting feedback without a provider fails before binding. Future game policies can live under `games/*`; no new game plugin is invented just to name a control mapping.
+The GUI launches either automation or a reviewed learned behavior with `profile.mode = "feedback"` and `learnedBehaviorId`. Programmatic integrations can still construct `DesktopRunner(session, artifactStore, target, profile, policy)`. Missing model configuration, unreviewed behavior and mismatched application are rejected before binding. Game policies can still live under `games/*`.
 
-Deterministic mode records pixel changes as **unknown goal progress**. Optional unchanged-screen detection pauses after the configured count; animated games may change continuously while stuck, and a successful click may leave identical pixels. There is no OCR, object detector, template tracking, resource counter or semantic win detector in this release.
+Deterministic mode records pixel changes as **unknown goal progress**. Optional unchanged-screen detection pauses after the configured count; animated games may change continuously while stuck. Learned mode uses model visual judgment against reviewed criteria, without a hardcoded resource counter or universal win signal. Feedback action-limit exhaustion is stopped/unverified rather than completed.
 
 ## Evidence and reports
 
 Native artifacts use the existing `FsArtifactStore` under `artifacts/desktop-<uuid>/`. `reports/configuration.json` is saved before input. `reports/desktop-summary.json` contains final state, target/profile, attempted actions, screenshot hashes/geometry, verification results, errors, recent history, logs and retained evidence references. The GUI shows current status, latest action, screenshot and a report link.
 
-Retain up to 100 immutable screenshots with a combined 64 MiB budget. Subsequent captures overwrite `screenshots/latest.png`; their hashes remain in the report but older overwritten images are not replay evidence. Each capture is limited to 16 megapixels. Logs/history metadata are bounded by action/run limits. Screenshots are local but can contain visible personal information; do not include secrets in goals/configurations. No screenshot is uploaded to a model in the shipped implementation.
+Retain up to 100 immutable run screenshots with a combined 64 MiB budget. Subsequent captures overwrite `screenshots/latest.png`; hashes remain but overwritten images are not replay evidence. Captures are limited to 16 megapixels. Logs/history are bounded by action/run limits. Learned runs upload selected screenshots/context to the configured model and include call/token/latency telemetry in reports. Teaching evidence has separate [storage and capture budgets](teaching.md). Keep secrets out of visible targets and goals/configurations.
 
 The latest native run remains visible in the GUI process. After restart, open the JSON report from disk. Native reports are not added to the browser-specific replay index or SQLite browser lifecycle. A controller crash can leave only configuration/screenshots; a final report requires the controller to finish its cleanup path.
 

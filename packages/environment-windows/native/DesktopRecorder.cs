@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -51,6 +53,10 @@ sealed class DesktopRecorder : NativeWindow {
     double lastX = -1, lastY = -1;
     Mutex lease;
     RecordingHud hud;
+    bool visualTeaching, teachingSession;
+    readonly List<object> frames = new List<object>();
+    long lastFrameAt = -1000, frameBytes;
+    int frameCount, frameRevision = -1;
 
     internal static object Command(Dictionary<string, object> command) {
         if (Instance == null && !Ready.WaitOne(0)) {
@@ -81,6 +87,7 @@ sealed class DesktopRecorder : NativeWindow {
     }
     object Dispatch(Dictionary<string, object> c) {
         string op = (string)c["op"];
+        if (op == "recorder-frames") { var batch = frames.ToArray(); frames.Clear(); return batch; }
         if (op == "recorder-hotkeys") {
             if (Active() || botActive || botArmed) throw new Exception("Stop recording and disarm/stop the bot before changing hotkeys");
             var proposed = (Dictionary<string, object>)c["hotkeys"];
@@ -108,6 +115,9 @@ sealed class DesktopRecorder : NativeWindow {
             try { owned = lease.WaitOne(0); } catch (AbandonedMutexException) { owned = true; }
             if (!owned) { lease.Dispose(); lease = null; throw new Exception("Another recording or desktop run owns this session"); }
             events.Clear(); accumulated = 0; pendingMove = null; keys.Clear(); buttons.Clear(); physicalKeys.Clear(); lastMoveAt = -100; lastX = lastY = -1;
+            visualTeaching = c.ContainsKey("visualTeaching") && Convert.ToBoolean(c["visualTeaching"]);
+            teachingSession = visualTeaching;
+            frames.Clear(); frameBytes = 0; frameCount = 0; lastFrameAt = -1000; frameRevision = -1;
             status = "armed"; reason = "Ready: use Start Recording or the recording hotkey"; revision++;
             UpdateHud();
         } else if (op == "recorder-start") Begin();
@@ -159,13 +169,15 @@ sealed class DesktopRecorder : NativeWindow {
                 if (Reserved((uint)vk)) return; // Start key must be released before the first recorded event.
                 status = "paused"; reason = "Release keys/buttons, then resume recording"; return;
             }
-            InstallHooks(); segmentStart = clock.ElapsedMilliseconds; status = "recording"; reason = "RECORDING your input"; revision++;
+            CaptureFrame(); // Baseline precedes installing input hooks and starting the timeline.
+            InstallHooks(); segmentStart = clock.ElapsedMilliseconds; status = "recording"; reason = visualTeaching ? "TEACHING: demonstrate your goal" : "RECORDING your input"; revision++;
         }
         if (status == "recording") {
             if (GetForegroundWindow() != target) { Pause("Target focus changed; recording paused"); return; }
             if (Elapsed() >= maxDurationMs || events.Count >= 2000) { Stop("stopped", "Recording duration/event limit reached"); return; }
             if (keys.Count + buttons.Count > 0 && Elapsed() - heldSince >= 59000) { Pause("Hold safety limit reached; release controls before resuming"); return; }
             if (pendingMove != null && Elapsed() - lastMoveAt >= 50) FlushMove();
+            if (Elapsed() - lastFrameAt >= (revision != frameRevision ? Math.Max(350, maxDurationMs / 150) : 1000)) CaptureFrame();
         }
         UpdateHud();
     }
@@ -174,7 +186,7 @@ sealed class DesktopRecorder : NativeWindow {
         if (hud == null) hud = new RecordingHud();
         var b = (Dictionary<string, object>)targetInfo["bounds"];
         hud.Location = new Point((int)b["x"] + Math.Max(0, (int)b["width"] - hud.Width - 10), (int)b["y"] + 10);
-        string title = status == "countdown" ? "Recording starts in " + Math.Ceiling(Math.Max(0, countdownEnd - clock.ElapsedMilliseconds) / 1000.0) : status == "recording" ? "RECORDING YOUR INPUT" : "Recording " + status;
+        string title = status == "countdown" ? (teachingSession ? "Teaching" : "Recording") + " starts in " + Math.Ceiling(Math.Max(0, countdownEnd - clock.ElapsedMilliseconds) / 1000.0) : status == "recording" ? (teachingSession ? "TEACHING: DEMONSTRATE YOUR GOAL" : "RECORDING YOUR INPUT") : (teachingSession ? "Teaching " : "Recording ") + status;
         hud.Caption.Text = title + "\n" + (Elapsed() / 1000) + " sec | " + events.Count + " events\n" + (hotkeys == null ? "" : hotkeys["record"] + " pause/resume | " + hotkeys["stopRecording"] + " stop | F8 emergency");
         if (!hud.Visible) hud.Show();
     }
@@ -207,6 +219,9 @@ sealed class DesktopRecorder : NativeWindow {
     }
     void Pause(string message) {
         if (status == "recording") {
+            // Never capture the GUI or another app after focus loss.
+            try { if (GetForegroundWindow() == target) CaptureFrame(); }
+            catch { visualTeaching = false; message += "; final teaching screenshot unavailable"; }
             FlushMove(); long elapsed = Math.Min(maxDurationMs, Elapsed());
             // Keep the quiet tail before pause/stop as well as releasing recorded holds.
             Add(new Dictionary<string, object> { { "kind", "release-all" } }, elapsed);
@@ -223,6 +238,34 @@ sealed class DesktopRecorder : NativeWindow {
     void Add(Dictionary<string, object> action, long at) {
         if (events.Count >= 2050) throw new Exception("Recording event capacity reached");
         events.Add(new Dictionary<string, object> { { "atMs", Math.Max(0, Math.Min(maxDurationMs, at)) }, { "action", action } }); revision++;
+    }
+    void CaptureFrame() {
+        if (!visualTeaching || targetInfo == null || GetForegroundWindow() != target) return;
+        if (frameCount >= 158 || frameBytes >= 60 * 1024 * 1024 || frames.Count >= 8) {
+            visualTeaching = false; reason = "Teaching screenshot budget reached; stop and review captured evidence"; return;
+        }
+        var before = DesktopBridge.Window(target);
+        if (!before["pid"].Equals(targetInfo["pid"]) || (string)before["processStartedAt"] != (string)targetInfo["processStartedAt"]) throw new Exception("Teaching target identity changed");
+        var b = (Dictionary<string, object>)before["bounds"];
+        int width = (int)b["width"], height = (int)b["height"];
+        if ((long)width * height > 16000000) throw new Exception("Capture exceeds 16 megapixels");
+        long at = Elapsed(); byte[] bytes;
+        bool showHud = hud != null && hud.Visible;
+        try {
+            if (showHud) hud.Hide();
+            using (var bitmap = new Bitmap(width, height)) {
+                using (var g = Graphics.FromImage(bitmap)) g.CopyFromScreen((int)b["x"], (int)b["y"], 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
+                double scale = Math.Min(1.0, 1280.0 / Math.Max(width, height));
+                using (var small = new Bitmap(bitmap, new Size(Math.Max(1, (int)(width * scale)), Math.Max(1, (int)(height * scale)))))
+                using (var stream = new MemoryStream()) { small.Save(stream, ImageFormat.Png); bytes = stream.ToArray(); }
+            }
+        } finally { if (showHud) hud.Show(); }
+        var after = DesktopBridge.Window(target); var ab = (Dictionary<string, object>)after["bounds"];
+        if (GetForegroundWindow() != target || !after["pid"].Equals(before["pid"]) || (string)after["processStartedAt"] != (string)before["processStartedAt"]) return;
+        foreach (string key in new [] { "x", "y", "width", "height" }) if (!ab[key].Equals(b[key])) return;
+        if (!after["dpi"].Equals(before["dpi"])) return;
+        frames.Add(new { window = before, geometry = geometry, png = Convert.ToBase64String(bytes), capturedAt = DateTime.UtcNow.ToString("o"), atMs = at, eventCount = events.Count, heldKeys = new List<string>(keys), heldButtons = new List<string>(buttons) });
+        frameCount++; frameBytes += bytes.Length; lastFrameAt = at; frameRevision = revision;
     }
     void FlushMove() { if (pendingMove == null) return; Add(pendingMove, pendingAt); pendingMove = null; lastMoveAt = pendingAt; }
     void MarkHeld() { if (keys.Count + buttons.Count == 0) heldSince = Elapsed(); }

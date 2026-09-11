@@ -6,7 +6,7 @@ export const DesktopHotkeysSchema = z.object({ record: ControlHotkeySchema.defau
   if (new Set(Object.values(keys)).size !== 3) ctx.addIssue({ code: "custom", message: "Recording, bot and stop-recording hotkeys must be different. F8 is reserved for emergency stop." });
 });
 export type DesktopHotkeys = z.infer<typeof DesktopHotkeysSchema>;
-export const RecordingOptionsSchema = z.object({ target: DesktopWindowSchema, delayMs: z.number().int().min(0).max(60000).default(3000), maxDurationMs: z.number().int().min(1000).max(120000).default(120000) }).strict();
+export const RecordingOptionsSchema = z.object({ target: DesktopWindowSchema, delayMs: z.number().int().min(0).max(60000).default(3000), maxDurationMs: z.number().int().min(1000).max(120000).default(120000), visualTeaching: z.boolean().optional() }).strict();
 export type RecordingOptions = z.infer<typeof RecordingOptionsSchema>;
 export const RecordedEventSchema = z.object({ atMs: z.number().int().min(0).max(120000), action: DesktopActionSchema }).strict();
 export type RecordedEvent = z.infer<typeof RecordedEventSchema>;
@@ -20,6 +20,8 @@ export const RecordingStateSchema = z.object({
 });
 export type RecordingState = z.infer<typeof RecordingStateSchema>;
 export interface DesktopRecorder {
+  /** Opt-in visual teaching capture on the recorder's own target and monotonic clock. */
+  recordingFrames?(): Promise<Array<import("./desktop.js").DesktopObservation & { atMs: number; eventCount: number; heldKeys: string[]; heldButtons: string[] }>>;
   configureHotkeys(keys: DesktopHotkeys): Promise<RecordingState>;
   recordingCommand(command: "prepare" | "start" | "pause" | "resume" | "stop" | "discard", options?: RecordingOptions): Promise<RecordingState>;
   recordingState(includeEvents?: boolean): Promise<RecordingState>;

@@ -76,6 +76,8 @@ This does not start a live match or change the Cat-and-Dog planner. It is only t
 
 Choose **Desktop automation** on the dashboard or open `/desktop.html`. Run `pnpm desktop:setup` before native use and after native source changes. Select a target, record your actions, stop, review and save the generated configuration, then use the separate **Start Bot** controls. Both modes support countdowns and explicitly armed hotkeys (F6 recording, F7 bot; F9 stops recording). Playback supports once, N repetitions, or until stopped with safety limits and a separate loop delay. **F8** stops both modes. Manual editing, screenshot point picking, configurations/behaviors, evidence and browser runner/replay features remain available.
 
+**Teach Bot** adds sparse visual demonstrations, explicit outcome labels, AI procedure extraction, completion review, persistent multiple examples, and intelligent screenshot-driven playback. Use **Run selection** to choose the macro or learned behavior. See the [Teach Bot operating guide](../../docs/teaching.md) for provider environment settings, evidence storage, correction workflow, costs and limitations. Missing AI configuration affects only analysis/intelligent playback; macros remain available.
+
 See the [recording and replay guide](../../docs/recording.md) for controls, timing, editing, saved hotkeys and limitations. [Recording validation](../../docs/recording-validation.md) distinguishes code-level checks from the real usage tests left for you.
 
 See the [desktop operating guide](../../docs/desktop.md) for setup, controls, safety behavior, native fixture tests, and the honest visual-policy/Roblox limitations.

@@ -1,6 +1,6 @@
 # Record your actions, then replay them
 
-This Windows workflow records a human demonstration into the existing desktop configuration format. Recording watches your input; **Start Bot** sends input. Stopping a recording only creates an editable draft. It never starts playback. There is no new autonomous game logic or AI provider.
+**Record Macro** watches your input and creates an exact editable desktop configuration. **Start Bot** sends input using your run selection. Stopping a macro recording only creates a draft; it never starts playback. This workflow needs no AI. For learning a goal from screenshots, demonstrations and outcomes, use the separate [Teach Bot workflow](teaching.md).
 
 ## Start the GUI
 
@@ -17,7 +17,7 @@ pnpm gui
 ## Make your first recording
 
 1. Open your target application, choose **Refresh windows**, and select its title/process/PID. Keep its client area visible. **Capture target preview** is optional.
-2. In **Record your actions**, choose a start method:
+2. In **Record Macro**, choose a start method:
    - **Button · start now:** click **Start Recording**. The helper requests target focus and begins when physical controls are released.
    - **Countdown:** set the recording countdown, then click **Start Recording**. The GUI and a small, non-activating overlay over the target show the countdown. Stop or discard cancels it.
    - **Arm recording hotkey:** click **Arm Recording Hotkey** once, prepare the target, then press **F6**. The configured recording countdown applies after the hotkey. Set it to zero for an immediate start after releasing F6.

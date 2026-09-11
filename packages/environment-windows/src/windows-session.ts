@@ -65,6 +65,10 @@ export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
     return RecordingStateSchema.parse(await this.request({ op: `recorder-${command}`, ...(options ? RecordingOptionsSchema.parse(options) : {}), includeEvents: command === "stop" }));
   }
   async recordingState(includeEvents = false): Promise<RecordingState> { return RecordingStateSchema.parse(await this.request({ op: "recorder-state", includeEvents })); }
+  async recordingFrames() {
+    const frames = z.array(CaptureSchema.extend({ atMs: z.number(), eventCount: z.number(), heldKeys: z.array(z.string()), heldButtons: z.array(z.string()) })).max(8).parse(await this.request({ op: "recorder-frames" }));
+    return frames.map(frame => { const png = Buffer.from(frame.png, "base64"); return { ...frame, png, sha256: createHash("sha256").update(png).digest("hex") }; });
+  }
   async setBotControl(armed: boolean, active: boolean): Promise<void> { await this.request({ op: "recorder-bot", armed, active }); }
   async focus(): Promise<void> { await this.request({ op: "focus" }); }
   async observe(): Promise<DesktopObservation> {

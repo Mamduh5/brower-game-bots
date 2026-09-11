@@ -8,3 +8,6 @@ export * from "./domain/player-goal.js";
 export * from "./domain/player-policy.js";
 export * from "./policies/rule-based-policy.js";
 export * from "./application/desktop-runner.js";
+export * from "./vision/visual-model.js";
+export * from "./vision/demonstration-learning.js";
+export * from "./vision/learned-desktop-policy.js";

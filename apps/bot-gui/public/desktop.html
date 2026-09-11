@@ -1,8 +1,8 @@
 ﻿<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Record & replay · Game Bots</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/desktop.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Record, teach & run · Game Bots</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/desktop.css"></head>
 <body>
-  <header class="topbar"><div><h1>Desktop automation</h1><p>Teach by doing. Review, save, then start the bot separately.</p></div><a href="/">Browser bots & reports</a><button id="emergency" class="danger">Emergency stop · F8</button></header>
+  <header class="topbar"><div><h1>Desktop automation</h1><p>Record an exact macro or teach a goal. Start Bot runs your selection.</p></div><a href="/">Browser bots & reports</a><button id="emergency" class="danger">Emergency stop · F8</button></header>
   <main class="desktop-layout">
     <div class="workflow">
       <section class="detail-header">
@@ -12,7 +12,7 @@
         <p class="muted">Keep the target visible. Focus changes pause recording and playback.</p>
       </section>
       <section class="detail-header record-panel">
-        <h2>2. Record your actions</h2><p>You provide the input. The bot only records.</p>
+        <h2>Record Macro</h2><p>Record exact actions and timing for editable replay. No AI required.</p>
         <div class="desktop-fields">
           <label>Recording start<select id="record-method"><option value="button">Button · start now</option><option value="delay" selected>Countdown</option><option value="hotkey">Arm recording hotkey</option></select></label>
           <label>Recording countdown (seconds)<input id="record-delay" type="number" min="0" max="60" value="3"></label>
@@ -23,7 +23,7 @@
         <p class="muted">Stop loads an editable sequence below. Recording never starts the bot. Maximum 2 minutes / about 2,000 captured events.</p>
       </section>
       <section class="detail-header">
-        <h2>3. Review & save</h2>
+        <h2>Review & save macro</h2>
         <label>Saved configuration<select id="profiles"><option value="">Choose a configuration</option></select></label>
         <label>Name<input id="name" value="My recording" maxlength="80"></label>
         <div class="desktop-buttons"><button id="save">Save configuration</button><button id="duplicate-profile">Save a copy</button></div>
@@ -35,14 +35,42 @@
           <div id="actions"></div>
           <div class="desktop-buttons"><button id="previous-page">Previous actions</button><span id="page-number"></span><button id="next-page">Next actions</button><button id="add">Add action</button><button id="add-wait">Insert wait at end</button></div>
         </details>
-        <details><summary>Notes & reusable behaviors</summary>
+        <details><summary>Notes & reusable macro sequences</summary>
           <label>Notes<input id="goal" maxlength="2000" placeholder="What this sequence does"></label>
-          <label>Behavior name<input id="skill-name" placeholder="move-forward"></label><button id="save-skill">Save sequence as behavior</button>
-          <label>Stored behaviors<select id="skills"></select></label><button id="use-skill">Replace sequence with behavior</button>
+          <label>Sequence name<input id="skill-name" placeholder="move-forward"></label><button id="save-skill">Save reusable sequence</button>
+          <label>Stored sequences<select id="skills"></select></label><button id="use-skill">Use sequence</button>
         </details>
       </section>
       <section class="detail-header bot-panel">
-        <h2>4. Start the bot</h2><p>The bot provides the input using the current configuration.</p>
+        <h2>Teach Bot</h2><p>Demonstrate a goal. Screenshots, actions and your outcome help the bot learn a procedure it can adapt to the current screen.</p>
+        <p id="model-status" role="status"></p>
+        <p class="muted">Analysis and intelligent runs send selected target screenshots and task context to your configured AI provider. Capture is local; no model calls while you demonstrate.</p>
+        <label>Learned behavior<select id="teach-behavior"><option value="">Create a new behavior</option></select></label>
+        <label>Behavior name<input id="teach-name" maxlength="80" placeholder="Collect red mushrooms"></label>
+        <label>Goal (optional when teaching)<textarea id="teach-goal" maxlength="2000" placeholder="Collect one red mushroom and verify the inventory count increased."></textarea></label>
+        <label>Mouse use<select id="teach-camera"><option value="pointer">Visible pointer / ordinary UI</option><option value="relative">Relative / locked camera</option></select></label>
+        <p class="muted">Uses the recording start method and countdown above. F6 pauses/resumes, F9 stops. Choose an existing behavior to add another example.</p>
+        <div class="desktop-buttons"><button id="teach-start">Start teaching</button><button id="teach-stop">Stop teaching</button></div>
+        <p id="teach-status" role="status" aria-live="polite">No teaching session</p>
+        <label>Demonstration to analyze<select id="teach-demo"></select></label>
+        <label>Did this demonstration achieve the goal?<select id="teach-outcome"><option value="uncertain">Not sure</option><option value="success">Yes, succeeded</option><option value="failure">No, failed</option></select></label>
+        <label>Outcome evidence or correction<textarea id="teach-note" maxlength="2000" placeholder="The inventory count increased by one. Turning left first was a mistake."></textarea></label>
+        <div class="desktop-buttons"><button id="teach-analyze">Analyze demonstration</button><button id="teach-cancel">Cancel analysis</button></div>
+        <p id="behavior-info"></p>
+        <details><summary>Learned procedure & demonstration evidence</summary><div id="teach-procedure"></div><div id="teach-evidence"></div></details>
+        <label>Finish when (review and correct the inferred evidence)<textarea id="teach-completion" maxlength="2000" placeholder="What must be visibly true for the bot to finish?"></textarea></label>
+        <button id="teach-save">Confirm goal & completion / Save behavior</button>
+      </section>
+      <section class="detail-header bot-panel">
+        <h2>Start Bot</h2><p>Run the macro in the editor or the selected learned behavior.</p>
+        <label>Run selection<select id="run-kind"><option value="macro">Current macro configuration</option><option value="learned">Selected learned behavior</option></select></label>
+        <details><summary>Intelligent run limits</summary><div class="desktop-fields">
+          <label>Maximum model calls<input id="ai-calls" type="number" min="2" max="200" value="30"></label>
+          <label>Maximum action duration (ms)<input id="ai-action-ms" type="number" min="100" max="2000" value="750"></label>
+          <label>Maximum observation age (seconds)<input id="ai-age" type="number" min="1" max="60" value="15"></label>
+          <label>Decisions without progress<input id="ai-stuck" type="number" min="2" max="10" value="4"></label>
+          <label>Recovery attempts<input id="ai-recoveries" type="number" min="0" max="5" value="2"></label>
+        </div><p>One model call per decision; input is released during model latency. Macro loop settings apply only to macros.</p></details>
         <div class="desktop-fields">
           <label>Bot start<select id="bot-method"><option value="button">Button · start now</option><option value="delay" selected>Countdown</option><option value="hotkey">Arm bot hotkey</option></select></label>
           <label>Bot start countdown (seconds)<input id="delay" type="number" min="0" max="60" value="3"></label>

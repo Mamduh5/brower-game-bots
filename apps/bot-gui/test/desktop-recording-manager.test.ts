@@ -6,10 +6,14 @@ import { DesktopRecordingManager } from "../src/desktop-recording-manager.js";
 import { DesktopHotkeysSchema, type DesktopRecorder, type RecordingOptions, type RecordingState, type DesktopHotkeys } from "@game-bots/environment-sdk";
 import { DesktopProfileSchema } from "@game-bots/game-sdk";
 import type { DesktopRunState } from "@game-bots/agent-player";
+import type { VisualModel } from "@game-bots/agent-player";
+import { DesktopTeachingManager } from "../src/desktop-teaching-manager.js";
 
 const target = { handle: "123", pid: 12, processStartedAt: "1", title: "Owned fixture", processName: "fixture", dpi: 96, bounds: { x: -200, y: 0, width: 640, height: 480 } };
 const profile = DesktopProfileSchema.parse({ version: 1, name: "demo", startDelayMs: 500, actions: [{ kind: "key-down", key: "KeyW" }] });
 class FakeRecorder implements DesktopRecorder {
+  frames: Awaited<ReturnType<NonNullable<DesktopRecorder["recordingFrames"]>>> = [];
+  async recordingFrames() { const frames = this.frames; this.frames = []; return frames; }
   closed = false; registrationError = false;
   state: RecordingState = { status: "idle", reason: "Idle", elapsedMs: 0, countdownMs: 0, eventCount: 0, revision: 0, target: null, hotkeys: null, botArmed: false, botActive: false, commands: [] };
   async configureHotkeys(keys: DesktopHotkeys) { if (this.registrationError) throw new Error("Could not register F6"); this.state.hotkeys = keys; return structuredClone(this.state); }
@@ -26,7 +30,7 @@ class FakeRecorder implements DesktopRecorder {
   async close() { this.closed = true; }
 }
 const cleanup: { root: string; manager: DesktopRecordingManager }[] = [];
-async function setup() {
+async function setup(modelFactory?: () => VisualModel) {
   const root = await mkdtemp(path.join(os.tmpdir(), "game-bots-recording-test-"));
   const recorder = new FakeRecorder(); let run: DesktopRunState | null = null;
   const bots = {
@@ -34,7 +38,7 @@ async function setup() {
     start: vi.fn(async (request: unknown) => { run = { runId: "fake", status: "running", endedAt: null, ...request as object } as DesktopRunState; return run; }),
     control: vi.fn(async (action: string) => { if (run && action === "stop") { run.status = "stopped"; run.endedAt = new Date().toISOString(); } return run; })
   };
-  const manager = new DesktopRecordingManager(root, bots, () => recorder); cleanup.push({root,manager});
+  const manager = new DesktopRecordingManager(root, bots, () => recorder, new DesktopTeachingManager(root, modelFactory)); cleanup.push({root,manager});
   return {manager,recorder,bots,root};
 }
 afterEach(async () => {
@@ -45,6 +49,65 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   }
   vi.useRealTimers();
+});
+
+const learned = { goal: "collect one resource", targetDescription: "red object", preconditions: ["target visible"], steps: [{ name: "approach", intent: "walk toward resource", when: "object visible", success: "pickup notification", failure: "no movement", recovery: "turn around obstacle", evidenceFrames: [0, 1] }], controls: [{ id: "approach", intent: "walk forward", keys: ["KeyW"], buttons: [] }], completion: ["pickup notification"], failureIndicators: [], uncertainties: [] };
+function fakeVisualModel(): VisualModel { return { provider: "fake", model: "vision-test", usage: { calls: 0, inputTokens: 0, outputTokens: 0, latencyMs: 0 }, json: vi.fn().mockResolvedValue(learned) }; }
+async function captureTeaching(manager: DesktopRecordingManager, recorder: FakeRecorder, behaviorId?: string) {
+  await manager.record({ target, startMethod: "button", delayMs: 0, maxDurationMs: 120000, teaching: { name: "collect", goal: "collect one resource", ...(behaviorId ? { behaviorId } : {}) } });
+  recorder.frames = [0, 1].map(i => ({ png: Buffer.from(`frame-${i}`), sha256: `hash-${i}`, capturedAt: new Date().toISOString(), geometry: "g", window: target, atMs: i * 800, eventCount: i * 2, heldKeys: [], heldButtons: [] }));
+  await manager.recordingControl("stop"); return manager.teaching.snapshot();
+}
+describe("teaching lifecycle and persistent demonstration memory", () => {
+  it("captures evidence separately from a macro, analyzes, reviews and appends further examples", async () => {
+    const model = fakeVisualModel(); const { manager, recorder, bots, root } = await setup(() => model);
+    const capture = await captureTeaching(manager, recorder);
+    expect(manager.snapshot().draft).toBeNull(); expect(bots.start).not.toHaveBeenCalled(); expect(capture.frameCount).toBe(2);
+    const demo = await manager.teaching.store.demonstration(capture.demonstrationId!);
+    expect(demo.frames[0]?.eventCount).toBe(0); expect(demo.frames[1]?.eventCount).toBe(2); expect(demo.events).toHaveLength(2);
+    await manager.teaching.analyze(capture.behaviorId!, capture.demonstrationId!, { outcome: "success", outcomeNote: "pickup notification" });
+    await vi.waitFor(() => expect(manager.teaching.snapshot().phase).toBe("ready"));
+    expect(vi.mocked(model.json).mock.calls[0]![2]).toHaveLength(2);
+    await manager.teaching.review({ id: capture.behaviorId, goal: "collect one", completionOverride: "inventory increases by one", reviewed: true });
+    const second = await captureTeaching(manager, recorder, capture.behaviorId!);
+    expect(second.demonstrationId).not.toBe(capture.demonstrationId);
+    const restarted = new DesktopTeachingManager(root);
+    const stored = await restarted.store.get(capture.behaviorId!);
+    expect(stored.examples).toHaveLength(2); expect(stored.examples[0]?.procedure?.targetDescription).toBe("red object");
+    expect(stored.completionOverride).toBe("inventory increases by one");
+    expect(await restarted.store.demonstration(capture.demonstrationId!)).toMatchObject({ outcome: "success" });
+  });
+  it("retains demonstration evidence when the provider is unconfigured", async () => {
+    const { manager, recorder } = await setup(() => { throw new Error("Visual model is not configured"); });
+    const capture = await captureTeaching(manager, recorder);
+    await expect(manager.teaching.analyze(capture.behaviorId!, capture.demonstrationId!, { outcome: "success" })).rejects.toThrow(/not configured/);
+    expect(manager.teaching.snapshot().phase).toBe("error");
+    expect((await manager.teaching.store.demonstration(capture.demonstrationId!)).frames).toHaveLength(2);
+    expect((await manager.teaching.store.get(capture.behaviorId!)).reviewed).toBe(false);
+    await manager.record({ target, startMethod: "button", delayMs: 0, maxDurationMs: 120000 });
+    expect((await manager.recordingControl("stop")).draft?.playback).toBe("recorded");
+  });
+  it("cancels analysis and disallows new input work during analysis", async () => {
+    const model = fakeVisualModel(); let started = false;
+    vi.mocked(model.json).mockImplementation(async (_i, _c, _images, signal) => { started = true; return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); });
+    const { manager, recorder, bots } = await setup(() => model); const capture = await captureTeaching(manager, recorder);
+    await manager.teaching.analyze(capture.behaviorId!, capture.demonstrationId!, { outcome: "success" });
+    await vi.waitFor(() => expect(started).toBe(true));
+    await expect(manager.startBot({ target, profile, startMethod: "button" })).rejects.toThrow(/analysis/);
+    await manager.teaching.cancelAnalysis(); expect(manager.teaching.snapshot().error).toContain("cancelled"); expect(bots.start).not.toHaveBeenCalled();
+  });
+  it("rejects cross-application examples and path traversal identifiers", async () => {
+    const { manager, recorder } = await setup(fakeVisualModel); const capture = await captureTeaching(manager, recorder);
+    await expect(manager.teaching.begin({ behaviorId: capture.behaviorId, name: "collect" }, { ...target, processName: "other" })).rejects.toThrow(/same application/);
+    await expect(manager.teaching.store.get("../../outside")).rejects.toThrow();
+  });
+  it("finalizes a teaching capture on shutdown", async () => {
+    const { manager, recorder } = await setup(fakeVisualModel);
+    await manager.record({ target, startMethod: "button", delayMs: 0, maxDurationMs: 120000, teaching: { name: "collect" } });
+    const id = manager.teaching.snapshot().demonstrationId!;
+    await manager.close(); expect(recorder.closed).toBe(true);
+    expect((await manager.teaching.store.demonstration(id)).events).toHaveLength(2);
+  });
 });
 describe("recording versus playback orchestration (no desktop input)", () => {
   it("stopping recording converts a draft without starting the bot", async () => {

@@ -5,7 +5,7 @@ Production-oriented modular monolith for browser and Windows desktop game automa
 - `Tester Agent`: QA-oriented execution, evidence capture, issue finding, and report generation.
 - `Player Agent`: gameplay-oriented decision-making that reuses the same runtime and environment foundation.
 
-Windows desktop automation can now record your mouse/keyboard demonstration, turn it into an editable saved configuration, and replay it separately once or in loops. Recording and playback have separate countdowns and configurable start hotkeys; F8 remains emergency stop. See the [recording and replay guide](docs/recording.md), [code-level validation and manual checklist](docs/recording-validation.md), and [Windows desktop guide](docs/desktop.md). No new autonomous game logic or visual AI provider is bundled.
+Windows desktop automation supports **Record Macro** for exact editable replay and **Teach Bot** for demonstration-guided visual behavior. **Start Bot** runs your selected macro or learned behavior. Teaching captures sparse screenshots plus input/outcome evidence, creates reusable procedure memory with a configured multimodal model, and adapts short actions using current screenshots. OpenAI Responses and compatible image-capable endpoints are supported; manual macros need no AI. F8 remains emergency stop. Start with the [Teach Bot guide](docs/teaching.md), [recording and replay guide](docs/recording.md), and [Windows desktop guide](docs/desktop.md). Real gameplay/generalization remains for manual validation.
 
 ```powershell
 pnpm install

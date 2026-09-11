@@ -10,6 +10,7 @@ import type { ArtifactStore } from "@game-bots/runtime-core";
 export interface DesktopHistoryEntry {
   action: DesktopAction; before: string; after: string; screenChanged: boolean;
   verification: "progress" | "no-progress" | "unknown"; reason: string;
+  actions?: DesktopAction[]; intent?: string;
 }
 export interface DesktopDecisionContext {
   goal: string; observation: DesktopObservation; history: readonly DesktopHistoryEntry[];
@@ -25,6 +26,10 @@ export type DesktopDecision = z.infer<typeof DecisionSchema>;
 const VerificationSchema = z.object({ result: z.enum(["progress", "no-progress", "unknown"]), reason: z.string().max(2000) }).strict();
 /** Provider/game integrations receive pixels and history, never a raw input handle. */
 export interface DesktopPolicy {
+  readonly boundedBatch?: boolean;
+  telemetry?(): object;
+  configuration?(): object;
+  reset?(): void;
   decide(context: DesktopDecisionContext, signal: AbortSignal): Promise<DesktopDecision>;
   verify(context: DesktopDecisionContext, before: DesktopObservation, action: DesktopAction, signal: AbortSignal): Promise<z.infer<typeof VerificationSchema>>;
 }
@@ -35,6 +40,7 @@ export interface DesktopRunState {
   latestScreenshot: ArtifactRef | null; reason: string; history: DesktopHistoryEntry[];
   logs: { at: string; message: string }[]; report: ArtifactRef | null;
   loopIndex: number; completedLoops: number; countdownEndsAt: string | null;
+  intelligence?: object;
 }
 
 /** Bounded pixel-driven runner; browser Player/Tester contracts stay unchanged. */
@@ -75,6 +81,7 @@ export class DesktopRunner {
     return this.control(async () => {
       if (!["running", "starting"].includes(this.state.status)) return;
       this.state.status = "paused"; this.pauseStarted = performance.now(); this.step.abort(new Error(reason));
+      this.policy?.reset?.();
       await this.session.pause(); this.log(reason);
     });
   }
@@ -97,7 +104,8 @@ export class DesktopRunner {
     return { goal: this.state.profile.goal, observation, history: this.state.history.slice(), skills: this.state.profile.skills, actionsRemaining: this.state.profile.maxActions - this.state.actionCount, elapsedMs: performance.now() - this.started };
   }
   private async callPolicy<T>(fn: (signal: AbortSignal) => Promise<T>, signal: AbortSignal): Promise<T> {
-    const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error("Policy timed out after 15 seconds")), 15000);
+    const timeoutMs = this.state.profile.policyTimeoutMs ?? 15000;
+    const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(new Error(`Policy timed out after ${timeoutMs / 1000} seconds`)), timeoutMs);
     const combined = AbortSignal.any([signal, timeout.signal]);
     let onAbort: () => void = () => undefined;
     try {
@@ -106,7 +114,7 @@ export class DesktopRunner {
         onAbort = () => reject(combined.reason); combined.addEventListener("abort", onAbort, { once: true });
         if (combined.aborted) onAbort();
       })]);
-    } finally { clearTimeout(timer); combined.removeEventListener("abort", onAbort); }
+    } finally { clearTimeout(timer); combined.removeEventListener("abort", onAbort); if (this.policy?.telemetry) this.state.intelligence = this.policy.telemetry(); }
   }
   private async capture(): Promise<DesktopObservation> {
     const observation = await this.session.observe();
@@ -235,6 +243,7 @@ export class DesktopRunner {
     try {
       await this.session.bind(this.state.target, p.maxDurationMs, p.maxHoldMs);
       await this.artifacts.put({ runId: this.state.runId, kind: "json", relativePath: "reports/configuration.json", contentType: "application/json" }, Buffer.from(JSON.stringify({ target: this.state.target, profile: p }, null, 2)));
+      if (this.policy?.configuration) await this.artifacts.put({ runId: this.state.runId, kind: "json", relativePath: "reports/learned-memory.json", contentType: "application/json" }, Buffer.from(JSON.stringify(this.policy.configuration(), null, 2)));
       this.state.countdownEndsAt = new Date(Date.now() + p.startDelayMs).toISOString();
       for (let remaining = p.startDelayMs; remaining > 0; remaining -= 100) {
         await delay(Math.min(100, remaining), undefined, { signal: this.abort.signal });
@@ -263,7 +272,14 @@ export class DesktopRunner {
             // Model latency must never extend a held input from a previous decision.
             await this.session.releaseAll();
             const decision = DecisionSchema.parse(await this.callPolicy(s => this.policy!.decide(this.context(observation), s), signal));
+            signal.throwIfAborted();
             this.log(decision.reason);
+            // Recheck the target even for completion: a lost window cannot yield success.
+            const fresh = await this.capture();
+            signal.throwIfAborted();
+            if (fresh.geometry !== observation.geometry) throw new Error("Geometry changed during decision");
+            const currentHealth = await this.session.health();
+            if (!currentHealth.armed) throw new Error(currentHealth.reason ?? "Native input disarmed");
             if (decision.type === "complete" || decision.type === "stop") { this.state.status = decision.type === "complete" ? "completed" : "stopped"; break; }
             if (decision.type === "skill") {
               const skill = p.skills.find(s => s.id === decision.skillId);
@@ -271,11 +287,13 @@ export class DesktopRunner {
               actions = skill.actions;
             } else actions = decision.actions;
             // Fresh screenshot guards geometry changes while the policy was deciding.
-            const fresh = await this.capture();
-            if (fresh.geometry !== observation.geometry) throw new Error("Geometry changed during decision");
             observation = fresh;
           } else actions = [p.actions[index % p.actions.length]!];
           const batchBefore = observation;
+          if (this.policy?.boundedBatch) {
+            if (actions.length > 8 || actions.reduce((n, a) => n + ("durationMs" in a ? a.durationMs : 0), 0) > 2000) throw new Error("Policy action batch exceeds safety bounds");
+            if (actions.length > p.maxActions - this.state.actionCount) { this.state.status = "stopped"; this.log("Action budget cannot fit the next bounded action; goal not verified"); break; }
+          }
           for (const action of actions) {
             signal.throwIfAborted();
             if (this.state.actionCount >= p.maxActions) break;
@@ -285,6 +303,7 @@ export class DesktopRunner {
             index++;
             this.events.push({ type: "action", at: new Date().toISOString(), action, number: this.state.actionCount });
             await this.session.execute(action, observation.geometry, signal);
+            if (this.policy?.boundedBatch) continue;
             await this.interval(p.intervalMs, signal);
             const after = await this.capture();
             const changed = observation.sha256 !== after.sha256;
@@ -300,6 +319,13 @@ export class DesktopRunner {
           }
           if (this.policy && this.state.status === "running") {
             await this.session.releaseAll();
+            if (this.policy.boundedBatch) {
+              await this.interval(p.intervalMs, signal);
+              observation = await this.capture();
+              const action = actions.at(-1)!;
+              this.state.history.push({ action, actions, intent: this.state.reason, before: batchBefore.sha256, after: observation.sha256, screenChanged: batchBefore.sha256 !== observation.sha256, verification: "unknown", reason: "Awaiting live visual assessment" });
+              this.state.history = this.state.history.slice(-20);
+            }
             const entry = this.state.history.at(-1);
             if (entry) {
               const verification = VerificationSchema.parse(await this.callPolicy(s => this.policy!.verify(this.context(observation), batchBefore, entry.action, s), signal));
@@ -320,7 +346,7 @@ export class DesktopRunner {
           throw error;
         }
       }
-      if (this.state.status === "running") { this.state.status = "completed"; this.log("Action limit reached"); }
+      if (this.state.status === "running") { this.state.status = this.policy ? "stopped" : "completed"; this.log(this.policy ? "Action limit reached; goal not verified" : "Action limit reached"); }
     } catch (error) {
       const reason = this.abort.signal.aborted ? String(this.abort.signal.reason?.message ?? "Stopped") : error instanceof Error ? error.message : String(error);
       this.state.status = this.abort.signal.aborted || /F8/.test(reason) ? "stopped" : "failed"; this.log(reason);

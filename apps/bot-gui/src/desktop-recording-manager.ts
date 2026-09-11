@@ -5,6 +5,7 @@ import { DesktopHotkeysSchema, RecordingOptionsSchema, type DesktopHotkeys, type
 import { DesktopRunRequestSchema, recordingToProfile, type DesktopProfile } from "@game-bots/game-sdk";
 import type { DesktopRunState } from "@game-bots/agent-player";
 import { WindowsDesktopSession } from "@game-bots/environment-windows";
+import { DesktopTeachingManager } from "./desktop-teaching-manager.js";
 
 interface BotControls { state(): DesktopRunState | null; start(raw: unknown): Promise<DesktopRunState>; control(action: string): Promise<DesktopRunState | null> }
 const activeRecording = (state: RecordingState | null): boolean => !!state && ["armed", "countdown", "recording", "paused"].includes(state.status);
@@ -21,11 +22,13 @@ export class DesktopRecordingManager {
   private queue: Promise<unknown> = Promise.resolve();
   private generation = 0;
   private convertedGeneration = -1;
-  constructor(private readonly root: string, private readonly bots: BotControls, private readonly createRecorder: () => DesktopRecorder = () => new WindowsDesktopSession()) {}
+  private teachingGeneration = -1;
+  readonly teaching: DesktopTeachingManager;
+  constructor(private readonly root: string, private readonly bots: BotControls, private readonly createRecorder: () => DesktopRecorder = () => new WindowsDesktopSession(), teaching?: DesktopTeachingManager) { this.teaching = teaching ?? new DesktopTeachingManager(root); }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const task = this.queue.then(operation); this.queue = task.catch(() => undefined); return task;
   }
-  snapshot() { return { recording: this.nativeState, draft: this.draft, draftId: this.convertedGeneration, error: this.error, botArmed: this.armedBot !== null, armedProfileName: this.armedBot?.profile.name ?? null }; }
+  snapshot() { return { recording: this.nativeState, draft: this.draft, draftId: this.convertedGeneration, error: this.error, botArmed: this.armedBot !== null, armedProfileName: this.armedBot?.profile.name ?? null, teaching: this.teaching.snapshot() }; }
   private botActive(): boolean { const run = this.bots.state(); return !!run && !run.endedAt; }
   async settings(): Promise<DesktopHotkeys> {
     if (!this.keys) {
@@ -59,14 +62,18 @@ export class DesktopRecordingManager {
   }
   async record(raw: Record<string, unknown>) {
     return this.serial(async () => {
-      if (this.botActive() || this.armedBot || activeRecording(this.nativeState)) throw new Error("Stop the active recording or stop/disarm the bot first");
-      const { startMethod, ...input } = raw;
+      if (this.botActive() || this.armedBot || activeRecording(this.nativeState) || this.teaching.busy) throw new Error("Stop the active recording, analysis or stop/disarm the bot first");
+      const { startMethod, teaching, ...input } = raw;
       if (!["button", "delay", "hotkey"].includes(String(startMethod))) throw new Error("Choose a recording start method");
       const options = RecordingOptionsSchema.parse(input);
+      options.visualTeaching = teaching !== undefined;
       if (startMethod === "button") options.delayMs = 0;
       const recorder = await this.service(); this.error = null; this.draft = null; this.generation++;
-      this.nativeState = await recorder.recordingCommand("prepare", options);
-      if (startMethod !== "hotkey") this.nativeState = await recorder.recordingCommand("start");
+      if (teaching !== undefined) { await this.teaching.begin(teaching, options.target); this.teachingGeneration = this.generation; }
+      try {
+        this.nativeState = await recorder.recordingCommand("prepare", options);
+        if (startMethod !== "hotkey") this.nativeState = await recorder.recordingCommand("start");
+      } catch (error) { if (teaching !== undefined) this.teaching.discard(); throw error; }
       return this.snapshot();
     });
   }
@@ -75,14 +82,16 @@ export class DesktopRecordingManager {
       if (!this.recorder && (action === "stop" || action === "discard")) return this.snapshot();
       if (action === "stop" && !activeRecording(this.nativeState)) return this.snapshot();
       const recorder = await this.service(); this.nativeState = await recorder.recordingCommand(action);
-      if (action === "discard") { this.draft = null; this.error = null; this.generation++; this.convertedGeneration = this.generation; }
-      else if (action === "stop") this.convert(this.nativeState);
+      if (action === "discard") { this.teaching.discard(); this.draft = null; this.error = null; this.generation++; this.convertedGeneration = this.generation; }
+      else if (action === "stop") { await this.teaching.finish(recorder, this.nativeState); this.convert(this.nativeState); }
+      else await this.teaching.drain(recorder);
       return this.snapshot();
     });
   }
   private convert(state: RecordingState): void {
     if (!state.events || this.convertedGeneration === this.generation) return;
     this.convertedGeneration = this.generation;
+    if (this.teachingGeneration === this.generation) { this.draft = null; return; }
     try { this.draft = recordingToProfile(state.events); this.error = null; }
     catch (error) { this.draft = null; this.error = error instanceof Error ? error.message : String(error); }
   }
@@ -95,11 +104,11 @@ export class DesktopRecordingManager {
   }
   async startBot(raw: Record<string, unknown>) {
     return this.serial(async () => {
-      if (activeRecording(this.nativeState) || this.botActive() || this.armedBot) throw new Error("Stop recording or stop/disarm the current bot first");
+      if (activeRecording(this.nativeState) || this.botActive() || this.armedBot || this.teaching.busy) throw new Error("Stop recording/analysis or stop/disarm the current bot first");
       const { startMethod = "delay", ...input } = raw;
       if (!["button", "delay", "hotkey"].includes(String(startMethod))) throw new Error("Choose a bot start method");
       const request = DesktopRunRequestSchema.parse(input);
-      if (request.profile.mode !== "automation") throw new Error("This GUI supports human-configured playback only");
+      if (request.profile.mode === "feedback" && !request.profile.learnedBehaviorId) throw new Error("Choose a learned behavior for intelligent playback");
       if (raw.startMethod === undefined && !this.recorder) { await this.bots.start(request); return { ...this.snapshot(), run: this.bots.state() }; }
       const recorder = await this.service(); this.validateReserved(request.profile, await this.settings());
       if (startMethod === "button") request.profile.startDelayMs = 0;
@@ -114,7 +123,7 @@ export class DesktopRecordingManager {
   }
   async botControl(action: "pause" | "resume" | "stop") {
     return this.serial(async () => {
-      if (action === "stop") { this.armedBot = null; if (this.recorder) await this.recorder.setBotControl(false, this.botActive()); }
+      if (action === "stop") { void this.teaching.cancelAnalysis(); this.armedBot = null; if (this.recorder) await this.recorder.setBotControl(false, this.botActive()); }
       const run = await this.bots.control(action);
       if (action === "stop" && this.recorder) await this.recorder.setBotControl(false, false);
       return { run, ...this.snapshot() };
@@ -128,11 +137,13 @@ export class DesktopRecordingManager {
     if (!this.recorder || this.closed) return;
     try {
       const state = await this.recorder.recordingState(); this.nativeState = state;
+      await this.teaching.drain(this.recorder);
       if (this.generation > 0 && ["stopped", "failed"].includes(state.status) && this.convertedGeneration !== this.generation) {
         const completed = await this.recorder.recordingState(true);
-        state.commands.push(...completed.commands); this.convert(completed);
+        state.commands.push(...completed.commands); await this.teaching.finish(this.recorder, completed); this.convert(completed);
       }
       if (state.commands.includes("emergency")) {
+        void this.teaching.cancelAnalysis();
         this.armedBot = null; await this.bots.control("stop"); await this.recorder.setBotControl(false, false);
       } else if (state.commands.includes("bot") && this.armedBot && !this.botActive() && !activeRecording(state)) {
         const request = this.armedBot; this.armedBot = null;
@@ -144,11 +155,25 @@ export class DesktopRecordingManager {
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error); this.armedBot = null;
       await this.bots.control("stop").catch(() => undefined);
+      try {
+        if (this.teaching.snapshot().phase === "capturing") {
+          const stopped = await this.recorder.recordingCommand("stop"); await this.teaching.finish(this.recorder, stopped);
+        }
+      } catch { this.teaching.fail("Teaching capture failed; any written frame files remain in artifacts"); }
       await this.recorder.close().catch(() => undefined); this.recorder = undefined;
     }
   }
   async close(): Promise<void> {
     this.closed = true; if (this.timer) clearTimeout(this.timer);
-    await this.serial(async () => { this.armedBot = null; try { await this.bots.control("stop"); } finally { await this.recorder?.close(); this.recorder = undefined; } });
+    await this.teaching.cancelAnalysis();
+    await this.serial(async () => {
+      this.armedBot = null;
+      try {
+        await this.bots.control("stop");
+        if (this.recorder && this.teaching.snapshot().phase === "capturing") {
+          const stopped = await this.recorder.recordingCommand("stop"); await this.teaching.finish(this.recorder, stopped);
+        }
+      } finally { await this.recorder?.close(); this.recorder = undefined; }
+    });
   }
 }

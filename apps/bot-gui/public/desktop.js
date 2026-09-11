@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let windows = [], profiles = [], skills = [], steps = [], pageIndex = 0, selected = 0;
 let previewMode = false, lastImage = '', active = false, recordingActive = false, loadedDraft = -1, beforeRecording = null;
+let behaviors = [], teachingState = null, teachingRevision = '';
 const PAGE_SIZE = 25;
 const kinds = { click: 'Click', hold: 'Press / hold keys and buttons', move: 'Move mouse to point', 'relative-move': 'Relative mouse movement', 'key-down': 'Key down', 'key-up': 'Key up', 'button-down': 'Mouse button down', 'button-up': 'Mouse button up', drag: 'Drag', scroll: 'Scroll', wait: 'Wait', 'release-all': 'Release all held input' };
 const keyNames = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(k => 'Key' + k).concat([...'0123456789'].map(k => 'Digit' + k), ['Space', 'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Shift', 'Control', 'Alt', 'Home', 'End', 'PageUp', 'PageDown'], [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12].map(n => 'F' + n));
@@ -210,7 +211,7 @@ for (const action of ['pause', 'resume', 'stop', 'discard'])
         loadProfile(beforeRecording);
         beforeRecording = null;
     } await poll(); });
-handle('start', async () => { await api('start', { target: target(), profile: profile(), startMethod: $('bot-method').value }); previewMode = false; await poll(); });
+handle('start', async () => { await api('start', { target: target(), profile: selectedRunProfile(), startMethod: $('bot-method').value }); previewMode = false; await poll(); });
 for (const action of ['pause', 'resume', 'stop'])
     handle(action, async () => { await api(action, {}); await poll(); });
 handle('emergency', async () => { const results = await Promise.allSettled([api('stop', {}), api('recording/stop', {})]); await poll(); const failed = results.find(r => r.status === 'rejected'); if (failed)
@@ -253,6 +254,8 @@ async function poll() {
     const r = capture.recording;
     active = !!run && !['stopped', 'completed', 'failed'].includes(run.status);
     recordingActive = !!r && ['armed', 'countdown', 'recording', 'paused'].includes(r.status);
+    teachingState = capture.teaching;
+    await renderTeachingState(capture);
     if (capture.draft && capture.draftId !== loadedDraft) {
         loadedDraft = capture.draftId;
         loadProfile(capture.draft);
@@ -262,15 +265,15 @@ async function poll() {
     $('service-error').textContent = capture.error ?? '';
     $('record-status').textContent = r ? `${r.status === 'countdown' ? 'Recording starts in ' + Math.ceil(r.countdownMs / 1000) + '…' : r.status === 'recording' ? 'RECORDING' : r.status} · ${(r.elapsedMs / 1000).toFixed(1)} sec · ${r.eventCount} events · ${r.target?.title ?? ''} · ${r.reason}` : 'Recording is off';
     const activity = recordingActive ? (r.status === 'recording' ? 'RECORDING · you control the target' : 'Recording ' + r.status) : capture.botArmed ? `Bot armed · ${capture.armedProfileName}` : active ? 'Bot ' + run.status : 'Idle';
-    $('activity').textContent = activity;
+    $('activity').textContent = teachingState?.phase === 'capturing' ? 'TEACHING · you control the target' : teachingState?.phase === 'analyzing' ? 'Analyzing demonstration' : activity;
     $('activity').className = 'activity ' + (recordingActive ? 'recording' : active ? 'playing' : '');
-    $('record-start').disabled = recordingActive || active || capture.botArmed;
+    $('record-start').disabled = recordingActive || active || capture.botArmed || teachingState?.phase === 'analyzing';
     $('record-start').textContent = $('record-method').value === 'hotkey' ? 'Arm Recording Hotkey' : 'Start Recording';
     $('record-pause').disabled = r?.status !== 'recording';
     $('record-resume').disabled = r?.status !== 'paused';
     $('record-stop').disabled = !recordingActive;
     $('record-discard').disabled = !r || r.status === 'idle';
-    $('start').disabled = recordingActive || active || capture.botArmed;
+    $('start').disabled = recordingActive || active || capture.botArmed || teachingState?.phase === 'analyzing';
     $('start').textContent = $('bot-method').value === 'hotkey' ? 'Arm Bot Hotkey' : 'Start Bot';
     $('preview').disabled = recordingActive || active || capture.botArmed;
     $('target').disabled = recordingActive || active || capture.botArmed;
@@ -285,7 +288,9 @@ async function poll() {
     }
     const total = run.profile.loop?.mode === 'once' ? 1 : run.profile.loop?.mode === 'count' ? run.profile.loop.count : 'until stopped';
     const countdown = run.countdownEndsAt ? ' · starts in ' + Math.max(0, Math.ceil((Date.parse(run.countdownEndsAt) - Date.now()) / 1000)) + '…' : '';
-    $('status').textContent = `Bot ${run.status}${countdown} · loop ${run.loopIndex ?? 1}/${total} · ${run.actionCount}/${run.profile.maxActions} actions · ${run.reason}`;
+    $('status').textContent = run.profile.mode === 'feedback'
+        ? `Bot ${run.status}${countdown} · ${run.profile.name} · ${run.actionCount}/${run.profile.maxActions} inputs · ${run.intelligence?.calls ?? 0}/${run.intelligence?.maxCalls ?? '?'} model calls · ${run.reason}`
+        : `Bot ${run.status}${countdown} · loop ${run.loopIndex ?? 1}/${total} · ${run.actionCount}/${run.profile.maxActions} actions · ${run.reason}`;
     $('latest-action').textContent = run.latestAction ? 'Latest action: ' + JSON.stringify(run.latestAction) : '';
     $('logs').textContent = run.logs.map(e => `${e.at} ${e.message}`).join('\n');
     if (run.latestScreenshot && !previewMode && !recordingActive) {
@@ -300,13 +305,99 @@ async function poll() {
     if (run.report)
         $('report').href = '/artifact?path=' + encodeURIComponent(run.report.relativePath);
 }
+function selectedBehavior() { return behaviors.find(b => b.id === $('teach-behavior').value); }
+async function refreshBehaviors(preferredId) {
+    const old = preferredId ?? $('teach-behavior').value;
+    ({ behaviors } = await api('teaching/behaviors'));
+    $('teach-behavior').replaceChildren(); option($('teach-behavior'), '', 'Create a new behavior');
+    for (const b of behaviors) option($('teach-behavior'), b.id, `${b.name} · ${b.examples.length} demonstrations · ${b.reviewed ? 'ready' : 'needs review'}`);
+    if (behaviors.some(b => b.id === old)) $('teach-behavior').value = old;
+    renderBehavior();
+}
+function renderBehavior() {
+    const b = selectedBehavior();
+    $('teach-demo').replaceChildren(); $('teach-procedure').replaceChildren(); $('teach-evidence').replaceChildren();
+    if (!b) { $('behavior-info').textContent = 'New behavior: demonstrate first, then analyze and review.'; return; }
+    $('teach-name').value = b.name; $('teach-goal').value = b.goal; $('teach-camera').value = b.cameraMode; $('teach-completion').value = b.completionOverride;
+    $('behavior-info').textContent = `${b.processName} · ${b.examples.length} demonstrations · ${b.examples.filter(e => e.procedure).length} analyzed · ${b.reviewed ? 'Ready to run' : 'Needs analysis / goal and completion review'}`;
+    for (const [i, e] of b.examples.entries()) {
+        option($('teach-demo'), e.demonstrationId, `Example ${i + 1}: ${e.outcome} · ${e.procedure ? 'analyzed' : 'not analyzed'}`);
+        if (e.procedure) {
+            const p = e.procedure; const article = document.createElement('article');
+            const heading = document.createElement('h3'); heading.textContent = `Example ${i + 1} · ${e.outcome}`; article.append(heading);
+            const summary = document.createElement('p'); summary.textContent = `Target: ${p.targetDescription}. Preconditions: ${p.preconditions.join('; ')}`; article.append(summary);
+            const list = document.createElement('ol');
+            for (const step of p.steps) { const li = document.createElement('li'); li.textContent = `${step.name}: ${step.intent}. When: ${step.when}. Verify: ${step.success}. Failure: ${step.failure}. Recovery: ${step.recovery}. Evidence frames: ${step.evidenceFrames.join(', ')}.`; list.append(li); }
+            article.append(list);
+            const uncertainty = document.createElement('p'); uncertainty.textContent = `Completion: ${p.completion.join('; ')}. Uncertainties: ${p.uncertainties.join('; ') || 'None reported; review against your demonstration.'}`; article.append(uncertainty);
+            $('teach-procedure').append(article);
+        }
+        const link = document.createElement('a'); link.textContent = `Inspect example ${i + 1} actions and frame metadata`; link.href = '/artifact?path=' + encodeURIComponent(`desktop-teach-${e.demonstrationId}/demonstration.json`); link.target = '_blank'; link.rel = 'noopener';
+        const row = document.createElement('p'); row.append(link); $('teach-evidence').append(row);
+        const view = document.createElement('button'); view.textContent = `View example ${i + 1} screenshots`;
+        view.onclick = async () => { try {
+            const response = await fetch(link.href); if (!response.ok) throw new Error('Evidence unavailable'); const demo = await response.json();
+            const gallery = document.createElement('div'); gallery.className = 'teaching-gallery';
+            for (const frame of demo.frames) {
+                const figure = document.createElement('figure'); const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `Frame ${frame.id} at ${frame.atMs} milliseconds`;
+                img.src = '/artifact?path=' + encodeURIComponent(`desktop-teach-${e.demonstrationId}/${frame.file}`);
+                const caption = document.createElement('figcaption'); caption.textContent = `Frame ${frame.id} · ${(frame.atMs / 1000).toFixed(2)}s · ${frame.eventCount} events · held: ${frame.heldKeys.concat(frame.heldButtons).join(', ') || 'none'}`;
+                figure.append(img, caption); gallery.append(figure);
+            }
+            view.replaceWith(gallery);
+        } catch (error) { $('message').textContent = error.message; } };
+        $('teach-evidence').append(view);
+    }
+    $('teach-demo').value = b.examples.at(-1)?.demonstrationId ?? '';
+}
+function selectedRunProfile() {
+    if ($('run-kind').value === 'macro') return profile();
+    const b = selectedBehavior(); if (!b?.reviewed) throw new Error('Select an analyzed behavior and confirm its goal and completion first');
+    return { version: 1, name: b.name, mode: 'feedback', goal: b.goal, learnedBehaviorId: b.id,
+        policyTimeoutMs: teachingState?.provider?.timeoutMs ?? 45000, startDelayMs: Number($('delay').value) * 1000,
+        maxActions: Number($('count').value), maxDurationMs: Number($('duration').value) * 1000,
+        intervalMs: 350, actions: [{ kind: 'wait', durationMs: 100 }], skills: [],
+        learnedOptions: { maxCalls: Number($('ai-calls').value), maxActionMs: Number($('ai-action-ms').value), maxObservationAgeMs: Number($('ai-age').value) * 1000,
+            maxNoProgress: Number($('ai-stuck').value), maxRecoveries: Number($('ai-recoveries').value) } };
+}
+async function renderTeachingState(capture) {
+    const t = capture.teaching; if (!t) return;
+    const revision = `${t.behaviorId}:${t.demonstrationId}:${t.phase}`;
+    if (revision !== teachingRevision) { teachingRevision = revision; if (t.behaviorId) await refreshBehaviors(t.behaviorId); }
+    $('model-status').textContent = t.provider.configured ? `${t.provider.provider} · ${t.provider.model} · ${t.provider.message}` : t.provider.message;
+    $('teach-status').textContent = `${t.phase} · ${t.frameCount} visual states${t.error ? ' · ' + t.error : ''}`;
+    const locked = recordingActive || active || capture.botArmed || t.phase === 'analyzing';
+    $('teach-start').disabled = locked;
+    $('teach-stop').disabled = t.phase !== 'capturing';
+    $('teach-analyze').disabled = locked || !$('teach-demo').value;
+    $('teach-cancel').disabled = t.phase !== 'analyzing';
+    $('teach-save').disabled = locked || !selectedBehavior();
+    $('teach-behavior').disabled = locked;
+    $('teach-start').textContent = $('record-method').value === 'hotkey' ? 'Arm teaching hotkey' : selectedBehavior() ? 'Teach another example' : 'Start teaching';
+}
+$('teach-behavior').onchange = () => { if (!$('teach-behavior').value) { $('teach-name').value = ''; $('teach-goal').value = ''; $('teach-completion').value = ''; } renderBehavior(); };
+handle('teach-start', async () => {
+    const id = $('teach-behavior').value;
+    await api('recording/start', { target: target(), startMethod: $('record-method').value, delayMs: Number($('record-delay').value) * 1000, maxDurationMs: 120000,
+        teaching: { ...(id ? { behaviorId: id } : {}), name: $('teach-name').value, goal: $('teach-goal').value, cameraMode: $('teach-camera').value } });
+    previewMode = false; await poll();
+});
+handle('teach-stop', async () => { await api('recording/stop', {}); await poll(); });
+handle('teach-analyze', async () => {
+    await api('teaching/analyze', { behaviorId: $('teach-behavior').value, demonstrationId: $('teach-demo').value, outcome: $('teach-outcome').value, outcomeNote: $('teach-note').value }); await poll();
+});
+handle('teach-cancel', async () => { await api('teaching/cancel', {}); await poll(); });
+handle('teach-save', async () => {
+    await api('teaching/review', { id: $('teach-behavior').value, goal: $('teach-goal').value, completionOverride: $('teach-completion').value, reviewed: true });
+    await refreshBehaviors(); $('run-kind').value = 'learned'; $('message').textContent = 'Learned behavior saved. Start Bot will run it from the current screen.';
+});
 for (const name of ['record', 'bot', 'stopRecording'])
     for (const key of ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F9', 'F10', 'F11'])
         option($('hotkey-' + name), key, key);
 setShortcuts({ record: 'F6', bot: 'F7', stopRecording: 'F9' });
 steps = [{ kind: 'click', point: { x: .5, y: .5 }, button: 'left', durationMs: 50 }];
 renderActions();
-void Promise.all([refreshProfiles(), api('recording/settings').then(setShortcuts)]).catch(error => { $('message').textContent = error.message; });
+void Promise.all([refreshProfiles(), refreshBehaviors(), api('recording/settings').then(setShortcuts)]).catch(error => { $('message').textContent = error.message; });
 async function tick() { try {
     await poll();
 }

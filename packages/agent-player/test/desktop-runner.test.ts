@@ -180,4 +180,39 @@ describe("desktop bounded runner", () => {
     const { runner, session } = setup({ mode: "feedback" }, policy); const task = runner.start(); await vi.runAllTimersAsync(); await task;
     expect(runner.state.status).toBe("failed"); expect(session.actions).toHaveLength(0);
   });
+  it("runs a bounded batch without observing or reasoning while a button is held, then cleans up", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { boundedBatch: true,
+      decide: vi.fn().mockResolvedValueOnce({ type: "act", actions: [{ kind: "key-down", key: "KeyW" }, { kind: "relative-move", dx: 10, dy: 0 }, { kind: "release-all" }], reason: "Adjusting approach" }).mockResolvedValue({ type: "complete", reason: "Visible success" }),
+      verify: vi.fn().mockResolvedValue({ result: "progress", reason: "visible progress" }) };
+    const { runner, session } = setup({ mode: "feedback", maxActions: 10 }, policy);
+    const observe = session.observe.bind(session); session.observe = async () => { expect(session.held.size).toBe(0); return observe(); };
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.actions).toHaveLength(3); expect(runner.state.status).toBe("completed"); expect(session.closed).toBe(true);
+    expect(runner.state.history[0]?.actions).toHaveLength(3);
+  });
+  it("does not call action-budget exhaustion a successful feedback run", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { boundedBatch: true, decide: vi.fn().mockResolvedValue({ type: "act", actions: [{ kind: "wait", durationMs: 100 }], reason: "Searching" }), verify: vi.fn().mockResolvedValue({ result: "unknown", reason: "awaiting" }) };
+    const { runner } = setup({ mode: "feedback", maxActions: 1 }, policy); const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(runner.state.status).toBe("stopped"); expect(runner.state.reason).toContain("goal not verified");
+  });
+  it("checks target health before accepting model completion", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { decide: vi.fn(), verify: vi.fn() };
+    const { runner, session } = setup({ mode: "feedback" }, policy);
+    vi.mocked(policy.decide).mockImplementation(async () => { session.reason = "Target identity changed"; session.armed = false; return { type: "complete", reason: "incorrect" }; });
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(runner.state.status).toBe("failed"); expect(session.actions).toHaveLength(0); expect(session.closed).toBe(true);
+  });
+  it("cleans up held input after a bounded batch fails midway", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { boundedBatch: true, decide: vi.fn().mockResolvedValue({ type: "act", actions: [{ kind: "key-down", key: "KeyW" }, { kind: "relative-move", dx: 1, dy: 0 }], reason: "Move" }), verify: vi.fn() };
+    const { runner, session } = setup({ mode: "feedback", maxActions: 10 }, policy);
+    const execute = session.execute.bind(session); session.execute = async (a, g, s) => { if (a.kind === "relative-move") throw new Error("Input rejected"); await execute(a, g, s); };
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(runner.state.status).toBe("failed"); expect(session.held.size).toBe(0); expect(session.closed).toBe(true);
+  });
+  it("bounds model latency independently of the run deadline", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { decide: () => new Promise(() => {}), verify: vi.fn() };
+    const { runner, session } = setup({ mode: "feedback", maxDurationMs: 10000, policyTimeoutMs: 1000 }, policy);
+    const task = runner.start(); await vi.advanceTimersByTimeAsync(1300); await task;
+    expect(runner.state.reason).toContain("Policy timed out"); expect(session.closed).toBe(true);
+  });
 });
