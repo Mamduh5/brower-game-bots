@@ -5,12 +5,13 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { DesktopActionSchema, DesktopWindowSchema, type DesktopAction, type DesktopHealth, type DesktopObservation, type DesktopSession, type DesktopWindow } from "@game-bots/environment-sdk";
+import { DesktopHotkeysSchema, RecordingOptionsSchema, RecordingStateSchema, type DesktopHotkeys, type DesktopRecorder, type RecordingOptions, type RecordingState } from "@game-bots/environment-sdk";
 
 const HealthSchema = z.object({ armed: z.boolean(), reason: z.string().nullable(), heldKeys: z.array(z.string()), heldButtons: z.array(z.string()) });
 const CaptureSchema = z.object({ window: DesktopWindowSchema, geometry: z.string(), png: z.string(), capturedAt: z.string() });
 
 /** One persistent helper owns actual input and independently watches focus/F8/leases. */
-export class WindowsDesktopSession implements DesktopSession {
+export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   private readonly heartbeat: NodeJS.Timeout;
@@ -58,7 +59,13 @@ export class WindowsDesktopSession implements DesktopSession {
   }
 
   async listWindows(): Promise<DesktopWindow[]> { return z.array(DesktopWindowSchema).parse(await this.request({ op: "list" })); }
-  async bind(target: DesktopWindow, maxDurationMs: number): Promise<void> { await this.request({ op: "bind", target: DesktopWindowSchema.parse(target), maxDurationMs }); }
+  async bind(target: DesktopWindow, maxDurationMs: number, maxHoldMs = 5500): Promise<void> { await this.request({ op: "bind", target: DesktopWindowSchema.parse(target), maxDurationMs, maxHoldMs }); }
+  async configureHotkeys(hotkeys: DesktopHotkeys): Promise<RecordingState> { return RecordingStateSchema.parse(await this.request({ op: "recorder-hotkeys", hotkeys: DesktopHotkeysSchema.parse(hotkeys) })); }
+  async recordingCommand(command: "prepare" | "start" | "pause" | "resume" | "stop" | "discard", options?: RecordingOptions): Promise<RecordingState> {
+    return RecordingStateSchema.parse(await this.request({ op: `recorder-${command}`, ...(options ? RecordingOptionsSchema.parse(options) : {}), includeEvents: command === "stop" }));
+  }
+  async recordingState(includeEvents = false): Promise<RecordingState> { return RecordingStateSchema.parse(await this.request({ op: "recorder-state", includeEvents })); }
+  async setBotControl(armed: boolean, active: boolean): Promise<void> { await this.request({ op: "recorder-bot", armed, active }); }
   async focus(): Promise<void> { await this.request({ op: "focus" }); }
   async observe(): Promise<DesktopObservation> {
     const capture = CaptureSchema.parse(await this.request({ op: "observe" }));

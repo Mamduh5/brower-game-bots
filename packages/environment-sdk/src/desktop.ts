@@ -38,7 +38,7 @@ export interface DesktopObservation {
 export interface DesktopHealth { armed: boolean; reason: string | null; heldKeys: string[]; heldButtons: string[] }
 export interface DesktopSession {
   listWindows(): Promise<DesktopWindow[]>;
-  bind(target: DesktopWindow, maxDurationMs: number): Promise<void>;
+  bind(target: DesktopWindow, maxDurationMs: number, maxHoldMs?: number): Promise<void>;
   focus(): Promise<void>;
   observe(): Promise<DesktopObservation>;
   execute(action: DesktopAction, geometry: string, signal: AbortSignal): Promise<void>;

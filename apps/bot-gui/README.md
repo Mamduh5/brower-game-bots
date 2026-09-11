@@ -74,6 +74,8 @@ The TypeScript contract in `src/human-vs-bot-contract.ts` defines the minimal fu
 This does not start a live match or change the Cat-and-Dog planner. It is only the seam needed for a later controller to keep human input untouched on the human turn, let the bot act only on its turn, and record both human and bot shot choices.
 # Windows desktop mode
 
-Choose **Desktop automation** on the dashboard or open `/desktop.html`. Run `pnpm desktop:setup` once before native use. This page provides application selection, screenshot point picking, a form-based mouse/keyboard action editor, saved configurations and behaviors, run limits, status, evidence, pause/resume/stop, and **F8 emergency stop**. Browser runner/replay features remain on `/`.
+Choose **Desktop automation** on the dashboard or open `/desktop.html`. Run `pnpm desktop:setup` before native use and after native source changes. Select a target, record your actions, stop, review and save the generated configuration, then use the separate **Start Bot** controls. Both modes support countdowns and explicitly armed hotkeys (F6 recording, F7 bot; F9 stops recording). Playback supports once, N repetitions, or until stopped with safety limits and a separate loop delay. **F8** stops both modes. Manual editing, screenshot point picking, configurations/behaviors, evidence and browser runner/replay features remain available.
+
+See the [recording and replay guide](../../docs/recording.md) for controls, timing, editing, saved hotkeys and limitations. [Recording validation](../../docs/recording-validation.md) distinguishes code-level checks from the real usage tests left for you.
 
 See the [desktop operating guide](../../docs/desktop.md) for setup, controls, safety behavior, native fixture tests, and the honest visual-policy/Roblox limitations.

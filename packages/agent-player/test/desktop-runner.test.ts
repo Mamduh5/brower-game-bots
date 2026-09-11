@@ -3,6 +3,7 @@ import { DesktopRunner, type DesktopPolicy } from "../src/application/desktop-ru
 import { DesktopProfileSchema } from "@game-bots/game-sdk";
 import type { DesktopAction, DesktopHealth, DesktopObservation, DesktopSession, DesktopWindow } from "@game-bots/environment-sdk";
 import type { ArtifactStore } from "@game-bots/runtime-core";
+vi.mock("node:perf_hooks", () => ({ performance: { now: () => Date.now() } }));
 
 // timers/promises retains native timers; use abortable global timers under Vitest's clock.
 vi.mock("node:timers/promises", () => ({ setTimeout: (ms: number, value: unknown, options?: { signal?: AbortSignal }) => new Promise((resolve, reject) => {
@@ -17,12 +18,13 @@ const target: DesktopWindow = { handle: "123", pid: 456, processStartedAt: "1", 
 class FakeDesktop implements DesktopSession {
   held = new Set<string>(); closed = false; armed = false; reason: string | null = null;
   actions: DesktopAction[] = []; captures = 0; failCapture = false; changed = true;
+  dispatchTimes: number[] = []; releases = 0;
   async listWindows() { return [target]; }
   async bind() {}
   async focus() {}
   async resume() { this.armed = true; this.reason = null; }
   async pause() { this.armed = false; this.reason = "Paused"; await this.releaseAll(); }
-  async releaseAll() { this.held.clear(); }
+  async releaseAll() { this.held.clear(); this.releases++; }
   async close() { await this.releaseAll(); this.closed = true; }
   async health(): Promise<DesktopHealth> { return { armed: this.armed, reason: this.reason, heldKeys: [...this.held], heldButtons: [] }; }
   async observe(): Promise<DesktopObservation> {
@@ -30,7 +32,7 @@ class FakeDesktop implements DesktopSession {
     this.captures++; return { capturedAt: new Date().toISOString(), window: target, geometry: "same", png: Buffer.from("png"), sha256: String(this.changed ? this.captures : 0) };
   }
   async execute(action: DesktopAction, _geometry: string, signal: AbortSignal) {
-    signal.throwIfAborted(); this.actions.push(action);
+    signal.throwIfAborted(); this.actions.push(action); this.dispatchTimes.push(Date.now());
     if (action.kind === "key-down") this.held.add(action.key);
     if (action.kind === "key-up") this.held.delete(action.key);
   }
@@ -46,6 +48,67 @@ function setup(overrides: object = {}, policy?: DesktopPolicy) {
 }
 afterEach(() => vi.useRealTimers());
 describe("desktop bounded runner", () => {
+  it("replays recorded timestamps without inserting screenshot/interval delays between edges", async () => {
+    vi.useFakeTimers();
+    const { runner, session } = setup({ playback: "recorded", loop: { mode: "once" }, maxActions: 20, actions: [
+      { kind: "key-down", key: "KeyW", delayBeforeMs: 0 }, { kind: "key-down", key: "Space", delayBeforeMs: 800 },
+      { kind: "key-up", key: "Space", delayBeforeMs: 100 }, { kind: "key-up", key: "KeyW", delayBeforeMs: 500 }
+    ] });
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.dispatchTimes.map(t => t - session.dispatchTimes[0]!)).toEqual([0,800,900,1400]);
+    expect(session.captures).toBe(2); expect(runner.state.completedLoops).toBe(1); expect(session.held.size).toBe(0);
+  });
+  it("applies the initial countdown once and a separate delay between finite loops", async () => {
+    vi.useFakeTimers(); const start = Date.now();
+    const { runner, session } = setup({ playback: "recorded", startDelayMs: 500, maxActions: 20, loop: { mode: "count", count: 3, delayMs: 300 }, actions: [{ kind: "key-down", key: "KeyW", delayBeforeMs: 100 }] });
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.dispatchTimes.map(t=>t-start)).toEqual([800,1200,1600]); expect(runner.state.completedLoops).toBe(3);
+    expect(session.releases).toBeGreaterThanOrEqual(3); expect(runner.state.status).toBe("completed");
+  });
+  it("bounds until-stopped looping by the existing action cap", async () => {
+    vi.useFakeTimers(); const { runner, session } = setup({ playback: "recorded", loop: { mode: "until-stopped" }, maxActions: 5 });
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.actions).toHaveLength(5); expect(runner.state.reason).toBe("Action limit reached"); expect(session.held.size).toBe(0);
+  });
+  it("preserves the remaining loop delay while paused", async () => {
+    vi.useFakeTimers(); const { runner, session } = setup({ playback: "recorded", loop: { mode: "count", count: 2, delayMs: 1000 }, maxActions: 10 });
+    const task = runner.start(); await vi.advanceTimersByTimeAsync(400); await runner.pause();
+    await vi.advanceTimersByTimeAsync(500); const resume = runner.resume(); await vi.advanceTimersByTimeAsync(250); await resume;
+    await vi.runAllTimersAsync(); await task;
+    expect(session.dispatchTimes[1]! - session.dispatchTimes[0]!).toBe(1700);
+    expect(runner.state.completedLoops).toBe(2); expect(session.held.size).toBe(0);
+  });
+  it("retains timing for disabled events without dispatching them", async () => {
+    vi.useFakeTimers(); const { runner, session } = setup({ playback: "recorded", loop: { mode: "once" }, maxActions: 10, actions: [
+      { kind: "key-down", key: "KeyW", delayBeforeMs: 100, enabled: false }, { kind: "key-down", key: "Space", delayBeforeMs: 300 }
+    ] }); const start = Date.now(); const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.actions).toHaveLength(1); expect(session.dispatchTimes[0]! - start).toBe(600);
+  });
+  it("adds an inserted wait to the recorded timeline before subsequent event gaps", async () => {
+    vi.useFakeTimers(); const { runner, session } = setup({ playback: "recorded", loop: { mode: "once" }, maxActions: 10, actions: [
+      { kind: "key-down", key: "KeyW", delayBeforeMs: 0 }, { kind: "wait", durationMs: 1000, delayBeforeMs: 100 }, { kind: "key-up", key: "KeyW", delayBeforeMs: 200 }
+    ] });
+    const execute = session.execute.bind(session);
+    session.execute = async (action, geometry, signal) => { await execute(action, geometry, signal); if (action.kind === "wait") await new Promise(resolve => setTimeout(resolve, action.durationMs)); };
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.dispatchTimes.map(t => t - session.dispatchTimes[0]!)).toEqual([0, 100, 1300]);
+    expect(session.held.size).toBe(0);
+  });
+  it("releases held input when a timed loop is stopped partway through", async () => {
+    vi.useFakeTimers(); const { runner, session } = setup({ playback: "recorded", loop: { mode: "until-stopped" }, maxActions: 10, actions: [
+      { kind: "key-down", key: "KeyW", delayBeforeMs: 0 }, { kind: "key-up", key: "KeyW", delayBeforeMs: 2000 }
+    ] }); const task = runner.start(); await vi.advanceTimersByTimeAsync(350); expect(session.held.size).toBe(1);
+    await runner.stop(); await task; expect(session.held.size).toBe(0); expect(session.actions).toHaveLength(1); expect(runner.state.status).toBe("stopped");
+  });
+  it("restores held state only after explicit resume and excludes paused time from recorded timing", async () => {
+    vi.useFakeTimers(); const { runner, session } = setup({ playback: "recorded", loop: { mode: "once" }, maxActions: 10, actions: [
+      { kind: "key-down", key: "KeyW", delayBeforeMs: 0 }, { kind: "key-up", key: "KeyW", delayBeforeMs: 1000 }
+    ] }); const task = runner.start(); await vi.advanceTimersByTimeAsync(400); await runner.pause(); expect(session.held.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(500); const resume = runner.resume(); await vi.advanceTimersByTimeAsync(250); await resume;
+    await vi.runAllTimersAsync(); await task;
+    expect(session.actions.map(a=>a.kind)).toEqual(["key-down","key-down","key-up"]);
+    expect(session.dispatchTimes[2]! - session.dispatchTimes[0]!).toBe(1700); expect(session.held.size).toBe(0);
+  });
   it("observes before/after, bounds attempts, preserves recent history, and releases held input", async () => {
     vi.useFakeTimers(); const { runner, session, documents } = setup();
     const task = runner.start(); await vi.runAllTimersAsync(); await task;

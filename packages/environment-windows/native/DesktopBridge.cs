@@ -49,6 +49,8 @@ class DesktopBridge {
     static int TargetPid;
     static string TargetStart, Geometry, Reason;
     static long Beat, Deadline, LastInput, HeldSince;
+    static int MaxHoldMs = 5500;
+    internal static bool ControllerResponsive { get { return !Parent.HasExited && Clock.ElapsedMilliseconds - Beat <= 2500; } }
     static bool Armed, Bound, Closing, Emergency;
     static Process Parent;
     static Mutex Lease;
@@ -78,11 +80,12 @@ class DesktopBridge {
                 }
             }
         } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
-        finally { lock (Gate) { Disarm("Helper closed"); } if (Lease != null) { Lease.ReleaseMutex(); Lease.Dispose(); } }
+        finally { lock (Gate) { Disarm("Helper closed"); } DesktopRecorder.Shutdown(); if (Lease != null) { Lease.ReleaseMutex(); Lease.Dispose(); } }
     }
     static object Dispatch(Dictionary<string, object> c) {
         string op = (string)c["op"];
         if (op == "heartbeat") { Beat = Clock.ElapsedMilliseconds; return true; }
+        if (op.StartsWith("recorder-")) return DesktopRecorder.Command(c);
         if (op == "list") {
             var windows = new List<object>();
             EnumWindows(delegate(IntPtr h, IntPtr p) {
@@ -97,6 +100,8 @@ class DesktopBridge {
             Target = new IntPtr(long.Parse((string)t["handle"])); TargetPid = Convert.ToInt32(t["pid"]); TargetStart = (string)t["processStartedAt"];
             int limit = Convert.ToInt32(c["maxDurationMs"]);
             if (limit < 1000 || limit > 3600000) throw new Exception("Invalid native deadline");
+            MaxHoldMs = c.ContainsKey("maxHoldMs") ? Convert.ToInt32(c["maxHoldMs"]) : 5500;
+            if (MaxHoldMs < 5500 || MaxHoldMs > 60000) throw new Exception("Invalid held-input safety limit");
             CheckIdentity();
             var lease = new Mutex(false, "Local\\GameBotsDesktopInput");
             bool owned = false;
@@ -160,7 +165,7 @@ class DesktopBridge {
         } else throw new Exception("Unsupported primitive input");
         return true;
     }
-    static Dictionary<string, object> Window(IntPtr h) {
+    internal static Dictionary<string, object> Window(IntPtr h) {
         uint pid; GetWindowThreadProcessId(h, out pid);
         using (var process = Process.GetProcessById((int)pid)) {
             var title = new StringBuilder(2048); GetWindowText(h, title, title.Capacity);
@@ -253,7 +258,7 @@ class DesktopBridge {
                 if ((GetAsyncKeyState(0x77) & 0x8000) != 0) { Emergency = true; Disarm("F8 emergency stop"); }
                 if (Armed) try {
                     CheckActive();
-                    if (Keys.Count + Buttons.Count > 0 && Clock.ElapsedMilliseconds - HeldSince > 5500) throw new Exception("Held input exceeded 5.5 seconds");
+                    if (Keys.Count + Buttons.Count > 0 && Clock.ElapsedMilliseconds - HeldSince > MaxHoldMs) throw new Exception("Held input exceeded " + MaxHoldMs + " ms safety limit");
                 } catch (Exception e) { Disarm(e.Message); }
                 else if (Keys.Count + Buttons.Count > 0) Release();
               } catch (Exception e) { Disarm("Watchdog failed: " + e.Message); }

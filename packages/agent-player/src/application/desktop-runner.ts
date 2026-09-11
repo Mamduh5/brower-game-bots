@@ -34,6 +34,7 @@ export interface DesktopRunState {
   startedAt: string; endedAt: string | null; actionCount: number; latestAction: DesktopAction | null;
   latestScreenshot: ArtifactRef | null; reason: string; history: DesktopHistoryEntry[];
   logs: { at: string; message: string }[]; report: ArtifactRef | null;
+  loopIndex: number; completedLoops: number; countdownEndsAt: string | null;
 }
 
 /** Bounded pixel-driven runner; browser Player/Tester contracts stay unchanged. */
@@ -50,11 +51,13 @@ export class DesktopRunner {
   private readonly evidence: ArtifactRef[] = [];
   private readonly events: object[] = [];
   private controlTask: Promise<void> = Promise.resolve();
+  private pauseStarted = 0;
+  private pausedMs = 0;
 
   constructor(private readonly session: DesktopSession, private readonly artifacts: ArtifactStore, target: DesktopWindow, profile: DesktopProfile, private readonly policy?: DesktopPolicy) {
     const validated = DesktopProfileSchema.parse(profile);
     if (validated.mode === "feedback" && !policy) throw new Error("Feedback mode requires an installed DesktopPolicy; no visual AI provider is configured.");
-    this.state = { runId: `desktop-${randomUUID()}`, status: "starting", profile: validated, target, startedAt: new Date().toISOString(), endedAt: null, actionCount: 0, latestAction: null, latestScreenshot: null, reason: "Start delay", history: [], logs: [], report: null };
+    this.state = { runId: `desktop-${randomUUID()}`, status: "starting", profile: validated, target, startedAt: new Date().toISOString(), endedAt: null, actionCount: 0, latestAction: null, latestScreenshot: null, reason: "Start delay", history: [], logs: [], report: null, loopIndex: 1, completedLoops: 0, countdownEndsAt: null };
   }
   start(): Promise<void> {
     if (this.task) throw new Error("Run already started");
@@ -71,7 +74,7 @@ export class DesktopRunner {
   pause(reason = "Paused by user"): Promise<void> {
     return this.control(async () => {
       if (!["running", "starting"].includes(this.state.status)) return;
-      this.state.status = "paused"; this.step.abort(new Error(reason));
+      this.state.status = "paused"; this.pauseStarted = performance.now(); this.step.abort(new Error(reason));
       await this.session.pause(); this.log(reason);
     });
   }
@@ -81,6 +84,7 @@ export class DesktopRunner {
       // Focus is only requested after an explicit user resume, never in recovery.
       await this.session.focus(); await delay(200, undefined, { signal: this.abort.signal });
       await this.session.observe(); await this.session.resume();
+      this.pausedMs += performance.now() - this.pauseStarted;
       this.step = new AbortController(); this.state.status = "running"; this.log("Resumed; a fresh observation will precede input");
     });
   }
@@ -123,20 +127,128 @@ export class DesktopRunner {
       if (!health.armed) throw new Error(health.reason ?? "Native input disarmed");
     }
   }
+  private async readyForSequence(): Promise<void> {
+    while (true) {
+      this.abort.signal.throwIfAborted();
+      const health = await this.session.health();
+      if (health.reason && /F8|deadline|identity|lost, hidden|heartbeat|Held input|release failed|Watchdog|modifier/i.test(health.reason)) throw new Error(health.reason);
+      if (!health.armed && this.state.status === "running") await this.pause(health.reason ?? "Input disarmed");
+      if (this.state.status !== "paused") return;
+      await delay(100, undefined, { signal: this.abort.signal });
+    }
+  }
+  /** Recorded edges share the same controller; no screenshots between tightly timed input edges. */
+  private async runConfiguredSequence(): Promise<void> {
+    const p = this.state.profile;
+    const totalLoops = p.loop?.mode === "once" ? 1 : p.loop?.mode === "count" ? p.loop.count : Infinity;
+    const heldKeys = new Set<string>(); const heldButtons = new Set<"left" | "right" | "middle">();
+    let point: { x: number; y: number } | undefined;
+    const remember = (action: DesktopAction): void => {
+      if (action.kind === "key-down") heldKeys.add(action.key);
+      if (action.kind === "key-up") heldKeys.delete(action.key);
+      if (action.kind === "button-down") heldButtons.add(action.button);
+      if (action.kind === "button-up") heldButtons.delete(action.button);
+      if (action.kind === "release-all") { heldKeys.clear(); heldButtons.clear(); }
+      if (action.kind === "move" || action.kind === "click") point = action.point;
+      if (action.kind === "drag") point = action.to;
+    };
+    const execute = async (action: DesktopAction, geometry: string, signal: AbortSignal): Promise<void> => {
+      signal.throwIfAborted();
+      this.state.latestAction = action; this.state.actionCount++;
+      this.events.push({ type: "action", at: new Date().toISOString(), action, number: this.state.actionCount, loop: this.state.loopIndex });
+      remember(action); await this.session.execute(action, geometry, signal);
+    };
+    for (let loop = 1; loop <= totalLoops && this.state.actionCount < p.maxActions; loop++) {
+      this.state.loopIndex = loop;
+      await this.readyForSequence(); let observation = await this.capture(); let due = performance.now();
+      let restore = false; let accountedPause = this.pausedMs; let finishedSteps = 0;
+      for (const step of p.actions) {
+        due += p.playback === "recorded" ? step.delayBeforeMs ?? 0 : 0;
+        let dispatched = false;
+        while (!dispatched && this.state.actionCount < p.maxActions) {
+          try {
+            await this.readyForSequence();
+            if (this.pausedMs !== accountedPause) { due += this.pausedMs - accountedPause; accountedPause = this.pausedMs; restore = true; }
+            const signal = AbortSignal.any([this.abort.signal, this.step.signal]);
+            if (restore) {
+              observation = await this.capture();
+              const restored: DesktopAction[] = [
+                ...(point && heldButtons.size ? [{ kind: "move" as const, point }] : []),
+                ...[...heldKeys].map(key => ({ kind: "key-down" as const, key })),
+                ...[...heldButtons].map(button => ({ kind: "button-down" as const, button }))
+              ];
+              for (const action of restored) { if (this.state.actionCount >= p.maxActions) break; await execute(action, observation.geometry, signal); }
+              restore = false;
+            }
+            if (this.state.actionCount >= p.maxActions) break;
+            await this.interval(Math.max(0, due - performance.now()), signal);
+            signal.throwIfAborted();
+            // Do not burst through overdue input after slow dispatch/pauses.
+            if (performance.now() - due > 250) { this.log("Playback fell behind; timing resynchronized without a catch-up burst"); due = performance.now(); }
+            dispatched = true;
+            if (step.enabled === false) continue;
+            const { delayBeforeMs: _timing, enabled: _enabled, ...raw } = step;
+            const action = DesktopActionSchema.parse(raw);
+            await execute(action, observation.geometry, signal);
+            // Manually inserted blocking actions extend the recorded timeline.
+            if (p.playback === "recorded" && "durationMs" in action) due += action.durationMs;
+            if (p.playback === "interval") {
+              await this.interval(p.intervalMs, signal);
+              const after = await this.capture();
+              this.unchanged = observation.sha256 === after.sha256 ? this.unchanged + 1 : 0;
+              this.state.history.push({ action, before: observation.sha256, after: after.sha256, screenChanged: observation.sha256 !== after.sha256, verification: "unknown", reason: "Configured playback" });
+              this.state.history = this.state.history.slice(-20); observation = after;
+              if (p.maxUnchangedObservations > 0 && this.unchanged >= p.maxUnchangedObservations) { this.unchanged = 0; await this.pause("Screen unchanged limit reached; inspect the target before resuming"); }
+            }
+          } catch (error) {
+            if (this.abort.signal.aborted) throw error;
+            const health = await this.session.health();
+            if (this.state.status !== "paused" && (!health.reason || !/focus|geometry|Paused/i.test(health.reason))) throw error;
+            await this.pause(health.reason ?? "Paused");
+            await this.readyForSequence(); restore = true;
+            // A partially dispatched action is never automatically repeated.
+          }
+        }
+        if (dispatched) finishedSteps++;
+        if (this.state.actionCount >= p.maxActions) break;
+      }
+      await this.session.releaseAll(); heldKeys.clear(); heldButtons.clear();
+      await this.readyForSequence(); await this.capture();
+      if (finishedSteps === p.actions.length) this.state.completedLoops++;
+      if (loop >= totalLoops || this.state.actionCount >= p.maxActions) break;
+      let loopDelayEnd = performance.now() + (p.loop?.delayMs ?? 0);
+      let loopPause = this.pausedMs;
+      while (performance.now() < loopDelayEnd) {
+        await this.readyForSequence();
+        loopDelayEnd += this.pausedMs - loopPause; loopPause = this.pausedMs;
+        await delay(Math.min(100, Math.max(0, loopDelayEnd - performance.now())), undefined, { signal: this.abort.signal });
+      }
+    }
+    this.state.status = "completed";
+    this.log(this.state.actionCount >= p.maxActions ? "Action limit reached" : "Configured loops completed");
+  }
   private async run(): Promise<void> {
     this.started = performance.now();
     const p = this.state.profile;
     const deadline = setTimeout(() => this.abort.abort(new Error("Run duration limit reached")), p.maxDurationMs);
     let index = 0;
     try {
-      await this.session.bind(this.state.target, p.maxDurationMs);
+      await this.session.bind(this.state.target, p.maxDurationMs, p.maxHoldMs);
       await this.artifacts.put({ runId: this.state.runId, kind: "json", relativePath: "reports/configuration.json", contentType: "application/json" }, Buffer.from(JSON.stringify({ target: this.state.target, profile: p }, null, 2)));
-      await delay(p.startDelayMs, undefined, { signal: this.abort.signal });
+      this.state.countdownEndsAt = new Date(Date.now() + p.startDelayMs).toISOString();
+      for (let remaining = p.startDelayMs; remaining > 0; remaining -= 100) {
+        await delay(Math.min(100, remaining), undefined, { signal: this.abort.signal });
+        if (/F8/.test((await this.session.health()).reason ?? "")) throw new Error("F8 emergency stop during countdown");
+      }
+      this.state.countdownEndsAt = null;
       if (this.state.status === "starting") {
         await this.session.focus(); await delay(200, undefined, { signal: this.abort.signal });
         await this.session.resume(); this.state.status = "running";
       }
       this.log("Target bound; F8 is the emergency stop");
+      if (!this.policy && (p.loop || p.playback === "recorded" || p.actions.some(a => a.enabled !== undefined || a.delayBeforeMs !== undefined))) {
+        await this.runConfiguredSequence(); return;
+      }
       while (this.state.actionCount < p.maxActions) {
         this.abort.signal.throwIfAborted();
         const health = await this.session.health();
@@ -214,6 +326,7 @@ export class DesktopRunner {
       this.state.status = this.abort.signal.aborted || /F8/.test(reason) ? "stopped" : "failed"; this.log(reason);
     } finally {
       clearTimeout(deadline);
+      this.state.countdownEndsAt = null;
       try { await this.session.close(); } catch (error) { this.state.status = "failed"; this.log(`Cleanup failed: ${String(error)}`); }
       this.state.endedAt = new Date().toISOString();
       try {

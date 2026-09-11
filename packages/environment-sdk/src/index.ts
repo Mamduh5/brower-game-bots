@@ -4,3 +4,4 @@ export * from "./environment-session.js";
 export * from "./health.js";
 export * from "./observation.js";
 export * from "./desktop.js";
+export * from "./recording.js";

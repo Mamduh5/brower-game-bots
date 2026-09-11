@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BotRunManager, discoverScreenshotPaths } from "./live-runner.js";
 import { DesktopManager } from "./desktop-manager.js";
+import { DesktopRecordingManager } from "./desktop-recording-manager.js";
 import { isLocalDesktopRequest } from "./desktop-security.js";
 import {
   discoverCatAndDogSummaries,
@@ -23,9 +24,10 @@ const staticRoot = publicRoot.endsWith(`${path.sep}dist${path.sep}public`) ? sou
 const options = parseServerOptions(process.argv.slice(2));
 const botRunManager = new BotRunManager(repoRoot);
 const desktopManager = new DesktopManager(repoRoot);
+const recordingManager = new DesktopRecordingManager(repoRoot, desktopManager);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => {
-  void desktopManager.close().finally(() => { server.close(); process.exit(0); });
+  void recordingManager.close().finally(() => { server.close(); process.exit(0); });
 });
 
 const server = createServer((request, response) => {
@@ -53,9 +55,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       else if (request.method === "GET" && action === "state") sendJson(response, 200, { run: desktopManager.state() });
       else if (request.method === "GET" && action === "profiles") sendJson(response, 200, { profiles: await desktopManager.profiles() });
       else if (request.method === "POST" && action === "profiles") sendJson(response, 200, await desktopManager.save(await readRequestJson(request)));
-      else if (request.method === "POST" && action === "start") sendJson(response, 201, await desktopManager.start(await readRequestJson(request)));
+      else if (request.method === "POST" && action === "start") {
+        const body = await readRequestJson(request); const result = await recordingManager.startBot(body);
+        sendJson(response, 201, body.startMethod === undefined ? result.run : result);
+      }
       else if (request.method === "POST" && action === "preview") sendJson(response, 200, await desktopManager.preview(await readRequestJson(request)));
-      else if (request.method === "POST" && ["pause", "resume", "stop"].includes(action)) sendJson(response, 200, { run: await desktopManager.control(action) });
+      else if (request.method === "POST" && (action === "pause" || action === "resume" || action === "stop")) sendJson(response, 200, await recordingManager.botControl(action));
+      else if (request.method === "GET" && action === "recording/state") sendJson(response, 200, recordingManager.snapshot());
+      else if (request.method === "GET" && action === "recording/settings") sendJson(response, 200, await recordingManager.settings());
+      else if (request.method === "POST" && action === "recording/settings") sendJson(response, 200, await recordingManager.saveSettings(await readRequestJson(request)));
+      else if (request.method === "POST" && action === "recording/start") sendJson(response, 201, await recordingManager.record(await readRequestJson(request)));
+      else if (request.method === "POST" && action.startsWith("recording/")) {
+        const command = action.slice("recording/".length);
+        if (command !== "pause" && command !== "resume" && command !== "stop" && command !== "discard") throw new Error("Unknown recording control");
+        sendJson(response, 200, await recordingManager.recordingControl(command));
+      }
       else sendJson(response, 404, { error: "Desktop route not found" });
     } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
     return;
@@ -220,7 +234,7 @@ async function readRequestJson(request: IncomingMessage): Promise<Record<string,
   let size = 0;
   for await (const chunk of request) {
     size += Buffer.byteLength(chunk);
-    if (size > 262144) throw new Error("Request body exceeds 256 KiB");
+    if (size > (request.url?.startsWith("/api/desktop/") ? 2097152 : 262144)) throw new Error("Request body exceeds the allowed size");
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
   if (chunks.length === 0) {

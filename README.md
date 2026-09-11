@@ -5,7 +5,7 @@ Production-oriented modular monolith for browser and Windows desktop game automa
 - `Tester Agent`: QA-oriented execution, evidence capture, issue finding, and report generation.
 - `Player Agent`: gameplay-oriented decision-making that reuses the same runtime and environment foundation.
 
-Windows desktop automation now has a GUI action editor, savable configurations, native screenshots and mouse/keyboard controls, F8 emergency stop, and a bounded policy interface for future visual game agents. See [Windows desktop guide](docs/desktop.md) and [validation results](docs/desktop-validation.md). No general visual AI provider or Roblox gameplay strategy is bundled.
+Windows desktop automation can now record your mouse/keyboard demonstration, turn it into an editable saved configuration, and replay it separately once or in loops. Recording and playback have separate countdowns and configurable start hotkeys; F8 remains emergency stop. See the [recording and replay guide](docs/recording.md), [code-level validation and manual checklist](docs/recording-validation.md), and [Windows desktop guide](docs/desktop.md). No new autonomous game logic or visual AI provider is bundled.
 
 ```powershell
 pnpm install

@@ -1,4 +1,19 @@
 .desktop-layout { display:grid; grid-template-columns:minmax(380px, 1fr) minmax(320px, 1fr); gap:20px; padding:24px; }
+.workflow, .desktop-live { display:flex; flex-direction:column; gap:18px; min-width:0; }
+.record-panel { border-left:5px solid #be185d; }
+.bot-panel { border-left:5px solid #0f766e; }
+.record-button { background:#9d174d; }
+.activity { font-size:1.4rem; font-weight:700; }
+.activity.recording { color:#be185d; }
+.activity.playing { color:#0f766e; }
+.desktop-action.selected { outline:2px solid #0f766e; }
+.desktop-action.disabled { opacity:0.55; }
+.action-tools { display:flex; gap:6px; flex-wrap:wrap; }
+.action-tools button { padding:5px 9px; }
+.action-tools input[type=checkbox] { width:auto; }
+#service-error { color:#b91c1c; }
+#report:not([hidden]) { display:block; margin-top:12px; }
+.desktop-layout details { margin-top:8px; }
 .desktop-layout label { display:grid; gap:6px; margin:10px 0; }
 .desktop-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .desktop-buttons { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }

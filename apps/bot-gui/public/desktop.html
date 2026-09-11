@@ -1,42 +1,72 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Desktop automation · Game Bots</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/desktop.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Record & replay · Game Bots</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/desktop.css"></head>
 <body>
-  <header class="topbar"><div><h1>Desktop automation</h1><p>Windows applications and games · Emergency stop: <strong>F8</strong></p></div><a href="/">Browser bots & reports</a><button id="stop" class="danger">Stop input</button></header>
+  <header class="topbar"><div><h1>Desktop automation</h1><p>Teach by doing. Review, save, then start the bot separately.</p></div><a href="/">Browser bots & reports</a><button id="emergency" class="danger">Emergency stop · F8</button></header>
   <main class="desktop-layout">
-    <section class="detail-header">
-      <h2>Target & configuration</h2>
-      <p>Open your application first. Use an owned/private test experience for game validation.</p>
-      <label>Application window <select id="target"><option value="">Refresh windows to choose a target</option></select></label>
-      <div class="desktop-buttons"><button id="windows">Refresh windows</button><button id="preview">Capture target preview</button></div>
-      <p class="muted">Capture and Start request focus for the selected window. Keep it visible. Changing focus pauses input.</p>
-      <label>Saved configuration <select id="profiles"><option value="">Choose a configuration</option></select></label>
-      <label>Name <input id="name" value="My clicker" maxlength="80"></label>
-      <label>Goal / notes <input id="goal" placeholder="Describe what this configuration is intended to do" maxlength="2000"></label>
-      <div class="desktop-fields">
-        <label>Interval after action (ms)<input id="interval" type="number" min="100" max="60000" value="1000"></label>
-        <label>Action limit<input id="count" type="number" min="1" max="10000" value="20"></label>
-        <label>Run duration (seconds)<input id="duration" type="number" min="1" max="3600" value="60"></label>
-        <label>Start delay (seconds)<input id="delay" type="number" min="0" max="60" value="3"></label>
-      </div>
-      <details><summary>Feedback guard & reusable behaviors</summary>
-        <label>Pause after unchanged screenshots (0 disables)<input id="unchanged" type="number" min="0" max="100" value="0"></label>
-        <p>Screen changes are recorded, but do not prove goal progress. Autonomous visual reasoning requires a DesktopPolicy integration; this editor runs deterministic actions.</p>
-        <label>Behavior name<input id="skill-name" placeholder="move-forward"></label><button id="save-skill">Save sequence as behavior</button>
-        <label>Stored behaviors<select id="skills"></select></label><button id="use-skill">Replace sequence with behavior</button>
+    <div class="workflow">
+      <section class="detail-header">
+        <h2>1. Choose your application</h2>
+        <label>Target window<select id="target"><option value="">Refresh windows to select an application</option></select></label>
+        <div class="desktop-buttons"><button id="windows">Refresh windows</button><button id="preview">Capture target preview</button></div>
+        <p class="muted">Keep the target visible. Focus changes pause recording and playback.</p>
+      </section>
+      <section class="detail-header record-panel">
+        <h2>2. Record your actions</h2><p>You provide the input. The bot only records.</p>
+        <div class="desktop-fields">
+          <label>Recording start<select id="record-method"><option value="button">Button · start now</option><option value="delay" selected>Countdown</option><option value="hotkey">Arm recording hotkey</option></select></label>
+          <label>Recording countdown (seconds)<input id="record-delay" type="number" min="0" max="60" value="3"></label>
+        </div>
+        <div class="desktop-buttons"><button id="record-start" class="record-button">Start Recording</button><button id="record-pause">Pause Recording</button><button id="record-resume">Resume Recording</button><button id="record-stop">Stop Recording</button><button id="record-discard">Discard Recording</button></div>
+        <p id="record-status" role="status" aria-live="polite">Recording is off</p>
+        <p id="shortcut-help">F6 starts or pauses/resumes an armed recording. F9 stops recording. F8 stops everything.</p>
+        <p class="muted">Stop loads an editable sequence below. Recording never starts the bot. Maximum 2 minutes / about 2,000 captured events.</p>
+      </section>
+      <section class="detail-header">
+        <h2>3. Review & save</h2>
+        <label>Saved configuration<select id="profiles"><option value="">Choose a configuration</option></select></label>
+        <label>Name<input id="name" value="My recording" maxlength="80"></label>
+        <div class="desktop-buttons"><button id="save">Save configuration</button><button id="duplicate-profile">Save a copy</button></div>
+        <p id="sequence-summary">One manually configured click. You can replace it by recording.</p>
+        <details id="editor"><summary>Edit sequence / create manually</summary>
+          <label>Timing<select id="timing"><option value="recorded">Recorded timing</option><option value="interval" selected>Fixed interval after actions</option></select></label>
+          <label>Fixed interval (ms)<input id="interval" type="number" min="100" max="60000" value="1000"></label>
+          <p>Delay before an event controls its timing. Down/up pairs preserve holds and overlapping input. Disabled events keep their timing gap.</p>
+          <div id="actions"></div>
+          <div class="desktop-buttons"><button id="previous-page">Previous actions</button><span id="page-number"></span><button id="next-page">Next actions</button><button id="add">Add action</button><button id="add-wait">Insert wait at end</button></div>
+        </details>
+        <details><summary>Notes & reusable behaviors</summary>
+          <label>Notes<input id="goal" maxlength="2000" placeholder="What this sequence does"></label>
+          <label>Behavior name<input id="skill-name" placeholder="move-forward"></label><button id="save-skill">Save sequence as behavior</button>
+          <label>Stored behaviors<select id="skills"></select></label><button id="use-skill">Replace sequence with behavior</button>
+        </details>
+      </section>
+      <section class="detail-header bot-panel">
+        <h2>4. Start the bot</h2><p>The bot provides the input using the current configuration.</p>
+        <div class="desktop-fields">
+          <label>Bot start<select id="bot-method"><option value="button">Button · start now</option><option value="delay" selected>Countdown</option><option value="hotkey">Arm bot hotkey</option></select></label>
+          <label>Bot start countdown (seconds)<input id="delay" type="number" min="0" max="60" value="3"></label>
+          <label>Loop mode<select id="loop"><option value="once">Run once</option><option value="count">Loop N times</option><option value="until-stopped">Loop until stopped (safety limits apply)</option></select></label>
+          <label>Number of loops<input id="loop-count" type="number" min="1" max="10000" value="3"></label>
+          <label>Delay between loops (seconds)<input id="loop-delay" type="number" min="0" max="60" value="0"></label>
+        </div>
+        <details><summary>Safety limits</summary><div class="desktop-fields">
+          <label>Action limit<input id="count" type="number" min="1" max="10000" value="1000"></label>
+          <label>Run duration (seconds)<input id="duration" type="number" min="1" max="3600" value="300"></label>
+          <label>Maximum continuous hold (ms)<input id="hold-limit" type="number" min="5500" max="60000" value="5500"></label>
+          <label>Unchanged-screen guard (interval mode, 0 disables)<input id="unchanged" type="number" min="0" max="100" value="0"></label>
+        </div></details>
+        <div class="desktop-buttons"><button id="start">Start Bot</button><button id="pause">Pause Bot</button><button id="resume">Resume Bot</button><button id="stop" class="danger">Stop Bot / cancel start</button></div>
+        <p class="muted">Start countdown runs once. Loop delay applies between repetitions. Stop cancels an armed hotkey, countdown, or running loop.</p>
+      </section>
+    </div>
+    <aside class="desktop-live">
+      <section class="detail-header"><h2>Current activity</h2><p id="activity" class="activity" aria-live="polite">Idle</p><p id="status" aria-live="polite">Bot is stopped</p><p id="latest-action"></p><p id="message" role="alert" aria-live="polite"></p><p id="service-error" role="alert"></p></section>
+      <section class="detail-header"><h2>Target preview / latest observation</h2><p class="muted">Click a setup preview to set a selected Move/Click action's point. Coordinates follow the window's client area.</p><img id="observation" alt="Latest target screenshot" hidden><a id="report" hidden>Open run report</a><pre id="logs"></pre></section>
+      <details class="detail-header"><summary>Global shortcuts</summary><p>Shortcuts only start a prepared recording or an explicitly armed bot. Settings persist; armed starts do not.</p>
+        <label>Record / pause / resume<select id="hotkey-record"></select></label><label>Start bot<select id="hotkey-bot"></select></label><label>Stop recording<select id="hotkey-stopRecording"></select></label>
+        <button id="apply-hotkeys">Apply shortcuts</button><p>F8 is fixed emergency stop. These keys cannot also be gameplay inputs while registered.</p>
       </details>
-      <h2>Action sequence</h2><p>Repeats in order until a limit is reached. X/Y are percentages of the window's client area. Holds are limited to 5 seconds; F8 is reserved.</p>
-      <div id="actions"></div>
-      <div class="desktop-buttons"><button id="add">Add action</button><button id="save">Save configuration</button><button id="start">Start</button><button id="pause">Pause</button><button id="resume">Resume</button></div>
-      <p id="message" role="alert" aria-live="polite"></p>
-    </section>
-    <section class="detail-header">
-      <h2>Observation & status</h2><p id="status" aria-live="polite">Idle</p><p id="latest-action"></p>
-      <p>Click a setup preview to set the last action's X/Y. Captures contain visible pixels; overlapping windows can obscure the target.</p>
-      <img id="observation" alt="Latest target screenshot" hidden>
-      <a id="report" hidden>Open run report</a>
-      <pre id="logs"></pre>
-    </section>
-  </main>
-  <script type="module" src="/desktop.js"></script>
+    </aside>
+  </main><script type="module" src="/desktop.js"></script>
 </body></html>
