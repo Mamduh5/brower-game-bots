@@ -1,5 +1,7 @@
 # Game Bot GUI
 
+The desktop page also provides **Local Learned · API required: No**, alongside Macro and optional AI Vision. Use **Teach a behavior** to capture, label the demonstration, then **Learn locally**. Existing Teach Bot screenshots can be imported without AI analysis or review. **Stop & teach a recovery** appends corrections to the same behavior; statistics and reset/forget controls are in the Local Learned panel. See [the local guide](../../docs/local-learned.md) for persistence, confidence, long-run limits and manual checks. No real desktop/game or E2E validation was performed for this addition.
+
 This app is a local live runner plus completed-run replay and artifact viewer for Cat-and-Dog, Chess.com, and Minesweeper Online player runs.
 
 Start it from the repository root:

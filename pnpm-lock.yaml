@@ -108,6 +108,9 @@ importers:
       sql.js:
         specifier: ^1.13.0
         version: 1.14.1
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
     devDependencies:
       '@types/sql.js':
         specifier: ^1.4.9
@@ -205,6 +208,9 @@ importers:
       chess.js:
         specifier: ^1.4.0
         version: 1.4.0
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
       zod:
         specifier: ^3.24.2
         version: 3.25.76

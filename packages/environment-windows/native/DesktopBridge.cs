@@ -99,7 +99,7 @@ class DesktopBridge {
             var t = (Dictionary<string, object>)c["target"];
             Target = new IntPtr(long.Parse((string)t["handle"])); TargetPid = Convert.ToInt32(t["pid"]); TargetStart = (string)t["processStartedAt"];
             int limit = Convert.ToInt32(c["maxDurationMs"]);
-            if (limit < 1000 || limit > 3600000) throw new Exception("Invalid native deadline");
+            if (limit < 1000 || limit > 86400000) throw new Exception("Invalid native deadline");
             MaxHoldMs = c.ContainsKey("maxHoldMs") ? Convert.ToInt32(c["maxHoldMs"]) : 5500;
             if (MaxHoldMs < 5500 || MaxHoldMs > 60000) throw new Exception("Invalid held-input safety limit");
             CheckIdentity();

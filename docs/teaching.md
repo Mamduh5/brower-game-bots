@@ -1,5 +1,7 @@
 # Teach Bot: demonstration-guided visual behavior
 
+For local demonstration learning without a provider, use [Local Learned](local-learned.md). Both modes reuse the capture/behavior library; **Learn locally** does not analyze with or call AI Vision. The AI procedure workflow documented below remains a separate optional mode. Local outcome/target/recovery annotations live in local knowledge and do not rewrite the AI procedure.
+
 **Record Macro** saves exact input and timing for deterministic replay. **Teach Bot** saves visual demonstrations and asks a multimodal model to extract reusable guidance. **Start Bot** executes the macro or learned behavior you select. Manual recording/replay works without an AI account.
 
 This is a working first implementation of demonstration memory plus a visual decision loop. It does not train a neural policy, and successful real gameplay has **not** been validated. Model quality, observation latency, and the game's acceptance of synthetic input determine practical results.

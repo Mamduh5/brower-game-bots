@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DesktopActionSchema, DesktopWindowSchema } from "@game-bots/environment-sdk";
 import { LearnedRunOptionsSchema } from "./teaching.js";
+import { LocalRunOptionsSchema } from "./local-learning.js";
 
 // Preserve the existing action objects; timing/editor metadata are optional additions.
 export const DesktopSequenceActionSchema = z.object({
@@ -22,15 +23,16 @@ export const DesktopSkillSchema = z.object({
 export const DesktopProfileSchema = z.object({
   version: z.literal(1),
   name: z.string().trim().min(1).max(80),
-  mode: z.enum(["automation", "feedback"]).default("automation"),
+  mode: z.enum(["automation", "feedback", "local"]).default("automation"),
   goal: z.string().max(2000).default(""),
   learnedBehaviorId: z.string().uuid().optional(),
   policyTimeoutMs: z.number().int().min(1000).max(120000).optional(),
   learnedOptions: LearnedRunOptionsSchema.optional(),
+  localOptions: LocalRunOptionsSchema.optional(),
   intervalMs: z.number().int().min(100).max(60000).default(1000),
   startDelayMs: z.number().int().min(0).max(60000).default(3000),
-  maxActions: z.number().int().min(1).max(10000).default(100),
-  maxDurationMs: z.number().int().min(1000).max(3600000).default(60000),
+  maxActions: z.number().int().min(1).max(1000000).default(100),
+  maxDurationMs: z.number().int().min(1000).max(86400000).default(60000),
   maxUnchangedObservations: z.number().int().min(0).max(100).default(0),
   actions: z.array(DesktopSequenceActionSchema).min(1).max(4096),
   playback: z.enum(["interval", "recorded"]).default("interval"),
@@ -38,6 +40,7 @@ export const DesktopProfileSchema = z.object({
   maxHoldMs: z.number().int().min(5500).max(60000).default(5500),
   skills: z.array(DesktopSkillSchema).max(32).default([])
 }).strict().superRefine((profile, ctx) => {
+  if (profile.mode !== "local" && (profile.maxActions > 10000 || profile.maxDurationMs > 3600000)) ctx.addIssue({ code: "custom", message: "Macro and AI runs retain the 10,000 action / one hour limit" });
   if (new Set(profile.skills.map(s => s.id)).size !== profile.skills.length) ctx.addIssue({ code: "custom", message: "Skill ids must be unique" });
   if (profile.startDelayMs >= profile.maxDurationMs) ctx.addIssue({ code: "custom", message: "Start delay must be shorter than run duration" });
   if (profile.actions.every(a => a.enabled === false)) ctx.addIssue({ code: "custom", message: "Enable at least one action" });

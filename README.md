@@ -18,6 +18,8 @@ pnpm desktop:fixture
 pnpm test:desktop
 ```
 
+**Local Learned** adds a separate, entirely local option for repetitive desktop tasks: demonstration-based visual state retrieval, current-target matching, bounded actions, runtime outcome statistics, learned recovery examples and persistent checkpoints. **No API key, model download or cloud fallback is required.** It is the default Start Bot selection; Macro and optional AI Vision remain separately selectable. Read the [Local Learned guide](docs/local-learned.md) for teaching, correction, 12-hour budgets, storage bounds and limitations. Actual gameplay and long-session reliability require your manual validation.
+
 ## Foundation Principles
 
 - Single repository, `pnpm` workspace, TypeScript-first.

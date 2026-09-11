@@ -42,9 +42,9 @@
         </details>
       </section>
       <section class="detail-header bot-panel">
-        <h2>Teach Bot</h2><p>Demonstrate a goal. Screenshots, actions and your outcome help the bot learn a procedure it can adapt to the current screen.</p>
+        <h2>Teach a behavior</h2><p>Demonstrate locally, then choose Local Learned or optional AI Vision analysis.</p>
         <p id="model-status" role="status"></p>
-        <p class="muted">Analysis and intelligent runs send selected target screenshots and task context to your configured AI provider. Capture is local; no model calls while you demonstrate.</p>
+        <p class="muted">Capture and Local Learned require no API. Only the buttons marked AI Vision send screenshots and context to your configured provider.</p>
         <label>Learned behavior<select id="teach-behavior"><option value="">Create a new behavior</option></select></label>
         <label>Behavior name<input id="teach-name" maxlength="80" placeholder="Collect red mushrooms"></label>
         <label>Goal (optional when teaching)<textarea id="teach-goal" maxlength="2000" placeholder="Collect one red mushroom and verify the inventory count increased."></textarea></label>
@@ -55,15 +55,45 @@
         <label>Demonstration to analyze<select id="teach-demo"></select></label>
         <label>Did this demonstration achieve the goal?<select id="teach-outcome"><option value="uncertain">Not sure</option><option value="success">Yes, succeeded</option><option value="failure">No, failed</option></select></label>
         <label>Outcome evidence or correction<textarea id="teach-note" maxlength="2000" placeholder="The inventory count increased by one. Turning left first was a mistake."></textarea></label>
-        <div class="desktop-buttons"><button id="teach-analyze">Analyze demonstration</button><button id="teach-cancel">Cancel analysis</button></div>
+        <div class="desktop-buttons"><button id="teach-analyze">Analyze with AI Vision</button><button id="teach-cancel">Cancel AI analysis</button></div>
         <p id="behavior-info"></p>
         <details><summary>Learned procedure & demonstration evidence</summary><div id="teach-procedure"></div><div id="teach-evidence"></div></details>
         <label>Finish when (review and correct the inferred evidence)<textarea id="teach-completion" maxlength="2000" placeholder="What must be visibly true for the bot to finish?"></textarea></label>
-        <button id="teach-save">Confirm goal & completion / Save behavior</button>
+        <button id="teach-save">Confirm goal & completion for AI Vision</button>
+      </section>
+      <section class="detail-header bot-panel">
+        <h2>Local Learned · API required: No</h2>
+        <p>Learn visual transitions from the selected demonstration above. Actions adapt to current pixels and observed results. Low confidence pauses for your help.</p>
+        <label><input id="local-recovery" type="checkbox"> This demonstrates a recovery from a stuck state</label>
+        <div class="desktop-buttons"><button id="local-train">Learn locally from selected demonstration</button><button id="local-import">Import all demonstrations locally</button></div>
+        <details><summary>Optional visual corrections</summary>
+          <p>Open demonstration screenshots above. Click a target with the checkbox below enabled, or mark a success frame. Text outcome notes are for your reference; Local Learned does not interpret language.</p>
+          <label><input id="local-mark-target" type="checkbox"> Click a demonstration image to mark its target</label>
+          <p id="local-annotation">Automatic target crop around demonstrated clicks; no extra annotation.</p>
+          <button id="local-clear-annotation">Clear pending visual annotation</button>
+          <label>Important image region (optional JSON; normalized x, y, width, height)<input id="local-region" placeholder='{"x":0,"y":0,"width":1,"height":0.8}'></label>
+          <p>Set the region before importing. Changing it requires a full local reset. Original demonstrations remain available.</p>
+        </details>
+        <div class="desktop-buttons"><button id="local-inspect">Refresh learning statistics</button><button id="local-takeover">Stop & teach a recovery</button></div>
+        <p id="local-status" role="status" aria-live="polite">No local learning loaded</p>
+        <details><summary>Correct or forget local learning</summary>
+          <label>Learned example<select id="local-example"></select></label>
+          <div class="desktop-buttons"><button id="local-good">Last observed result succeeded</button><button id="local-bad">Last observed result failed</button><button id="local-wrong">Wrong state · disable example</button><button id="local-forget-demo">Forget selected demonstration locally</button></div>
+          <div class="desktop-buttons"><button id="local-clear-runtime">Clear runtime learning</button><button id="local-reset">Reset to demonstrations</button><button id="local-full-reset">Full local reset</button></div>
+          <p>Stop the bot before corrections. Resets preserve all original demonstrations and AI analysis. Importing a forgotten example explicitly teaches it again.</p>
+        </details>
       </section>
       <section class="detail-header bot-panel">
         <h2>Start Bot</h2><p>Run the macro in the editor or the selected learned behavior.</p>
-        <label>Run selection<select id="run-kind"><option value="macro">Current macro configuration</option><option value="learned">Selected learned behavior</option></select></label>
+        <label>Run selection<select id="run-kind"><option value="local" selected>Local Learned · no API</option><option value="macro">Macro · exact replay</option><option value="learned">AI Vision · provider required</option></select></label>
+        <details><summary>Local Learned run limits</summary><div class="desktop-fields">
+          <label><input id="local-finish" type="checkbox"> Finish after learned success is confirmed (otherwise continue)</label>
+          <label>Minimum confidence<input id="local-confidence" type="number" min="0.5" max="0.95" step="0.01" value="0.62"></label>
+          <label>Maximum action (ms)<input id="local-action" type="number" min="100" max="1000" value="800"></label>
+          <label>Observe after action (ms)<input id="local-interval" type="number" min="350" max="60000" value="650"></label>
+          <label>Decisions without progress<input id="local-stuck" type="number" min="2" max="12" value="6"></label>
+          <label>Recovery attempts<input id="local-recoveries" type="number" min="0" max="4" value="2"></label>
+        </div><button id="local-long-run">Set 12-hour local safety budget</button><p>Start with short supervised runs. A larger budget does not disable stuck, focus, F8 or input guards.</p></details>
         <details><summary>Intelligent run limits</summary><div class="desktop-fields">
           <label>Maximum model calls<input id="ai-calls" type="number" min="2" max="200" value="30"></label>
           <label>Maximum action duration (ms)<input id="ai-action-ms" type="number" min="100" max="2000" value="750"></label>
@@ -79,8 +109,8 @@
           <label>Delay between loops (seconds)<input id="loop-delay" type="number" min="0" max="60" value="0"></label>
         </div>
         <details><summary>Safety limits</summary><div class="desktop-fields">
-          <label>Action limit<input id="count" type="number" min="1" max="10000" value="1000"></label>
-          <label>Run duration (seconds)<input id="duration" type="number" min="1" max="3600" value="300"></label>
+          <label>Action limit<input id="count" type="number" min="1" max="1000000" value="1000"></label>
+          <label>Run duration (seconds; local up to 24 hours)<input id="duration" type="number" min="1" max="86400" value="300"></label>
           <label>Maximum continuous hold (ms)<input id="hold-limit" type="number" min="5500" max="60000" value="5500"></label>
           <label>Unchanged-screen guard (interval mode, 0 disables)<input id="unchanged" type="number" min="0" max="100" value="0"></label>
         </div></details>

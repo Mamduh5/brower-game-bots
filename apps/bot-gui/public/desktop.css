@@ -18,6 +18,8 @@
 .desktop-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .desktop-buttons { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .desktop-layout input, .desktop-layout select { width:100%; padding:8px; box-sizing:border-box; }
+.desktop-layout input[type=checkbox] { width:auto; justify-self:start; }
+#local-status { overflow-wrap:anywhere; line-height:1.6; }
 .desktop-layout textarea { width:100%; min-height:72px; padding:8px; box-sizing:border-box; font:inherit; }
 #teach-procedure { overflow-wrap:anywhere; }
 .teaching-gallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; max-height:600px; overflow:auto; }

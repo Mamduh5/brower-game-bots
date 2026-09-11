@@ -55,6 +55,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       else if (request.method === "GET" && action === "state") sendJson(response, 200, { run: desktopManager.state() });
       else if (request.method === "GET" && action === "profiles") sendJson(response, 200, { profiles: await desktopManager.profiles() });
       else if (request.method === "GET" && action === "teaching/behaviors") sendJson(response, 200, { behaviors: await recordingManager.teaching.store.list(), teaching: recordingManager.teaching.snapshot() });
+      else if (request.method === "POST" && action === "local") sendJson(response, 200, await recordingManager.localOperation(await readRequestJson(request)));
       else if (request.method === "POST" && action === "teaching/review") sendJson(response, 200, await recordingManager.teaching.review(await readRequestJson(request)));
       else if (request.method === "POST" && action === "teaching/analyze") {
         const body = await readRequestJson(request);

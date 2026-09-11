@@ -6,3 +6,4 @@ export * from "./test-scenario.js";
 export * from "./desktop-profile.js";
 export * from "./recording.js";
 export * from "./teaching.js";
+export * from "./local-learning.js";

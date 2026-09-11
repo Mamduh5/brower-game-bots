@@ -48,6 +48,22 @@ function setup(overrides: object = {}, policy?: DesktopPolicy) {
 }
 afterEach(() => vi.useRealTimers());
 describe("desktop bounded runner", () => {
+  it("pauses for local teaching with no dispatch and checkpoints after releasing input", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { local: true, boundedBatch: true, decide: vi.fn().mockResolvedValue({ type: "pause", reason: "Unknown state: teach" }), verify: vi.fn(), checkpoint: vi.fn(), close: vi.fn() };
+    const { runner, session } = setup({ mode: "local" }, policy); const task = runner.start(); await vi.advanceTimersByTimeAsync(400);
+    expect(runner.state.status).toBe("paused"); expect(session.actions).toHaveLength(0); expect(session.held.size).toBe(0); expect(policy.checkpoint).toHaveBeenCalledOnce();
+    await runner.stop(); await task; expect(policy.close).toHaveBeenCalledOnce();
+  });
+  it("rejects a moved local target and changed completion appearance before accepting a decision", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { local: true, decide: vi.fn().mockResolvedValue({ type: "complete", reason: "Candidate" }), verify: vi.fn(), validateObservation: vi.fn().mockResolvedValue(false) };
+    const { runner, session } = setup({ mode: "local" }, policy); const task = runner.start(); await vi.advanceTimersByTimeAsync(400);
+    expect(runner.state.status).toBe("paused"); expect(session.actions).toHaveLength(0); await runner.stop(); await task;
+  });
+  it("bounds local report events and retains compact evidence under many fake decisions", async () => {
+    vi.useFakeTimers(); const policy: DesktopPolicy = { local: true, boundedBatch: true, managesProgress: true, decide: vi.fn().mockResolvedValue({ type: "act", reason: "Synthetic transition", actions: [{ kind: "wait", durationMs: 1 }] }), verify: vi.fn().mockResolvedValue({ result: "unknown", reason: "Synthetic" }) };
+    const { runner, documents } = setup({ mode: "local", maxActions: 200, maxDurationMs: 60000 }, policy); const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    const report = JSON.parse(documents["reports/desktop-summary.json"]!); expect(report.events.length).toBeLessThanOrEqual(500); expect(report.droppedEvents).toBeGreaterThan(0); expect(report.history.length).toBeLessThanOrEqual(20); expect(report.logs.length).toBeLessThanOrEqual(100); expect(report.evidence.length).toBeLessThanOrEqual(16);
+  });
   it("replays recorded timestamps without inserting screenshot/interval delays between edges", async () => {
     vi.useFakeTimers();
     const { runner, session } = setup({ playback: "recorded", loop: { mode: "once" }, maxActions: 20, actions: [

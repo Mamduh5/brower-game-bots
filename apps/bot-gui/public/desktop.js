@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 let windows = [], profiles = [], skills = [], steps = [], pageIndex = 0, selected = 0;
 let previewMode = false, lastImage = '', active = false, recordingActive = false, loadedDraft = -1, beforeRecording = null;
 let behaviors = [], teachingState = null, teachingRevision = '';
+let localAnnotation = {}, localLastTransition = '', localBusy = false;
 const PAGE_SIZE = 25;
 const kinds = { click: 'Click', hold: 'Press / hold keys and buttons', move: 'Move mouse to point', 'relative-move': 'Relative mouse movement', 'key-down': 'Key down', 'key-up': 'Key up', 'button-down': 'Mouse button down', 'button-up': 'Mouse button up', drag: 'Drag', scroll: 'Scroll', wait: 'Wait', 'release-all': 'Release all held input' };
 const keyNames = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(k => 'Key' + k).concat([...'0123456789'].map(k => 'Digit' + k), ['Space', 'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Shift', 'Control', 'Alt', 'Home', 'End', 'PageUp', 'PageDown'], [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12].map(n => 'F' + n));
@@ -169,6 +170,7 @@ function renderActions() {
 function profile() { return { version: 1, name: $('name').value, mode: 'automation', goal: $('goal').value, intervalMs: Number($('interval').value), startDelayMs: Number($('delay').value) * 1000, maxActions: Number($('count').value), maxDurationMs: Number($('duration').value) * 1000, maxUnchangedObservations: Number($('unchanged').value), maxHoldMs: Number($('hold-limit').value), actions: clone(steps), skills: clone(skills), playback: $('timing').value, loop: { mode: $('loop').value, count: Number($('loop-count').value), delayMs: Number($('loop-delay').value) * 1000 } }; }
 function renderSkills() { $('skills').replaceChildren(); skills.forEach((s, i) => option($('skills'), String(i), s.id)); }
 function loadProfile(p) {
+    $('run-kind').value = p.mode === 'local' ? 'local' : p.mode === 'feedback' ? 'learned' : 'macro';
     $('name').value = p.name;
     $('goal').value = p.goal ?? '';
     $('interval').value = p.intervalMs;
@@ -256,6 +258,13 @@ async function poll() {
     recordingActive = !!r && ['armed', 'countdown', 'recording', 'paused'].includes(r.status);
     teachingState = capture.teaching;
     await renderTeachingState(capture);
+    const localLocked = recordingActive || active || capture.botArmed || localBusy || teachingState?.phase === 'analyzing';
+    for (const id of ['local-train', 'local-import', 'local-inspect', 'local-good', 'local-bad', 'local-wrong', 'local-forget-demo', 'local-clear-runtime', 'local-reset', 'local-full-reset']) $(id).disabled = localLocked || !selectedBehavior();
+    $('local-takeover').disabled = localBusy || recordingActive || !run || run.profile.mode !== 'local';
+    if (run?.profile.mode === 'local' && !run.endedAt && run.intelligence) {
+        const t = run.intelligence; localLastTransition = t.latestTransition ?? localLastTransition;
+        $('local-status').textContent = localSummary(t);
+    }
     if (capture.draft && capture.draftId !== loadedDraft) {
         loadedDraft = capture.draftId;
         loadProfile(capture.draft);
@@ -292,6 +301,7 @@ async function poll() {
         ? `Bot ${run.status}${countdown} · ${run.profile.name} · ${run.actionCount}/${run.profile.maxActions} inputs · ${run.intelligence?.calls ?? 0}/${run.intelligence?.maxCalls ?? '?'} model calls · ${run.reason}`
         : `Bot ${run.status}${countdown} · loop ${run.loopIndex ?? 1}/${total} · ${run.actionCount}/${run.profile.maxActions} actions · ${run.reason}`;
     $('latest-action').textContent = run.latestAction ? 'Latest action: ' + JSON.stringify(run.latestAction) : '';
+    if (run.profile.mode === 'local') $('status').textContent = `Local Bot ${run.status}${countdown} · ${run.profile.name} · ${run.actionCount}/${run.profile.maxActions} inputs · API required: No · ${run.reason}`;
     $('logs').textContent = run.logs.map(e => `${e.at} ${e.message}`).join('\n');
     if (run.latestScreenshot && !previewMode && !recordingActive) {
         const image = `/artifact?path=${encodeURIComponent(run.latestScreenshot.relativePath)}&v=${encodeURIComponent(run.latestScreenshot.createdAt)}`;
@@ -317,7 +327,7 @@ async function refreshBehaviors(preferredId) {
 function renderBehavior() {
     const b = selectedBehavior();
     $('teach-demo').replaceChildren(); $('teach-procedure').replaceChildren(); $('teach-evidence').replaceChildren();
-    if (!b) { $('behavior-info').textContent = 'New behavior: demonstrate first, then analyze and review.'; return; }
+    if (!b) { $('behavior-info').textContent = 'New behavior: demonstrate first, then Learn locally or analyze with AI Vision.'; return; }
     $('teach-name').value = b.name; $('teach-goal').value = b.goal; $('teach-camera').value = b.cameraMode; $('teach-completion').value = b.completionOverride;
     $('behavior-info').textContent = `${b.processName} · ${b.examples.length} demonstrations · ${b.examples.filter(e => e.procedure).length} analyzed · ${b.reviewed ? 'Ready to run' : 'Needs analysis / goal and completion review'}`;
     for (const [i, e] of b.examples.entries()) {
@@ -341,6 +351,15 @@ function renderBehavior() {
             for (const frame of demo.frames) {
                 const figure = document.createElement('figure'); const img = document.createElement('img'); img.loading = 'lazy'; img.alt = `Frame ${frame.id} at ${frame.atMs} milliseconds`;
                 img.src = '/artifact?path=' + encodeURIComponent(`desktop-teach-${e.demonstrationId}/${frame.file}`);
+                img.onclick = event => {
+                    if (!$('local-mark-target').checked) return;
+                    const rect = img.getBoundingClientRect();
+                    localAnnotation = { demonstrationId: e.demonstrationId, target: { frameId: frame.id, point: { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) }, size: .12 } };
+                    $('teach-demo').value = e.demonstrationId; $('local-annotation').textContent = `Target marked in frame ${frame.id}. Choose Learn locally to apply it.`;
+                };
+                const success = document.createElement('button'); success.textContent = `Use frame ${frame.id} as local success evidence`;
+                success.onclick = () => { localAnnotation = { ...(localAnnotation.demonstrationId === e.demonstrationId ? localAnnotation : {}), demonstrationId: e.demonstrationId, successFrame: frame.id }; $('teach-demo').value = e.demonstrationId; $('teach-outcome').value = 'success'; $('local-annotation').textContent = `Success frame ${frame.id} selected. Choose Learn locally to apply it.`; };
+                figure.append(success);
                 const caption = document.createElement('figcaption'); caption.textContent = `Frame ${frame.id} · ${(frame.atMs / 1000).toFixed(2)}s · ${frame.eventCount} events · held: ${frame.heldKeys.concat(frame.heldButtons).join(', ') || 'none'}`;
                 figure.append(img, caption); gallery.append(figure);
             }
@@ -349,9 +368,19 @@ function renderBehavior() {
         $('teach-evidence').append(view);
     }
     $('teach-demo').value = b.examples.at(-1)?.demonstrationId ?? '';
+    $('behavior-info').textContent += ' AI review is not required for Local Learned.';
+    $('teach-outcome').value = b.examples.at(-1)?.outcome ?? 'uncertain';
 }
 function selectedRunProfile() {
     if ($('run-kind').value === 'macro') return profile();
+    if ($('run-kind').value === 'local') {
+        const b = selectedBehavior(); if (!b) throw new Error('Select a behavior and use Learn locally first');
+        return { version: 1, name: b.name, mode: 'local', goal: b.goal, learnedBehaviorId: b.id,
+            startDelayMs: Number($('delay').value) * 1000, maxActions: Number($('count').value), maxDurationMs: Number($('duration').value) * 1000,
+            intervalMs: Number($('local-interval').value), actions: [{ kind: 'wait', durationMs: 100 }], skills: [],
+            localOptions: { finishOnSuccess: $('local-finish').checked, minConfidence: Number($('local-confidence').value), maxActionMs: Number($('local-action').value),
+                maxNoProgress: Number($('local-stuck').value), maxRecoveries: Number($('local-recoveries').value) } };
+    }
     const b = selectedBehavior(); if (!b?.reviewed) throw new Error('Select an analyzed behavior and confirm its goal and completion first');
     return { version: 1, name: b.name, mode: 'feedback', goal: b.goal, learnedBehaviorId: b.id,
         policyTimeoutMs: teachingState?.provider?.timeoutMs ?? 45000, startDelayMs: Number($('delay').value) * 1000,
@@ -367,6 +396,7 @@ async function renderTeachingState(capture) {
     $('model-status').textContent = t.provider.configured ? `${t.provider.provider} · ${t.provider.model} · ${t.provider.message}` : t.provider.message;
     $('teach-status').textContent = `${t.phase} · ${t.frameCount} visual states${t.error ? ' · ' + t.error : ''}`;
     const locked = recordingActive || active || capture.botArmed || t.phase === 'analyzing';
+    $('model-status').textContent = 'AI Vision only: ' + $('model-status').textContent + ' Local Learned needs no provider.';
     $('teach-start').disabled = locked;
     $('teach-stop').disabled = t.phase !== 'capturing';
     $('teach-analyze').disabled = locked || !$('teach-demo').value;
@@ -376,6 +406,7 @@ async function renderTeachingState(capture) {
     $('teach-start').textContent = $('record-method').value === 'hotkey' ? 'Arm teaching hotkey' : selectedBehavior() ? 'Teach another example' : 'Start teaching';
 }
 $('teach-behavior').onchange = () => { if (!$('teach-behavior').value) { $('teach-name').value = ''; $('teach-goal').value = ''; $('teach-completion').value = ''; } renderBehavior(); };
+$('teach-demo').onchange = () => { $('teach-outcome').value = selectedBehavior()?.examples.find(e => e.demonstrationId === $('teach-demo').value)?.outcome ?? 'uncertain'; };
 handle('teach-start', async () => {
     const id = $('teach-behavior').value;
     await api('recording/start', { target: target(), startMethod: $('record-method').value, delayMs: Number($('record-delay').value) * 1000, maxDurationMs: 120000,
@@ -390,6 +421,43 @@ handle('teach-cancel', async () => { await api('teaching/cancel', {}); await pol
 handle('teach-save', async () => {
     await api('teaching/review', { id: $('teach-behavior').value, goal: $('teach-goal').value, completionOverride: $('teach-completion').value, reviewed: true });
     await refreshBehaviors(); $('run-kind').value = 'learned'; $('message').textContent = 'Learned behavior saved. Start Bot will run it from the current screen.';
+});
+function localSummary(t) {
+    return `Local · API required: No · ${t.states ?? 0} learned transitions · ${t.demonstrations ?? 0} demonstrations · ${t.runtimeStates ?? 0} runtime states · ${t.experiences ?? 0} experiences (${t.positive ?? 0} useful / ${t.negative ?? 0} bad / ${t.neutral ?? 0} neutral / ${t.uncertain ?? 0} uncertain) · ${t.targets ?? 0} targets · ${t.recoveryExamples ?? t.recoveries ?? 0} recovery examples · confidence ${Math.round((t.confidence ?? 0) * 100)}% · ${t.unknown ?? 0} help requests · ${t.stuck ?? 0} stuck · ${t.successes ?? 0} success appearances · vision ${Math.round(t.visionMs ?? 0)} ms / decision ${Math.round(t.decisionMs ?? 0)} ms · ${t.observations ?? 0} images processed · database ${((t.diskBytes ?? 0) / 1048576).toFixed(1)} MB · checkpoint ${t.checkpointAt ?? 'not yet saved'}${t.recoveredCheckpoint ? ' · recovered backup checkpoint' : ''}${t.checkpointError ? ' · SAVE ERROR: ' + t.checkpointError : ''}`;
+}
+async function localOperation(action, extra = {}) {
+    const b = selectedBehavior(); if (!b) throw new Error('Select a behavior first');
+    localBusy = true; $('local-status').textContent = 'Processing locally…';
+    try { const result = await api('local', { behaviorId: b.id, action, ...extra }); $('local-status').textContent = localSummary(result);
+        if (result.examples) { $('local-example').replaceChildren(); for (const e of result.examples) option($('local-example'), e.id, `Frame ${e.frameId} · ${e.actions.join(', ')} · ${e.recovery ? 'recovery' : e.prior}${e.disabled ? ' · disabled' : ''}`); if (result.examples.some(e => e.id === localLastTransition)) $('local-example').value = localLastTransition; }
+        if (result.results) $('local-status').textContent += ` · imported ${result.results.reduce((n, r) => n + r.added, 0)} / skipped ${result.results.reduce((n, r) => n + r.skipped, 0)} transitions`;
+        return result;
+    } finally { localBusy = false; }
+}
+handle('local-train', async () => {
+    const id = $('teach-demo').value; if (!id) throw new Error('Choose a demonstration');
+    if (localAnnotation.demonstrationId && localAnnotation.demonstrationId !== id) throw new Error('Visual annotation belongs to a different demonstration; clear it first');
+    await localOperation('train', { training: { behaviorId: selectedBehavior().id, demonstrationId: id, outcome: $('teach-outcome').value,
+        recovery: $('local-recovery').checked, ...localAnnotation, ...($('local-region').value.trim() ? { region: JSON.parse($('local-region').value) } : {}) } });
+    $('run-kind').value = 'local';
+});
+handle('local-import', async () => { await localOperation('train'); $('run-kind').value = 'local'; });
+handle('local-inspect', async () => { await localOperation('inspect'); });
+handle('local-clear-annotation', async () => { localAnnotation = {}; $('local-annotation').textContent = 'Automatic click targets; no pending annotation.'; });
+handle('local-long-run', async () => { $('run-kind').value = 'local'; $('duration').value = '43200'; $('count').value = '250000'; $('message').textContent = '12-hour local budget set. Stuck detection and all controller guards still apply.'; });
+handle('local-clear-runtime', async () => { await localOperation('clear-runtime'); });
+handle('local-reset', async () => { if (confirm('Rebuild local knowledge from demonstrations and clear runtime learning? Original evidence is kept.')) await localOperation('reset-demonstrations'); });
+handle('local-full-reset', async () => { if (confirm('Clear all local knowledge for this behavior? Original demonstrations and AI analysis are kept.')) await localOperation('full-reset'); });
+handle('local-forget-demo', async () => { await localOperation('forget-demo', { id: $('teach-demo').value }); });
+for (const [id, outcome] of [['local-good', 'success'], ['local-bad', 'failure'], ['local-wrong', 'wrong-state']]) handle(id, async () => {
+    await localOperation('correct', { id: $('local-example').value || localLastTransition, outcome });
+});
+handle('local-takeover', async () => {
+    await api('stop', {}); await refreshBehaviors(); $('local-recovery').checked = true;
+    const b = selectedBehavior(); if (!b) throw new Error('Select the same behavior before teaching recovery');
+    await api('recording/start', { target: target(), startMethod: 'delay', delayMs: Math.max(3000, Number($('record-delay').value) * 1000), maxDurationMs: 120000,
+        teaching: { behaviorId: b.id, name: b.name, goal: b.goal, cameraMode: b.cameraMode } });
+    previewMode = false; await poll(); $('message').textContent = 'You control the target. Demonstrate recovery, stop with F9, label progress/success and choose Learn locally. Start Bot resumes from the current screen.';
 });
 for (const name of ['record', 'bot', 'stopRecording'])
     for (const key of ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F9', 'F10', 'F11'])

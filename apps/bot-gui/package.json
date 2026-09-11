@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "zod": "^3.24.2",
     "sql.js": "^1.13.0",
     "@game-bots/agent-player": "workspace:*",
     "@game-bots/environment-windows": "workspace:*",

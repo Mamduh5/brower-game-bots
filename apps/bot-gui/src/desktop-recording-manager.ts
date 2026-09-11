@@ -6,6 +6,7 @@ import { DesktopRunRequestSchema, recordingToProfile, type DesktopProfile } from
 import type { DesktopRunState } from "@game-bots/agent-player";
 import { WindowsDesktopSession } from "@game-bots/environment-windows";
 import { DesktopTeachingManager } from "./desktop-teaching-manager.js";
+import { DesktopLocalManager } from "./desktop-local-manager.js";
 
 interface BotControls { state(): DesktopRunState | null; start(raw: unknown): Promise<DesktopRunState>; control(action: string): Promise<DesktopRunState | null> }
 const activeRecording = (state: RecordingState | null): boolean => !!state && ["armed", "countdown", "recording", "paused"].includes(state.status);
@@ -29,6 +30,12 @@ export class DesktopRecordingManager {
     const task = this.queue.then(operation); this.queue = task.catch(() => undefined); return task;
   }
   snapshot() { return { recording: this.nativeState, draft: this.draft, draftId: this.convertedGeneration, error: this.error, botArmed: this.armedBot !== null, armedProfileName: this.armedBot?.profile.name ?? null, teaching: this.teaching.snapshot() }; }
+  async localOperation(raw: unknown) {
+    return this.serial(async () => {
+      if (activeRecording(this.nativeState) || this.botActive() || this.armedBot || this.teaching.busy) throw new Error("Stop/disarm the bot and finish recording/analysis before editing local learning");
+      return new DesktopLocalManager(this.root).operation(raw);
+    });
+  }
   private botActive(): boolean { const run = this.bots.state(); return !!run && !run.endedAt; }
   async settings(): Promise<DesktopHotkeys> {
     if (!this.keys) {

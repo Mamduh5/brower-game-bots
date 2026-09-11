@@ -20,6 +20,7 @@ const DecisionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("act"), actions: z.array(DesktopActionSchema).min(1).max(16), reason: z.string().max(2000) }).strict(),
   z.object({ type: z.literal("skill"), skillId: z.string(), reason: z.string().max(2000) }).strict(),
   z.object({ type: z.literal("complete"), reason: z.string().max(2000) }).strict(),
+  z.object({ type: z.literal("pause"), reason: z.string().max(2000) }).strict(),
   z.object({ type: z.literal("stop"), reason: z.string().max(2000) }).strict()
 ]);
 export type DesktopDecision = z.infer<typeof DecisionSchema>;
@@ -27,6 +28,11 @@ const VerificationSchema = z.object({ result: z.enum(["progress", "no-progress",
 /** Provider/game integrations receive pixels and history, never a raw input handle. */
 export interface DesktopPolicy {
   readonly boundedBatch?: boolean;
+  readonly managesProgress?: boolean;
+  readonly local?: boolean;
+  close?(): Promise<void>;
+  checkpoint?(): Promise<void>;
+  validateObservation?(observation: DesktopObservation, signal: AbortSignal): Promise<boolean>;
   telemetry?(): object;
   configuration?(): object;
   reset?(): void;
@@ -59,10 +65,13 @@ export class DesktopRunner {
   private controlTask: Promise<void> = Promise.resolve();
   private pauseStarted = 0;
   private pausedMs = 0;
+  private lastEvidenceAt = 0;
+  private lastEvidenceHash = "";
+  private droppedEvents = 0;
 
   constructor(private readonly session: DesktopSession, private readonly artifacts: ArtifactStore, target: DesktopWindow, profile: DesktopProfile, private readonly policy?: DesktopPolicy) {
     const validated = DesktopProfileSchema.parse(profile);
-    if (validated.mode === "feedback" && !policy) throw new Error("Feedback mode requires an installed DesktopPolicy; no visual AI provider is configured.");
+    if (validated.mode !== "automation" && !policy) throw new Error("Learned mode requires an installed DesktopPolicy.");
     this.state = { runId: `desktop-${randomUUID()}`, status: "starting", profile: validated, target, startedAt: new Date().toISOString(), endedAt: null, actionCount: 0, latestAction: null, latestScreenshot: null, reason: "Start delay", history: [], logs: [], report: null, loopIndex: 1, completedLoops: 0, countdownEndsAt: null };
   }
   start(): Promise<void> {
@@ -73,7 +82,9 @@ export class DesktopRunner {
     const event = { at: new Date().toISOString(), message };
     this.events.push(event); this.state.logs.push(event); this.state.logs = this.state.logs.slice(-100);
     this.state.reason = message;
+    this.boundEvents();
   }
+  private boundEvents() { if (!this.policy?.local) return; const limit = 500; if (this.events.length > limit) { this.droppedEvents += this.events.length - limit; this.events.splice(0, this.events.length - limit); } }
   private control(operation: () => Promise<void>): Promise<void> {
     const next = this.controlTask.then(operation); this.controlTask = next.catch(() => undefined); return next;
   }
@@ -83,6 +94,7 @@ export class DesktopRunner {
       this.state.status = "paused"; this.pauseStarted = performance.now(); this.step.abort(new Error(reason));
       this.policy?.reset?.();
       await this.session.pause(); this.log(reason);
+      await this.policy?.checkpoint?.();
     });
   }
   resume(): Promise<void> {
@@ -118,14 +130,18 @@ export class DesktopRunner {
   }
   private async capture(): Promise<DesktopObservation> {
     const observation = await this.session.observe();
+    if (this.policy?.local && observation.png.length > 16 * 1024 * 1024) throw new Error("Local screenshot exceeds the 16 MiB evidence limit");
+    if (this.policy?.local && this.state.latestScreenshot && (Date.now() - this.lastEvidenceAt < 5000 || observation.sha256 === this.lastEvidenceHash)) return observation;
     // Immutable evidence has both a count and byte budget; subsequent captures update a live image.
-    const retain = this.screenshotCount < 100 && this.screenshotBytes + observation.png.length <= 64 * 1024 * 1024;
+    const retain = this.screenshotCount < (this.policy?.local ? 16 : 100) && this.screenshotBytes + observation.png.length <= (this.policy?.local ? 16 : 64) * 1024 * 1024;
     const relativePath = retain ? `screenshots/${String(this.screenshotCount++).padStart(4, "0")}.png` : "screenshots/latest.png";
     if (retain) this.screenshotBytes += observation.png.length;
     const ref = await this.artifacts.put({ runId: this.state.runId, kind: "screenshot", relativePath, contentType: "image/png" }, observation.png);
     if (!relativePath.endsWith("latest.png")) this.evidence.push(ref);
     this.state.latestScreenshot = ref;
+    this.lastEvidenceAt = Date.now(); this.lastEvidenceHash = observation.sha256;
     this.events.push({ type: "observation", at: observation.capturedAt, sha256: observation.sha256, geometry: observation.geometry, path: ref.relativePath });
+    this.boundEvents();
     return observation;
   }
   private async interval(ms: number, signal: AbortSignal): Promise<void> {
@@ -280,6 +296,9 @@ export class DesktopRunner {
             if (fresh.geometry !== observation.geometry) throw new Error("Geometry changed during decision");
             const currentHealth = await this.session.health();
             if (!currentHealth.armed) throw new Error(currentHealth.reason ?? "Native input disarmed");
+            if (decision.type === "pause") { await this.pause(decision.reason); continue; }
+            if (this.policy.validateObservation && !await this.callPolicy(s => this.policy!.validateObservation!(fresh, s), signal)) { await this.pause("Visual target changed before dispatch; inspect or teach the current state"); continue; }
+            signal.throwIfAborted();
             if (decision.type === "complete" || decision.type === "stop") { this.state.status = decision.type === "complete" ? "completed" : "stopped"; break; }
             if (decision.type === "skill") {
               const skill = p.skills.find(s => s.id === decision.skillId);
@@ -331,12 +350,13 @@ export class DesktopRunner {
               const verification = VerificationSchema.parse(await this.callPolicy(s => this.policy!.verify(this.context(observation), batchBefore, entry.action, s), signal));
               entry.verification = verification.result; entry.reason = verification.reason;
               this.events.push({ type: "policy-verification", ...verification });
-              if (verification.result === "no-progress") {
+              if (verification.result === "no-progress" && !this.policy.managesProgress) {
                 this.policyFailures++;
                 if (this.policyFailures >= 3) { await this.pause("Three decisions without verified progress; inspect or change strategy"); this.policyFailures = 0; }
               } else if (verification.result === "progress") this.policyFailures = 0;
             }
           }
+          this.boundEvents();
         } catch (error) {
           if (this.abort.signal.aborted) throw error;
           if (["paused"].includes(this.state.status)) continue;
@@ -354,9 +374,11 @@ export class DesktopRunner {
       clearTimeout(deadline);
       this.state.countdownEndsAt = null;
       try { await this.session.close(); } catch (error) { this.state.status = "failed"; this.log(`Cleanup failed: ${String(error)}`); }
+      try { await this.policy?.close?.(); if (this.policy?.telemetry) this.state.intelligence = this.policy.telemetry(); } catch (error) { this.state.status = "failed"; this.log(`Learning checkpoint failed: ${String(error)}`); }
       this.state.endedAt = new Date().toISOString();
       try {
-        this.state.report = await this.artifacts.put({ runId: this.state.runId, kind: "json", relativePath: "reports/desktop-summary.json", contentType: "application/json" }, Buffer.from(JSON.stringify({ ...this.state, evidence: this.evidence, events: this.events }, null, 2)));
+        this.boundEvents();
+        this.state.report = await this.artifacts.put({ runId: this.state.runId, kind: "json", relativePath: "reports/desktop-summary.json", contentType: "application/json" }, Buffer.from(JSON.stringify({ ...this.state, evidence: this.evidence, events: this.events, droppedEvents: this.droppedEvents }, null, 2)));
       } catch (error) { this.state.status = "failed"; this.log(`Report write failed: ${String(error)}`); }
     }
   }

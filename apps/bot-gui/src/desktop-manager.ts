@@ -1,12 +1,13 @@
 import { mkdir, readdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { DesktopRunner, LearnedDesktopPolicy, createVisualModel, type DesktopRunState } from "@game-bots/agent-player";
+import { DesktopRunner, LearnedDesktopPolicy, LocalDesktopPolicy, createVisualModel, type DesktopRunState, type DesktopPolicy } from "@game-bots/agent-player";
 import { DesktopBehaviorStore } from "./desktop-teaching-manager.js";
 import { WindowsDesktopSession } from "@game-bots/environment-windows";
 import { DesktopProfileSchema, DesktopRunRequestSchema } from "@game-bots/game-sdk";
 import { FsArtifactStore } from "@game-bots/artifact-store-fs";
 import { DesktopWindowSchema, type DesktopWindow } from "@game-bots/environment-sdk";
+import { pruneLocalRunArtifacts } from "./desktop-local-retention.js";
 
 export class DesktopManager {
   private runner: DesktopRunner | undefined;
@@ -52,8 +53,17 @@ export class DesktopManager {
     if (this.starting || (this.runner && !this.runner.state.endedAt)) throw new Error("A desktop run is already active");
     const request = DesktopRunRequestSchema.parse(raw);
     this.starting = true;
+    let policy: DesktopPolicy | undefined;
     try {
-      let policy: LearnedDesktopPolicy | undefined;
+      if (request.profile.mode === "local") {
+        if (!request.profile.learnedBehaviorId) throw new Error("Select a behavior trained with Learn locally");
+        const behavior = await new DesktopBehaviorStore(this.repoRoot).get(request.profile.learnedBehaviorId);
+        if (behavior.processName !== request.target.processName) throw new Error("Local behavior belongs to a different application");
+        policy = await LocalDesktopPolicy.create(this.repoRoot, behavior, request.profile.localOptions);
+        request.profile.goal = behavior.goal; request.profile.name = behavior.name;
+        request.profile.intervalMs = Math.max(350, request.profile.intervalMs);
+        await pruneLocalRunArtifacts(this.repoRoot, 4);
+      }
       if (request.profile.mode === "feedback") {
         if (!request.profile.learnedBehaviorId) throw new Error("Select a saved learned behavior for intelligent playback");
         const store = new DesktopBehaviorStore(this.repoRoot); const behavior = await store.get(request.profile.learnedBehaviorId);
@@ -68,7 +78,8 @@ export class DesktopManager {
       this.runner = runner;
       void runner.start().catch(() => undefined); // Runner persists and exposes failures in its state.
       return runner.state;
-    } finally { this.starting = false; }
+    } catch (error) { await policy?.close?.(); throw error; }
+    finally { this.starting = false; }
   }
   async control(action: string): Promise<DesktopRunState | null> {
     if (!this.runner) return null;
