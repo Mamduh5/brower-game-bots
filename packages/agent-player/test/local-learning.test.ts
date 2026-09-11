@@ -22,6 +22,9 @@ describe("local visual features and grounding", () => {
     expect(patchAt({ rgb: new Array(96 * 72 * 3).fill(.4) }, .5, .5)).toBeNull();
     expect(matchTarget(decodeGrid(scene(2)), target)).toBeNull();
     expect(matchTarget(decodeGrid(scene(0, 24, true)), target)).toBeNull();
+    const colored = { rgb: Array.from({ length: 96 * 72 * 3 }, (_, i) => [.1, .9, .2][i % 3]!) };
+    expect(patchAt(colored, .5, .5)).toBeNull();
+    expect(matchTarget(colored, target)).toBeNull();
   });
   it("validates PNG headers and decoded pixel budgets before allocation", () => {
     expect(() => decodeGrid(Buffer.from("broken"))).toThrow(); const png = Buffer.from(scene()); png.writeUInt32BE(1000000, 16); expect(() => decodeGrid(png)).toThrow(/megapixels/);
@@ -33,6 +36,79 @@ describe("local visual features and grounding", () => {
   });
 });
 describe("local imitation and online updates", () => {
+  function grounded() {
+    const { m, transition: t } = memoryFixture();
+    const patch = patchAt(decodeGrid(scene(0, 24)), .25, .5, .125, 1 / 6)!;
+    m.targets.push({ id: "target", ...patch });
+    t.targetId = "target"; t.targetBefore = { x: .25, y: .5 }; t.targetAfter = { x: 1 / 3, y: .5 };
+    t.before = features(decodeGrid(scene(0, 24))); t.after = features(decodeGrid(scene(0, 32))); t.terminal = false;
+    return { m, t };
+  }
+  it("does not reward passing the demonstrated endpoint even when target motion has the right direction", () => {
+    const { m } = grounded(), e = new LocalEngine(m), before = scene(0, 24), after = scene(0, 60);
+    expect(e.decide(before, sha(before)).type).toBe("act");
+    expect(e.verify(after, sha(after)).result).toBe("no-progress");
+    expect(e.telemetry().assessment?.target?.alignment).toBeGreaterThan(.8);
+    expect(m.totals.negative).toBe(1);
+  });
+  it("credits approach but penalizes unexpected target loss despite a matching scene result", () => {
+    const { m, t } = grounded(), e = new LocalEngine(m), before = scene(0, 24), after = scene(0, 32);
+    e.decide(before, sha(before)); expect(e.verify(after, sha(after)).result).toBe("progress");
+    t.after = state(1); e.decide(before, sha(before));
+    expect(e.verify(scene(1), sha(scene(1))).result).toBe("no-progress");
+    expect(e.telemetry().assessment?.target?.after).toBeNull();
+  });
+  it("rejects directional controls unsupported by the current target position", () => {
+    const { m } = grounded(), e = new LocalEngine(m), png = scene(0, 60);
+    expect(e.decide(png, sha(png)).type).toBe("pause");
+    expect(e.telemetry().candidates[0]?.rejection).toContain("control support");
+  });
+  it("bounds total compound duration and shortens controls with fast demonstrated target motion", () => {
+    const { m, t } = grounded();
+    t.actions = [{ kind: "hold", keys: ["KeyW"], buttons: [], durationMs: 400 }, { kind: "hold", keys: ["KeyD"], buttons: [], durationMs: 400 }];
+    const e = new LocalEngine(m, { maxActionMs: 600 }), png = scene(0, 24), decision = e.decide(png, sha(png));
+    expect(decision.type).toBe("act"); expect(e.telemetry().actionBudgetMs).toBeLessThanOrEqual(336);
+    expect(e.telemetry().actionBudgetMs).toBeGreaterThanOrEqual(120);
+    t.actions = [1, 1, 798].map(durationMs => ({ kind: "hold", keys: ["KeyW"], buttons: [], durationMs }));
+    const short = new LocalEngine(m, { maxActionMs: 100 }); short.decide(png, sha(png));
+    expect(short.telemetry().actionBudgetMs).toBeLessThanOrEqual(100);
+  });
+  it("keeps ordinary candidates when recovery examples exist but do not match the current scene", () => {
+    const { m, transition } = memoryFixture();
+    m.transitions.push({ ...structuredClone(transition), id: "unrelated-recovery", before: state(2), recovery: true, terminal: false });
+    const e = new LocalEngine(m), png = scene();
+    for (let i = 0; i < 4; i++) { expect(e.decide(png, sha(png)).type).toBe("act"); e.verify(png, sha(png)); }
+    expect(e.telemetry().recoveryAttempts).toBe(0);
+  });
+  it("retains short ordered movement chords in a bounded skill", () => {
+    const demo = demonstration();
+    demo.frames[1]!.atMs = 1000; demo.frames[1]!.eventCount = 4;
+    demo.events = [
+      { atMs: 0, action: { kind: "key-down", key: "KeyW" } },
+      { atMs: 250, action: { kind: "key-down", key: "KeyD" } },
+      { atMs: 600, action: { kind: "key-up", key: "KeyD" } },
+      { atMs: 1000, action: { kind: "key-up", key: "KeyW" } }
+    ];
+    expect(frameSkill(demo, 0)?.actions).toEqual([
+      { kind: "hold", keys: ["KeyW"], buttons: [], durationMs: 200 },
+      { kind: "hold", keys: ["KeyD", "KeyW"], buttons: [], durationMs: 280 },
+      { kind: "hold", keys: ["KeyW"], buttons: [], durationMs: 320 }
+    ]);
+  });
+  it("explains rejected retrievals and observed progress numerically", () => {
+    const { m } = memoryFixture(), engine = new LocalEngine(m);
+    engine.decide(scene(2), sha(scene(2)));
+    expect(engine.telemetry().candidates[0]?.rejection).toContain("Scene similarity");
+    engine.decide(scene(), sha(scene())); engine.verify(scene(), sha(scene()));
+    expect(engine.telemetry().assessment).toMatchObject({ changed: 0, result: "neutral" });
+  });
+  it("keeps available ordinary actions until the configured stuck budget when no recovery was taught", () => {
+    const { m } = memoryFixture(), engine = new LocalEngine(m, { maxNoProgress: 6 });
+    for (let i = 0; i < 4; i++) {
+      expect(engine.decide(scene(), sha(scene())).type).toBe("act"); engine.verify(scene(), sha(scene()));
+    }
+    expect(engine.telemetry().recoveryAttempts).toBe(0); expect(engine.telemetry().candidates.length).toBeGreaterThan(0);
+  });
   it("imports pointer evidence and clicks the current matched location instead of the demonstration coordinate", async () => {
     const images = [scene(0, 24), scene(1)], demo = demonstration(images), m = newMemory(behavior);
     demo.events = [{ atMs: 0, action: { kind: "move", point: { x: .25, y: .5 } } }, { atMs: 100, action: { kind: "button-down", button: "left" } }, { atMs: 150, action: { kind: "button-up", button: "left" } }]; demo.frames[1]!.eventCount = 3;
@@ -49,6 +125,14 @@ describe("local imitation and online updates", () => {
     expect((await importDemonstration(m, demo, annotation, async id => images[id]!)).added).toBe(0);
     const second = demonstration(images); await importDemonstration(m, second, { ...annotation, demonstrationId: second.id, recovery: true }, async id => images[id]!);
     expect(m.transitions).toHaveLength(2); expect(m.imports).toHaveLength(2); expect(m.transitions[1]?.recovery).toBe(true); expect(LocalMemorySchema.safeParse(m).success).toBe(true);
+  });
+  it("reports import coverage by reason and rejects an ambiguous annotation before replacing knowledge", async () => {
+    const images = [scene(), scene(1)], demo = demonstration(images), m = newMemory(behavior);
+    const result = await importDemonstration(m, demo, { behaviorId: behavior.id, recovery: false }, async id => images[id]!);
+    expect(result).toMatchObject({ total: 1, added: 1, skipped: 0, merged: 0, skippedByReason: {} });
+    const ambiguous = [scene(0, 24, true), scene(1)], other = demonstration(ambiguous);
+    await expect(importDemonstration(m, other, { behaviorId: behavior.id, recovery: false, target: { frameId: 0, point: { x: .25, y: .5 }, size: .125 } }, async id => ambiguous[id]!)).rejects.toThrow(/uniquely/);
+    expect(m.transitions).toHaveLength(1);
   });
   it("uses failed demonstrations as negative terminal experience", async () => {
     const images = [scene(), scene(1)], demo = demonstration(images), m = newMemory(behavior); demo.outcome = "failure";

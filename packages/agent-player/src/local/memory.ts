@@ -10,10 +10,10 @@ export const LOCAL_LIMITS = { transitions: 1024, runtime: 256, targets: 64, file
 const feature = z.array(z.number().finite().min(0).max(1)).length(FEATURE_SIZE);
 const count = z.number().finite().nonnegative().max(1e12);
 export const LocalMemorySchema = z.object({
-  version: z.literal(1), behaviorId: TeachingIdSchema, processName: z.string().max(300), cameraMode: z.enum(["pointer", "relative"]),
+  version: z.literal(2), behaviorId: TeachingIdSchema, processName: z.string().max(300), cameraMode: z.enum(["pointer", "relative"]),
   region: LocalRegionSchema, checkpointAt: z.string().nullable(),
   imports: z.array(z.object({ id: TeachingIdSchema, hash: z.string().max(64), annotation: LocalTrainSchema }).strict()).max(100),
-  targets: z.array(z.object({ id: z.string().max(64), rgb: z.array(z.number().min(0).max(1)).length(243), width: z.number().min(.03).max(.4), height: z.number().min(.03).max(.4) }).strict()).max(LOCAL_LIMITS.targets),
+  targets: z.array(z.object({ id: z.string().max(64), rgb: z.array(z.number().min(0).max(1)).length(243), width: z.number().min(.03).max(.4), height: z.number().min(.03).max(.4), detailVersion: z.literal(2).optional() }).strict()).max(LOCAL_LIMITS.targets),
   transitions: z.array(z.object({
     id: z.string().max(100), demoId: TeachingIdSchema, frameId: z.number().int().nonnegative(), before: feature, after: feature,
     actions: z.array(DesktopActionSchema).min(1).max(8), targetId: z.string().max(64).nullable(),
@@ -39,7 +39,7 @@ export const LocalMemorySchema = z.object({
 export type LocalMemory = z.infer<typeof LocalMemorySchema>;
 export type Transition = LocalMemory["transitions"][number];
 export function newMemory(behavior: { id: string; processName: string; cameraMode: "pointer" | "relative" }): LocalMemory {
-  return { version: 1, behaviorId: behavior.id, processName: behavior.processName, cameraMode: behavior.cameraMode,
+  return { version: 2, behaviorId: behavior.id, processName: behavior.processName, cameraMode: behavior.cameraMode,
     region: { x: 0, y: 0, width: 1, height: 1 }, checkpointAt: null, imports: [], targets: [], transitions: [], runtime: [],
     totals: { observations: 0, experiences: 0, positive: 0, negative: 0, uncertain: 0, neutral: 0, unknown: 0, stuck: 0, successes: 0, evicted: 0, skipped: 0 } };
 }
@@ -68,7 +68,9 @@ export class LocalMemoryStore {
     const envelope = z.object({ checksum: z.string(), payload: z.string() }).strict().parse(JSON.parse(await readFile(file, "utf8")));
     if (hash(envelope.payload) !== envelope.checksum) throw new Error("Local memory checksum failed");
     const raw = JSON.parse(envelope.payload);
-    if (raw.version !== 1) throw new Error(`Unsupported local memory version ${String(raw.version)}; reset or use a compatible version`);
+    if (raw.version !== 1 && raw.version !== 2) throw new Error(`Unsupported local memory version ${String(raw.version)}; reset or use a compatible version`);
+    // Legacy patches keep their original sampling plane; only reimport creates detail patches.
+    if (raw.version === 1) raw.version = 2;
     return LocalMemorySchema.parse(raw);
   }
   async load(): Promise<LocalMemory | null> {

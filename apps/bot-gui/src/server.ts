@@ -54,12 +54,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       if (request.method === "GET" && action === "windows") sendJson(response, 200, { windows: await desktopManager.windows() });
       else if (request.method === "GET" && action === "state") sendJson(response, 200, { run: desktopManager.state() });
       else if (request.method === "GET" && action === "profiles") sendJson(response, 200, { profiles: await desktopManager.profiles() });
-      else if (request.method === "GET" && action === "teaching/behaviors") sendJson(response, 200, { behaviors: await recordingManager.teaching.store.list(), teaching: recordingManager.teaching.snapshot() });
+      else if (request.method === "GET" && action === "teaching/behaviors") sendJson(response, 200, await recordingManager.behaviors());
       else if (request.method === "POST" && action === "local") sendJson(response, 200, await recordingManager.localOperation(await readRequestJson(request)));
-      else if (request.method === "POST" && action === "teaching/review") sendJson(response, 200, await recordingManager.teaching.review(await readRequestJson(request)));
+      else if (request.method === "POST" && action === "teaching/review") sendJson(response, 200, await recordingManager.teachingOperation("review", await readRequestJson(request)));
+      else if (request.method === "POST" && action === "teaching/delete") sendJson(response, 200, await recordingManager.teachingOperation("delete", await readRequestJson(request)));
       else if (request.method === "POST" && action === "teaching/analyze") {
         const body = await readRequestJson(request);
-        sendJson(response, 202, await recordingManager.teaching.analyze(String(body.behaviorId), String(body.demonstrationId), { outcome: body.outcome, outcomeNote: body.outcomeNote ?? "" }));
+        sendJson(response, 202, await recordingManager.teachingOperation("analyze", body));
       }
       else if (request.method === "POST" && action === "teaching/cancel") { await recordingManager.teaching.cancelAnalysis(); sendJson(response, 200, recordingManager.teaching.snapshot()); }
       else if (request.method === "POST" && action === "profiles") sendJson(response, 200, await desktopManager.save(await readRequestJson(request)));

@@ -10,6 +10,17 @@ const roots: string[] = [];
 async function setup() { const root = await mkdtemp(path.join(os.tmpdir(), "game-bots-local-store-")); roots.push(root); return new LocalMemoryStore(path.join(root, "memory.json")); }
 afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep + "game-bots-local-store-")) throw new Error("Unsafe test cleanup"); await rm(root, { recursive: true, force: true }); } });
 describe("local durable memory", () => {
+  it("migrates version 1 without reinterpreting legacy target pixels and writes version 2", async () => {
+    const store = await setup(), { m } = memoryFixture();
+    m.targets.push({ id: "legacy", rgb: Array.from({ length: 243 }, (_, i) => i % 2), width: .1, height: .1 });
+    m.transitions[0]!.targetId = "legacy";
+    const payload = JSON.stringify({ ...m, version: 1 });
+    await writeFile(store.file, JSON.stringify({ payload, checksum: createHash("sha256").update(payload).digest("hex") }));
+    const loaded = (await store.load())!;
+    expect(loaded.version).toBe(2); expect(loaded.targets[0]?.detailVersion).toBeUndefined();
+    expect(loaded.targets[0]?.rgb).toEqual(m.targets[0]?.rgb);
+    await store.save(loaded); expect(JSON.parse(JSON.parse(await readFile(store.file, "utf8")).payload).version).toBe(2);
+  });
   it("persists compact learned state across store instances with a checkpoint timestamp", async () => {
     const store = await setup(), { m } = memoryFixture(); await store.save(m);
     const loaded = await new LocalMemoryStore(store.file).load(); expect(loaded).toEqual(m); expect(loaded?.checkpointAt).not.toBeNull(); expect(store.diskBytes).toBeGreaterThan(100);

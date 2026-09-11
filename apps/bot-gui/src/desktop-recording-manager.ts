@@ -7,6 +7,7 @@ import type { DesktopRunState } from "@game-bots/agent-player";
 import { WindowsDesktopSession } from "@game-bots/environment-windows";
 import { DesktopTeachingManager } from "./desktop-teaching-manager.js";
 import { DesktopLocalManager } from "./desktop-local-manager.js";
+import { DesktopDemonstrationDeletion } from "./desktop-demonstration-deletion.js";
 
 interface BotControls { state(): DesktopRunState | null; start(raw: unknown): Promise<DesktopRunState>; control(action: string): Promise<DesktopRunState | null> }
 const activeRecording = (state: RecordingState | null): boolean => !!state && ["armed", "countdown", "recording", "paused"].includes(state.status);
@@ -21,13 +22,30 @@ export class DesktopRecordingManager {
   private timer: NodeJS.Timeout | undefined;
   private closed = false;
   private queue: Promise<unknown> = Promise.resolve();
+  private recovered = false;
   private generation = 0;
   private convertedGeneration = -1;
   private teachingGeneration = -1;
   readonly teaching: DesktopTeachingManager;
   constructor(private readonly root: string, private readonly bots: BotControls, private readonly createRecorder: () => DesktopRecorder = () => new WindowsDesktopSession(), teaching?: DesktopTeachingManager) { this.teaching = teaching ?? new DesktopTeachingManager(root); }
-  private serial<T>(operation: () => Promise<T>): Promise<T> {
-    const task = this.queue.then(operation); this.queue = task.catch(() => undefined); return task;
+  private serial<T>(operation: () => Promise<T>, recover = true): Promise<T> {
+    const task = this.queue.then(async () => {
+      if (recover && !this.recovered) { await new DesktopDemonstrationDeletion(this.root).recover(); this.recovered = true; }
+      return operation();
+    }); this.queue = task.catch(() => undefined); return task;
+  }
+  async behaviors() { return this.serial(async () => ({ behaviors: await this.teaching.store.list(), teaching: this.teaching.snapshot() })); }
+  async teachingOperation(action: "delete" | "review" | "analyze", raw: any) {
+    return this.serial(async () => {
+      if (activeRecording(this.nativeState) || this.botActive() || this.armedBot || this.teaching.busy) throw new Error("Stop/disarm input and finish analysis before editing demonstrations");
+      if (action === "review") return this.teaching.review(raw);
+      if (action === "analyze") return this.teaching.analyze(String(raw.behaviorId), String(raw.demonstrationId), { outcome: raw.outcome, outcomeNote: raw.outcomeNote ?? "" });
+      this.recovered = false;
+      const result = await new DesktopDemonstrationDeletion(this.root).delete(raw);
+      this.recovered = true;
+      if (this.teaching.snapshot().demonstrationId === result.deleted) this.teaching.discard();
+      return result;
+    });
   }
   snapshot() { return { recording: this.nativeState, draft: this.draft, draftId: this.convertedGeneration, error: this.error, botArmed: this.armedBot !== null, armedProfileName: this.armedBot?.profile.name ?? null, teaching: this.teaching.snapshot() }; }
   async localOperation(raw: unknown) {
@@ -93,7 +111,7 @@ export class DesktopRecordingManager {
       else if (action === "stop") { await this.teaching.finish(recorder, this.nativeState); this.convert(this.nativeState); }
       else await this.teaching.drain(recorder);
       return this.snapshot();
-    });
+    }, false);
   }
   private convert(state: RecordingState): void {
     if (!state.events || this.convertedGeneration === this.generation) return;
@@ -134,11 +152,11 @@ export class DesktopRecordingManager {
       const run = await this.bots.control(action);
       if (action === "stop" && this.recorder) await this.recorder.setBotControl(false, false);
       return { run, ...this.snapshot() };
-    });
+    }, action !== "stop");
   }
   private pollLater(): void {
     if (this.timer || this.closed || !this.recorder) return;
-    this.timer = setTimeout(() => { this.timer = undefined; void this.serial(() => this.poll()).finally(() => this.pollLater()); }, 150);
+    this.timer = setTimeout(() => { this.timer = undefined; void this.serial(() => this.poll(), false).finally(() => this.pollLater()); }, 150);
   }
   private async poll(): Promise<void> {
     if (!this.recorder || this.closed) return;
@@ -181,6 +199,6 @@ export class DesktopRecordingManager {
           const stopped = await this.recorder.recordingCommand("stop"); await this.teaching.finish(this.recorder, stopped);
         }
       } finally { await this.recorder?.close(); this.recorder = undefined; }
-    });
+    }, false);
   }
 }

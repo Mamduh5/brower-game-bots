@@ -1,5 +1,7 @@
 # Local Learned implementation and code validation
 
+This page records the initial implementation checks. The subsequent real Roblox continuation and current failure result are documented in [Local Learned continuation validation](local-learned-continuation-validation.md). Its results supersede the initial "not performed" statements below.
+
 Implemented in the working tree on 2026-09-12. No commit, push, pull request, branch creation/switch or repository rename was performed.
 
 ## Checks actually performed

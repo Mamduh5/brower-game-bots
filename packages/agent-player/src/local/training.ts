@@ -5,16 +5,25 @@ import { decodeGrid, features, matchTarget, patchAt, similarity, visualChange, t
 import { forgetDemonstration, LOCAL_LIMITS, pruneMemory, type LocalMemory, type Transition } from "./memory.js";
 
 /** Extract short simultaneous holds and camera adjustments, never a replay timeline. */
-export function frameSkill(demo: Demonstration, index: number): { actions: DesktopAction[]; point: { x: number; y: number } | null } | null {
+export function frameSkill(demo: Demonstration, index: number, rejected?: (reason: string) => void): { actions: DesktopAction[]; point: { x: number; y: number } | null } | null {
+  const skip = (reason: string) => { rejected?.(reason); return null; };
   const before = demo.frames[index]!, after = demo.frames[index + 1]!;
-  if (after.atMs <= before.atMs || after.atMs - before.atMs > 1500 || before.geometry !== after.geometry) return null;
+  if (after.atMs <= before.atMs || after.atMs - before.atMs > 1500) return skip("frame-gap");
+  if (before.geometry !== after.geometry) return skip("geometry-change");
   const events = demo.events.slice(before.eventCount, after.eventCount);
-  if (events.some(e => e.atMs < before.atMs - 100 || e.atMs > after.atMs + 100)) return null;
-  const keys = new Set(before.heldKeys); const durations = new Map<string, { keys: string[]; duration: number }>();
+  if (events.some(e => e.atMs < before.atMs - 100 || e.atMs > after.atMs + 100)) return skip("event-alignment");
+  const keys = new Set(before.heldKeys); const durations: { keys: string[]; duration: number }[] = [];
   let time = before.atMs, point: { x: number; y: number } | null = null, click: "left" | "right" | "middle" | null = null;
   let dx = 0, dy = 0, ticks = 0, axis: "vertical" | "horizontal" = "vertical";
   const buttons = new Set(before.heldButtons);
-  const hold = (end: number) => { if (keys.size && end > time) { const list = [...keys].sort(), id = list.join("+"); const previous = durations.get(id); durations.set(id, { keys: list, duration: (previous?.duration ?? 0) + end - time }); } time = end; };
+  const hold = (end: number) => {
+    if (keys.size && end > time) {
+      const list = [...keys].sort(), previous = durations.at(-1);
+      if (previous && previous.keys.join("+") === list.join("+")) previous.duration += end - time;
+      else durations.push({ keys: list, duration: end - time });
+    }
+    time = end;
+  };
   // Recover cursor position before this frame, used only to crop a target, never to dispatch a click.
   for (const e of demo.events.slice(0, before.eventCount)) if (e.action.kind === "move" || e.action.kind === "click") point = e.action.point;
   let unsupported = false;
@@ -25,32 +34,36 @@ export function frameSkill(demo: Demonstration, index: number): { actions: Deskt
     if (a.kind === "move") { if (click) unsupported = true; point = a.point; }
     if (a.kind === "click") { click = a.button; point = a.point; }
     if (a.kind === "button-down") { buttons.add(a.button); if (demo.cameraMode === "pointer") click = a.button; }
+    if (a.kind === "button-up") buttons.delete(a.button);
     if (a.kind === "relative-move") { dx += a.dx; dy += a.dy; }
     if (a.kind === "scroll") { ticks += a.ticks; axis = a.axis; }
     if (a.kind === "drag" || a.kind === "hold") unsupported = true;
-    if (a.kind === "release-all") keys.clear();
+    if (a.kind === "release-all") { keys.clear(); buttons.clear(); }
   }
   hold(after.atMs);
-  if (unsupported || durations.size > 1 || [...durations.values()].some(h => h.keys.length > 4 || h.keys.some(k => /^(F\d+|Alt|Control)$/.test(k)))) return null;
+  if (unsupported) return skip("unsupported-input-or-pointer-drag");
+  if (durations.length > 4) return skip("too-many-chord-changes");
+  if (durations.some(h => h.keys.length > 4 || h.keys.some(k => /^(F\d+|Alt|Control)$/.test(k)))) return skip("reserved-or-excessive-keys");
   const actions: DesktopAction[] = [];
   if (demo.cameraMode === "relative" && (dx || dy)) {
     actions.push({ kind: "move", point: { x: .5, y: .5 } });
     for (const button of buttons) actions.push({ kind: "button-down", button });
     actions.push({ kind: "relative-move", dx: Math.max(-300, Math.min(300, dx)), dy: Math.max(-300, Math.min(300, dy)) }, { kind: "release-all" });
   }
-  for (const h of durations.values()) actions.push({ kind: "hold", keys: h.keys, buttons: [], durationMs: Math.max(50, Math.min(800, Math.round(h.duration))) });
+  const totalHold = durations.reduce((n, h) => n + h.duration, 0);
+  for (const h of durations) actions.push({ kind: "hold", keys: h.keys, buttons: [], durationMs: Math.max(1, Math.floor(h.duration * Math.min(1, 800 / totalHold))) });
   if (click && demo.cameraMode === "pointer") {
-    if (!point || durations.size || ticks) return null;
+    if (!point || durations.length || ticks) return skip("mixed-or-ungrounded-pointer-input");
     actions.push({ kind: "click", point: { x: .5, y: .5 }, button: click, durationMs: 50 });
   }
   if (ticks && !click) { actions.push({ kind: "move", point: { x: .5, y: .5 } }, { kind: "scroll", ticks: Math.max(-3, Math.min(3, ticks)), axis }); }
-  if (demo.cameraMode === "relative" && !dx && !dy && buttons.size && !durations.size) {
+  if (demo.cameraMode === "relative" && !dx && !dy && buttons.size && !durations.length) {
     actions.push({ kind: "move", point: { x: .5, y: .5 } }, { kind: "hold", keys: [], buttons: [...buttons], durationMs: Math.min(800, Math.round(after.atMs - before.atMs)) });
   }
-  return actions.length && actions.length <= 8 ? { actions, point: click ? point : null } : null;
+  return actions.length && actions.length <= 8 ? { actions, point: click ? point : null } : skip(actions.length ? "action-count-limit" : demo.cameraMode === "pointer" && before.heldButtons.length && events.some(e => e.action.kind === "move") ? "unsupported-pointer-camera-motion" : "no-supported-input");
 }
 
-export async function importDemonstration(memory: LocalMemory, raw: Demonstration, rawAnnotation: LocalTrainRequest, image: (frameId: number) => Promise<Uint8Array>): Promise<{ added: number; skipped: number }> {
+export async function importDemonstration(memory: LocalMemory, raw: Demonstration, rawAnnotation: LocalTrainRequest, image: (frameId: number) => Promise<Uint8Array>) {
   const demo = DemonstrationSchema.parse(raw), annotation = LocalTrainSchema.parse(rawAnnotation);
   if (demo.behaviorId !== memory.behaviorId || demo.target.processName !== memory.processName || demo.cameraMode !== memory.cameraMode) throw new Error("Demonstration identity does not match local behavior");
   if (demo.frames.length < 2) throw new Error("Local learning requires at least two screenshot frames");
@@ -62,24 +75,32 @@ export async function importDemonstration(memory: LocalMemory, raw: Demonstratio
     memory.region = annotation.region;
   }
   const outcome = annotation.outcome ?? demo.outcome;
-  const digest = createHash("sha256").update(JSON.stringify({ demo, annotation })).digest("hex");
-  if (memory.imports.find(i => i.id === demo.id)?.hash === digest) return { added: 0, skipped: 0 };
+  const digest = createHash("sha256").update(JSON.stringify({ extractorVersion: 4, demo, annotation })).digest("hex");
+  if (memory.imports.find(i => i.id === demo.id)?.hash === digest) return { added: 0, skipped: 0, total: demo.frames.length - 1, merged: 0, skippedByReason: {} };
   // Decode evidence serially with a two-frame cache. Raw history is not retained.
   const cache = new Map<number, ImageGrid>();
   const grid = async (id: number) => { let value = cache.get(id); if (!value) { const bytes = await image(id); const expected = demo.frames.find(f => f.id === id)!.sha256; if (createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error("Demonstration screenshot checksum mismatch"); value = decodeGrid(bytes); if (cache.size >= 2) cache.delete(cache.keys().next().value!); cache.set(id, value); } return value; };
   let annotationPatch: TargetPatch | null = null;
-  if (annotation.target) { const t = annotation.target; annotationPatch = patchAt(await grid(t.frameId), t.point.x, t.point.y, t.size, t.size); if (!annotationPatch) throw new Error("Marked target is featureless or too close to an edge; mark a smaller textured region"); }
+  if (annotation.target) {
+    const t = annotation.target, source = await grid(t.frameId);
+    annotationPatch = patchAt(source, t.point.x, t.point.y, t.size, t.size);
+    if (!annotationPatch) throw new Error("Marked target is featureless or too close to an edge; mark a smaller textured region");
+    const self = matchTarget(source, annotationPatch);
+    if (!self || Math.hypot(self.x - t.point.x, self.y - t.point.y) > t.size / 2) throw new Error("Marked target cannot be uniquely localized in its source frame; choose a distinct object patch");
+  }
   // Commit replacement only after all evidence has been successfully processed.
   const pending: Transition[] = [], patches = new Map<string, LocalMemory["targets"][number]>(); let skipped = 0;
+  const skippedByReason: Record<string, number> = {};
+  const skip = (reason: string) => { skipped++; skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1; };
   for (let i = 0; i < demo.frames.length - 1; i++) {
-    const skill = frameSkill(demo, i); if (!skill) { skipped++; continue; }
+    const skill = frameSkill(demo, i, skip); if (!skill) continue;
     const first = demo.frames[i]!, last = demo.frames[i + 1]!;
     const a = await grid(first.id), b = await grid(last.id), before = features(a, memory.region), after = features(b, memory.region);
     const patch = skill.point ? patchAt(a, skill.point.x, skill.point.y) : annotationPatch;
-    if (skill.point && !patch) { skipped++; continue; }
+    if (skill.point && !patch) { skip("featureless-or-edge-click-target"); continue; }
     let targetId: string | null = null, targetBefore: Transition["targetBefore"] = null, targetAfter: Transition["targetAfter"] = null;
     if (patch) {
-      const match = matchTarget(a, patch); if (!match) { skipped++; continue; }
+      const match = matchTarget(a, patch); if (!match) { skip("target-absent-or-ambiguous"); continue; }
       targetId = createHash("sha256").update(JSON.stringify(patch)).digest("hex");
       patches.set(targetId, { id: targetId, ...patch }); targetBefore = { x: match.x, y: match.y };
       const afterMatch = matchTarget(b, patch); if (afterMatch) targetAfter = { x: afterMatch.x, y: afterMatch.y };
@@ -106,22 +127,22 @@ export async function importDemonstration(memory: LocalMemory, raw: Demonstratio
   }
   forgetDemonstration(memory, demo.id);
   memory.imports.push({ id: demo.id, hash: digest, annotation });
-  let added = 0;
+  let added = 0, merged = 0;
   for (const t of pending) {
     const duplicate = memory.transitions.find(p => p.demoId === t.demoId && p.recovery === t.recovery && p.prior === t.prior && !p.terminal && !t.terminal && p.targetId === t.targetId && JSON.stringify(p.actions) === JSON.stringify(t.actions) && similarity(p.before, t.before) > .99 && similarity(p.after, t.after) > .99);
-    if (duplicate) { duplicate.samples++; continue; }
+    if (duplicate) { duplicate.samples++; merged++; continue; }
     if (t.targetId && !memory.targets.some(p => p.id === t.targetId)) {
-      if (memory.targets.length >= LOCAL_LIMITS.targets) { skipped++; continue; }
+      if (memory.targets.length >= LOCAL_LIMITS.targets) { skip("target-capacity"); continue; }
       memory.targets.push(patches.get(t.targetId)!);
     }
     if (memory.transitions.length >= LOCAL_LIMITS.transitions) {
       // Retain terminal/recovery exemplars preferentially, evict the oldest redundant ordinary state.
       const index = memory.transitions.findIndex(p => !p.terminal && !p.recovery);
-      if (index < 0) { skipped++; continue; }
+      if (index < 0) { skip("transition-capacity"); continue; }
       memory.transitions.splice(index, 1); memory.totals.evicted++;
     }
     memory.transitions.push(t); added++;
   }
   memory.totals.skipped += skipped; pruneMemory(memory);
-  return { added, skipped };
+  return { added, skipped, total: demo.frames.length - 1, merged, skippedByReason };
 }

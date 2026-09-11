@@ -52,7 +52,9 @@
         <p class="muted">Uses the recording start method and countdown above. F6 pauses/resumes, F9 stops. Choose an existing behavior to add another example.</p>
         <div class="desktop-buttons"><button id="teach-start">Start teaching</button><button id="teach-stop">Stop teaching</button></div>
         <p id="teach-status" role="status" aria-live="polite">No teaching session</p>
-        <label>Demonstration to analyze<select id="teach-demo"></select></label>
+        <label>Selected demonstration<select id="teach-demo"></select></label>
+        <button id="teach-delete" class="danger">Delete demonstration and source evidence</button>
+        <p>Delete removes this example, its screenshots, analysis and local learning. Forget locally keeps the original evidence.</p>
         <label>Did this demonstration achieve the goal?<select id="teach-outcome"><option value="uncertain">Not sure</option><option value="success">Yes, succeeded</option><option value="failure">No, failed</option></select></label>
         <label>Outcome evidence or correction<textarea id="teach-note" maxlength="2000" placeholder="The inventory count increased by one. Turning left first was a mistake."></textarea></label>
         <div class="desktop-buttons"><button id="teach-analyze">Analyze with AI Vision</button><button id="teach-cancel">Cancel AI analysis</button></div>

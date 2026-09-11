@@ -38,7 +38,7 @@ export class LocalDesktopPolicy implements DesktopPolicy {
     catch (error) { await worker.close().catch(() => undefined); throw error; }
   }
   telemetry() { return this.worker.status; }
-  configuration() { return { mode: "local", apiRequired: false, behaviorId: this.behavior.id, options: this.options, version: 1 }; }
+  configuration() { return { mode: "local", apiRequired: false, behaviorId: this.behavior.id, options: this.options, version: 2 }; }
   reset() { void this.worker.call("reset").catch(() => undefined); }
   async checkpoint() { await this.worker.call("checkpoint"); }
   async close() { await this.worker.close(); }

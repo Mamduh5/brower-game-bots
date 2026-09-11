@@ -6,6 +6,7 @@ import { LearnedBehaviorSchema } from "@game-bots/game-sdk";
 import { LocalWorker, LocalDesktopPolicy } from "@game-bots/agent-player";
 import { DesktopBehaviorStore } from "../src/desktop-teaching-manager.js";
 import { DesktopLocalManager } from "../src/desktop-local-manager.js";
+import { DesktopDemonstrationDeletion } from "../src/desktop-demonstration-deletion.js";
 import { pruneLocalRunArtifacts } from "../src/desktop-local-retention.js";
 import { behavior, demonstration, scene, sha } from "../../../packages/agent-player/test/local-fixtures.js";
 
@@ -23,6 +24,38 @@ async function setup() {
   return { root, manager: new DesktopLocalManager(root), saved, demo };
 }
 describe("local worker and GUI service (synthetic files, no native controller)", () => {
+  it("forgets without deleting source, then deletes source and references durably", async () => {
+    const { manager, root, saved, demo } = await setup(), store = new DesktopBehaviorStore(root);
+    const other = demonstration(); await store.saveDemonstration(other);
+    saved.examples.push({ demonstrationId: other.id, outcome: "uncertain", procedure: null, analyzedAt: null, model: null, provider: null }); await store.save(saved);
+    await manager.operation({ behaviorId: saved.id, action: "train", training: { behaviorId: saved.id, demonstrationId: demo.id } });
+    await manager.operation({ behaviorId: saved.id, action: "forget-demo", id: demo.id });
+    expect((await manager.operation({ behaviorId: saved.id, action: "inspect" })).states).toBe(0);
+    expect((await store.demonstration(demo.id)).frames).toHaveLength(2);
+    await manager.operation({ behaviorId: saved.id, action: "train", training: { behaviorId: saved.id, demonstrationId: demo.id } });
+    const deletion = new DesktopDemonstrationDeletion(root);
+    await expect(deletion.delete({ behaviorId: saved.id, demonstrationId: demo.id })).rejects.toThrow();
+    await deletion.delete({ behaviorId: saved.id, demonstrationId: demo.id, confirm: true });
+    await new DesktopDemonstrationDeletion(root).recover();
+    expect((await new DesktopBehaviorStore(root).get(saved.id)).examples.map(e => e.demonstrationId)).toEqual([other.id]);
+    expect((await store.demonstration(other.id)).id).toBe(other.id);
+    await expect(store.demonstration(demo.id)).rejects.toThrow();
+    await expect(readFile(path.join(store.evidenceDir(demo.id), "frames/0.png"))).rejects.toThrow();
+    const local = await manager.operation({ behaviorId: saved.id, action: "inspect" });
+    expect(local.imports).toHaveLength(0); expect(local.targets).toBe(0); expect(local.runtimeStates).toBe(0);
+    // Force backup recovery: forgotten source must not reappear in the fallback generation.
+    await writeFile(path.join(root, "data/desktop-local", `${saved.id}.json`), "invalid");
+    expect((await manager.operation({ behaviorId: saved.id, action: "inspect" })).imports).toHaveLength(0);
+  });
+  it("replays interrupted deletion intent after restart", async () => {
+    const { root, saved, demo, manager } = await setup();
+    await manager.operation({ behaviorId: saved.id, action: "train" });
+    const journal = path.join(root, "data/desktop-demonstration-deletions"); await mkdir(journal);
+    await writeFile(path.join(journal, `${demo.id}.json`), JSON.stringify({ behaviorId: saved.id, demonstrationId: demo.id, confirm: true }));
+    await new DesktopDemonstrationDeletion(root).recover();
+    expect((await new DesktopBehaviorStore(root).get(saved.id)).examples).toHaveLength(0);
+    expect((await manager.operation({ behaviorId: saved.id, action: "inspect" })).states).toBe(0);
+  });
   it("prunes only completed local reports and leaves macro and teaching artifacts intact", async () => {
     const { root } = await setup(); const ids = ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000003"];
     for (const [i, id] of ids.entries()) { const dir = path.join(root, "artifacts", `desktop-${id}`, "reports"); await mkdir(dir, { recursive: true }); await writeFile(path.join(dir, "desktop-summary.json"), JSON.stringify({ profile: { mode: i === 2 ? "automation" : "local" }, endedAt: `2026-09-0${i + 1}T00:00:00.000Z` })); }

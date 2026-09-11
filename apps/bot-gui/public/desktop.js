@@ -264,6 +264,8 @@ async function poll() {
     if (run?.profile.mode === 'local' && !run.endedAt && run.intelligence) {
         const t = run.intelligence; localLastTransition = t.latestTransition ?? localLastTransition;
         $('local-status').textContent = localSummary(t);
+        if (t.candidates?.length) { const c = t.candidates[0]; $('local-status').textContent += ` · Nearest example frame ${c.frameId}: scene ${Math.round(c.scene * 100)}%${c.rejection ? ' · ' + c.rejection : ''}${c.target ? ' · target match ' + Math.round(c.target.confidence * 100) + '%' : ''}`; }
+        if (t.assessment) $('local-status').textContent += ` · Last visual result: ${t.assessment.result} (expected-state similarity ${Math.round(t.assessment.initial * 100)}% → ${Math.round(t.assessment.expected * 100)}%); goal completion is separate`;
     }
     if (capture.draft && capture.draftId !== loadedDraft) {
         loadedDraft = capture.draftId;
@@ -400,6 +402,9 @@ async function renderTeachingState(capture) {
     $('teach-start').disabled = locked;
     $('teach-stop').disabled = t.phase !== 'capturing';
     $('teach-analyze').disabled = locked || !$('teach-demo').value;
+    $('teach-delete').disabled = locked || localBusy || !$('teach-demo').value;
+    if (t.phase === 'capturing') $('teach-status').textContent += ' · ' + (capture.recording?.reason ?? 'Preparing capture');
+    if (capture.recording?.warnings?.length) $('teach-status').textContent += ' · ' + capture.recording.warnings.join('; ');
     $('teach-cancel').disabled = t.phase !== 'analyzing';
     $('teach-save').disabled = locked || !selectedBehavior();
     $('teach-behavior').disabled = locked;
@@ -414,6 +419,20 @@ handle('teach-start', async () => {
     previewMode = false; await poll();
 });
 handle('teach-stop', async () => { await api('recording/stop', {}); await poll(); });
+handle('teach-delete', async () => {
+    const behaviorId = $('teach-behavior').value, demonstrationId = $('teach-demo').value;
+    if (!demonstrationId) throw new Error('Select a demonstration');
+    if (!confirm('Permanently delete this demonstration, its screenshots, AI analysis and local learning contributions? This cannot be undone. Other demonstrations are kept.')) return;
+    localBusy = true;
+    try {
+        await api('teaching/delete', { behaviorId, demonstrationId, confirm: true });
+        localAnnotation = {}; localLastTransition = ''; $('local-example').replaceChildren();
+        $('local-annotation').textContent = 'No pending annotation.';
+        $('local-status').textContent = 'Demonstration contributions removed. Inspect local learning to refresh statistics.';
+        await refreshBehaviors(behaviorId); await poll();
+        $('message').textContent = 'Demonstration and source evidence deleted.';
+    } finally { localBusy = false; }
+});
 handle('teach-analyze', async () => {
     await api('teaching/analyze', { behaviorId: $('teach-behavior').value, demonstrationId: $('teach-demo').value, outcome: $('teach-outcome').value, outcomeNote: $('teach-note').value }); await poll();
 });

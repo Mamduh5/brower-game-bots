@@ -91,6 +91,10 @@ export class DesktopTeachingManager {
     try { await this.drain(recorder); }
     catch { this.current.warnings.push("Could not drain final native frames; some visual evidence may be missing"); }
     this.current.events = state.events ?? []; this.current.endedAt = new Date().toISOString(); this.current.captureReason = state.reason;
+    this.current.warnings.push(...(state.warnings ?? []).filter(w => !this.current!.warnings.includes(w)));
+    if (this.current.frames.length < 2) this.current.warnings.push("Capture has fewer than two screenshots; resume/start capture before demonstrating. This example cannot train Local Learned.");
+    if (!this.current.events.some(e => e.action.kind !== "release-all")) this.current.warnings.push("No gameplay input was captured; this is not a usable action demonstration.");
+    this.current.warnings = this.current.warnings.slice(0, 20);
     if (state.status === "failed") this.current.warnings.push(state.reason);
     const tail = this.current.events.at(-1)?.atMs ?? 0;
     if (tail - (this.current.frames.at(-1)?.atMs ?? 0) > 1500) this.current.warnings.push("The final input is not closely covered by a screenshot; completion may be ambiguous");

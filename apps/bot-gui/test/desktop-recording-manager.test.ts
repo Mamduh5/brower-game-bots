@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,30 @@ async function captureTeaching(manager: DesktopRecordingManager, recorder: FakeR
   await manager.recordingControl("stop"); return manager.teaching.snapshot();
 }
 describe("teaching lifecycle and persistent demonstration memory", () => {
+  it("finalizes three independent teaching sessions on one recorder, through button and polled stops", async () => {
+    vi.useFakeTimers(); const { manager, recorder, root } = await setup();
+    const ids: string[] = []; let behaviorId: string | undefined;
+    for (let session = 0; session < 3; session++) {
+      await manager.record({ target, startMethod: "button", delayMs: 0, maxDurationMs: 10000, teaching: { name: "repeated", ...(behaviorId ? { behaviorId } : {}) } });
+      const state = manager.teaching.snapshot(); behaviorId = state.behaviorId!; ids.push(state.demonstrationId!);
+      recorder.frames = [0, 1].map(i => ({ png: Buffer.from(`session-${session}-frame-${i}`), sha256: `session-${session}-${i}`, capturedAt: new Date().toISOString(), geometry: "g", window: target, atMs: i * 800, eventCount: i * 2, heldKeys: [], heldButtons: [] }));
+      if (session === 1) { await recorder.recordingCommand("stop"); await vi.advanceTimersByTimeAsync(200); await manager.behaviors(); }
+      else await manager.recordingControl("stop");
+      const demo = await manager.teaching.store.demonstration(ids[session]!);
+      expect(demo.events).toHaveLength(2); expect(demo.frames).toHaveLength(2);
+      for (const frame of demo.frames) expect(await readFile(path.join(root, "artifacts", `desktop-teach-${demo.id}`, frame.file), "utf8")).toBe(`session-${session}-frame-${frame.id}`);
+      expect(recorder.closed).toBe(false);
+    }
+    expect(new Set(ids).size).toBe(3); expect((await manager.teaching.store.get(behaviorId!)).examples.map(e => e.demonstrationId)).toEqual(ids);
+  });
+  it("preserves diagnostics for a stopped session that never captured", async () => {
+    const { manager, recorder } = await setup();
+    await manager.record({ target, startMethod: "hotkey", teaching: { name: "not started" } });
+    recorder.state.warnings = ["Capture never started: target did not gain focus"];
+    await manager.recordingControl("stop");
+    const demo = await manager.teaching.store.demonstration(manager.teaching.snapshot().demonstrationId!);
+    expect(demo.warnings.join(" ")).toContain("never started"); expect(demo.warnings.join(" ")).toContain("fewer than two");
+  });
   it("captures evidence separately from a macro, analyzes, reviews and appends further examples", async () => {
     const model = fakeVisualModel(); const { manager, recorder, bots, root } = await setup(() => model);
     const capture = await captureTeaching(manager, recorder);

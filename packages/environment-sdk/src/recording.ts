@@ -16,7 +16,8 @@ export const RecordingStateSchema = z.object({
   eventCount: z.number().int().nonnegative(), revision: z.number().int().nonnegative(),
   target: DesktopWindowSchema.nullable(), hotkeys: DesktopHotkeysSchema.nullable(),
   botArmed: z.boolean(), botActive: z.boolean(), commands: z.array(z.enum(["bot", "emergency"])),
-  events: z.array(RecordedEventSchema).max(2100).optional()
+  events: z.array(RecordedEventSchema).max(2100).optional(),
+  warnings: z.array(z.string()).max(16).optional(), captureStarted: z.boolean().optional()
 });
 export type RecordingState = z.infer<typeof RecordingStateSchema>;
 export interface DesktopRecorder {
