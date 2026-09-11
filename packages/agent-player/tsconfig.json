@@ -8,7 +8,18 @@
   "references": [
     {
       "path": "../runtime-core"
+    },
+    {
+      "path": "../environment-sdk"
+    },
+    {
+      "path": "../game-sdk"
+    },
+    {
+      "path": "../contracts"
     }
   ],
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

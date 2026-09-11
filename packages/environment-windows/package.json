@@ -1,0 +1,8 @@
+{
+  "name": "@game-bots/environment-windows",
+  "version": "0.1.0", "private": true, "type": "module",
+  "main": "./dist/index.js", "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -p tsconfig.json", "build:native": "node scripts/build-native.mjs" },
+  "dependencies": { "@game-bots/environment-sdk": "workspace:*", "zod": "^3.24.2" }
+}

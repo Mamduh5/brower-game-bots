@@ -60,6 +60,9 @@
     },
     {
       "path": "./apps/bot-gui"
+    },
+    {
+      "path": "./packages/environment-windows"
     }
   ]
 }

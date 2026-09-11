@@ -8,11 +8,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue",
-    "dev": "pnpm run build && node dist/server.js",
+    "dev": "pnpm -w build && node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "sql.js": "^1.13.0"
+    "sql.js": "^1.13.0",
+    "@game-bots/agent-player": "workspace:*",
+    "@game-bots/environment-windows": "workspace:*",
+    "@game-bots/game-sdk": "workspace:*",
+    "@game-bots/artifact-store-fs": "workspace:*",
+    "@game-bots/environment-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/sql.js": "^1.4.9"

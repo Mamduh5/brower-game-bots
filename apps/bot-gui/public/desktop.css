@@ -1,0 +1,13 @@
+.desktop-layout { display:grid; grid-template-columns:minmax(380px, 1fr) minmax(320px, 1fr); gap:20px; padding:24px; }
+.desktop-layout label { display:grid; gap:6px; margin:10px 0; }
+.desktop-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.desktop-buttons { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.desktop-layout input, .desktop-layout select { width:100%; padding:8px; box-sizing:border-box; }
+.desktop-action { border:1px solid #64748b; border-radius:8px; padding:12px; margin:12px 0; }
+.desktop-action .params { display:flex; gap:8px; flex-wrap:wrap; }
+.desktop-action .params label { flex:1; min-width:90px; }
+.danger { background:#9f1239; color:white; border:2px solid #fb7185; }
+#message { white-space:pre-wrap; color:#e59d32; }
+#observation { width:100%; height:auto; cursor:crosshair; }
+#logs { white-space:pre-wrap; overflow-wrap:anywhere; max-height:350px; overflow:auto; }
+@media(max-width:850px) { .desktop-layout { grid-template-columns:1fr; padding:12px; } }

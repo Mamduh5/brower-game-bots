@@ -72,3 +72,8 @@ The TypeScript contract in `src/human-vs-bot-contract.ts` defines the minimal fu
 - shot choice and shot outcome telemetry events
 
 This does not start a live match or change the Cat-and-Dog planner. It is only the seam needed for a later controller to keep human input untouched on the human turn, let the bot act only on its turn, and record both human and bot shot choices.
+# Windows desktop mode
+
+Choose **Desktop automation** on the dashboard or open `/desktop.html`. Run `pnpm desktop:setup` once before native use. This page provides application selection, screenshot point picking, a form-based mouse/keyboard action editor, saved configurations and behaviors, run limits, status, evidence, pause/resume/stop, and **F8 emergency stop**. Browser runner/replay features remain on `/`.
+
+See the [desktop operating guide](../../docs/desktop.md) for setup, controls, safety behavior, native fixture tests, and the honest visual-policy/Roblox limitations.

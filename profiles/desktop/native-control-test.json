@@ -1,0 +1,17 @@
+{
+  "version": 1, "name": "Native control test (owned targets only)", "mode": "automation",
+  "goal": "Validate basic movement, jump, relative camera input, and safe release in a fixture or owned/private test experience. Adjust mappings for your game.",
+  "intervalMs": 150, "startDelayMs": 3000, "maxActions": 9, "maxDurationMs": 20000, "maxUnchangedObservations": 0,
+  "actions": [
+    { "kind": "move", "point": { "x": 0.5, "y": 0.5 } },
+    { "kind": "hold", "keys": ["KeyW"], "buttons": [], "durationMs": 400 },
+    { "kind": "hold", "keys": ["KeyW", "Space"], "buttons": [], "durationMs": 200 },
+    { "kind": "button-down", "button": "right" },
+    { "kind": "relative-move", "dx": 30, "dy": 0 },
+    { "kind": "button-up", "button": "right" },
+    { "kind": "click", "point": { "x": 0.5, "y": 0.5 }, "button": "left", "durationMs": 50 },
+    { "kind": "hold", "keys": ["KeyE"], "buttons": [], "durationMs": 100 },
+    { "kind": "release-all" }
+  ],
+  "skills": [{ "id": "move-forward", "description": "Example mapping; edit for your application", "actions": [{ "kind": "hold", "keys": ["KeyW"], "buttons": [], "durationMs": 400 }] }]
+}

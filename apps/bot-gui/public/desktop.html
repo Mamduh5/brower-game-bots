@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Desktop automation · Game Bots</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/desktop.css"></head>
+<body>
+  <header class="topbar"><div><h1>Desktop automation</h1><p>Windows applications and games · Emergency stop: <strong>F8</strong></p></div><a href="/">Browser bots & reports</a><button id="stop" class="danger">Stop input</button></header>
+  <main class="desktop-layout">
+    <section class="detail-header">
+      <h2>Target & configuration</h2>
+      <p>Open your application first. Use an owned/private test experience for game validation.</p>
+      <label>Application window <select id="target"><option value="">Refresh windows to choose a target</option></select></label>
+      <div class="desktop-buttons"><button id="windows">Refresh windows</button><button id="preview">Capture target preview</button></div>
+      <p class="muted">Capture and Start request focus for the selected window. Keep it visible. Changing focus pauses input.</p>
+      <label>Saved configuration <select id="profiles"><option value="">Choose a configuration</option></select></label>
+      <label>Name <input id="name" value="My clicker" maxlength="80"></label>
+      <label>Goal / notes <input id="goal" placeholder="Describe what this configuration is intended to do" maxlength="2000"></label>
+      <div class="desktop-fields">
+        <label>Interval after action (ms)<input id="interval" type="number" min="100" max="60000" value="1000"></label>
+        <label>Action limit<input id="count" type="number" min="1" max="10000" value="20"></label>
+        <label>Run duration (seconds)<input id="duration" type="number" min="1" max="3600" value="60"></label>
+        <label>Start delay (seconds)<input id="delay" type="number" min="0" max="60" value="3"></label>
+      </div>
+      <details><summary>Feedback guard & reusable behaviors</summary>
+        <label>Pause after unchanged screenshots (0 disables)<input id="unchanged" type="number" min="0" max="100" value="0"></label>
+        <p>Screen changes are recorded, but do not prove goal progress. Autonomous visual reasoning requires a DesktopPolicy integration; this editor runs deterministic actions.</p>
+        <label>Behavior name<input id="skill-name" placeholder="move-forward"></label><button id="save-skill">Save sequence as behavior</button>
+        <label>Stored behaviors<select id="skills"></select></label><button id="use-skill">Replace sequence with behavior</button>
+      </details>
+      <h2>Action sequence</h2><p>Repeats in order until a limit is reached. X/Y are percentages of the window's client area. Holds are limited to 5 seconds; F8 is reserved.</p>
+      <div id="actions"></div>
+      <div class="desktop-buttons"><button id="add">Add action</button><button id="save">Save configuration</button><button id="start">Start</button><button id="pause">Pause</button><button id="resume">Resume</button></div>
+      <p id="message" role="alert" aria-live="polite"></p>
+    </section>
+    <section class="detail-header">
+      <h2>Observation & status</h2><p id="status" aria-live="polite">Idle</p><p id="latest-action"></p>
+      <p>Click a setup preview to set the last action's X/Y. Captures contain visible pixels; overlapping windows can obscure the target.</p>
+      <img id="observation" alt="Latest target screenshot" hidden>
+      <a id="report" hidden>Open run report</a>
+      <pre id="logs"></pre>
+    </section>
+  </main>
+  <script type="module" src="/desktop.js"></script>
+</body></html>

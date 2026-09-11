@@ -7,3 +7,4 @@ export * from "./domain/minesweeper-basic-policy.js";
 export * from "./domain/player-goal.js";
 export * from "./domain/player-policy.js";
 export * from "./policies/rule-based-policy.js";
+export * from "./application/desktop-runner.js";

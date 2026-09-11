@@ -24,6 +24,7 @@
       "@game-bots/logging": ["./packages/logging/src/index.ts"],
       "@game-bots/runtime-core": ["./packages/runtime-core/src/index.ts"],
       "@game-bots/environment-sdk": ["./packages/environment-sdk/src/index.ts"],
+      "@game-bots/environment-windows": ["./packages/environment-windows/src/index.ts"],
       "@game-bots/environment-playwright": ["./packages/environment-playwright/src/index.ts"],
       "@game-bots/game-sdk": ["./packages/game-sdk/src/index.ts"],
       "@game-bots/agent-player": ["./packages/agent-player/src/index.ts"],

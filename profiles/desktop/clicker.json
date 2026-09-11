@@ -1,0 +1,6 @@
+{
+  "version": 1, "name": "Clicker example", "mode": "automation", "goal": "Click the configured client-area point",
+  "intervalMs": 1000, "startDelayMs": 3000, "maxActions": 10, "maxDurationMs": 30000,
+  "maxUnchangedObservations": 0, "skills": [],
+  "actions": [{ "kind": "click", "point": { "x": 0.5, "y": 0.5 }, "button": "left", "durationMs": 50 }]
+}

@@ -20,6 +20,9 @@
   "dependencies": {
     "@game-bots/runtime-core": "workspace:*",
     "chess.js": "^1.4.0",
-    "zod": "^3.24.2"
+    "zod": "^3.24.2",
+    "@game-bots/environment-sdk": "workspace:*",
+    "@game-bots/game-sdk": "workspace:*",
+    "@game-bots/contracts": "workspace:*"
   }
 }

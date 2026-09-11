@@ -1,9 +1,22 @@
 # Browser Game Bots
 
-Production-oriented modular monolith for browser-first game automation with two specialized agents:
+Production-oriented modular monolith for browser and Windows desktop game automation with two specialized agents:
 
 - `Tester Agent`: QA-oriented execution, evidence capture, issue finding, and report generation.
 - `Player Agent`: gameplay-oriented decision-making that reuses the same runtime and environment foundation.
+
+Windows desktop automation now has a GUI action editor, savable configurations, native screenshots and mouse/keyboard controls, F8 emergency stop, and a bounded policy interface for future visual game agents. See [Windows desktop guide](docs/desktop.md) and [validation results](docs/desktop-validation.md). No general visual AI provider or Roblox gameplay strategy is bundled.
+
+```powershell
+pnpm install
+pnpm desktop:setup
+pnpm gui
+# Open http://127.0.0.1:5178/desktop.html
+# In another terminal, try the harmless native target:
+pnpm desktop:fixture
+# Automated real-Windows validation (opens owned fixture windows):
+pnpm test:desktop
+```
 
 ## Foundation Principles
 

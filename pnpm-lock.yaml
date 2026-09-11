@@ -90,6 +90,21 @@ importers:
 
   apps/bot-gui:
     dependencies:
+      '@game-bots/agent-player':
+        specifier: workspace:*
+        version: link:../../packages/agent-player
+      '@game-bots/artifact-store-fs':
+        specifier: workspace:*
+        version: link:../../packages/artifact-store-fs
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../../packages/environment-sdk
+      '@game-bots/environment-windows':
+        specifier: workspace:*
+        version: link:../../packages/environment-windows
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../../packages/game-sdk
       sql.js:
         specifier: ^1.13.0
         version: 1.14.1
@@ -175,6 +190,15 @@ importers:
 
   packages/agent-player:
     dependencies:
+      '@game-bots/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../environment-sdk
+      '@game-bots/game-sdk':
+        specifier: workspace:*
+        version: link:../game-sdk
       '@game-bots/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core
@@ -244,6 +268,15 @@ importers:
       '@game-bots/contracts':
         specifier: workspace:*
         version: link:../contracts
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+
+  packages/environment-windows:
+    dependencies:
+      '@game-bots/environment-sdk':
+        specifier: workspace:*
+        version: link:../environment-sdk
       zod:
         specifier: ^3.24.2
         version: 3.25.76

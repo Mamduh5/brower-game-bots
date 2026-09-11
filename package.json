@@ -13,7 +13,10 @@
     "test": "vitest --config vitest.config.ts run",
     "test:unit": "vitest --config vitest.config.ts run --project unit",
     "test:e2e": "pnpm build && playwright test",
-    "typecheck": "tsc -b tsconfig.json --pretty false"
+    "typecheck": "tsc -b tsconfig.json --pretty false",
+    "desktop:setup": "pnpm --filter @game-bots/environment-windows build:native",
+    "desktop:fixture": "node scripts/desktop-fixture.mjs",
+    "test:desktop": "pnpm build && pnpm desktop:setup && node scripts/desktop-smoke.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.0",

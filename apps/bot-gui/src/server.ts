@@ -4,6 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BotRunManager, discoverScreenshotPaths } from "./live-runner.js";
+import { DesktopManager } from "./desktop-manager.js";
+import { isLocalDesktopRequest } from "./desktop-security.js";
 import {
   discoverCatAndDogSummaries,
   getSummaryRelativePathForRun,
@@ -20,6 +22,11 @@ const staticRoot = publicRoot.endsWith(`${path.sep}dist${path.sep}public`) ? sou
 
 const options = parseServerOptions(process.argv.slice(2));
 const botRunManager = new BotRunManager(repoRoot);
+const desktopManager = new DesktopManager(repoRoot);
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => {
+  void desktopManager.close().finally(() => { server.close(); process.exit(0); });
+});
 
 const server = createServer((request, response) => {
   void handleRequest(request, response).catch((error: unknown) => {
@@ -36,6 +43,23 @@ server.listen(options.port, options.host, () => {
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const route = parseRoute(requestUrl.pathname);
+
+  if (requestUrl.pathname.startsWith("/api/desktop/")) {
+    if (!isLocalDesktopRequest(request)) { sendJson(response, 403, { error: "Desktop control requires a same-origin localhost request." }); return; }
+    response.setHeader("cache-control", "no-store");
+    try {
+      const action = requestUrl.pathname.slice("/api/desktop/".length);
+      if (request.method === "GET" && action === "windows") sendJson(response, 200, { windows: await desktopManager.windows() });
+      else if (request.method === "GET" && action === "state") sendJson(response, 200, { run: desktopManager.state() });
+      else if (request.method === "GET" && action === "profiles") sendJson(response, 200, { profiles: await desktopManager.profiles() });
+      else if (request.method === "POST" && action === "profiles") sendJson(response, 200, await desktopManager.save(await readRequestJson(request)));
+      else if (request.method === "POST" && action === "start") sendJson(response, 201, await desktopManager.start(await readRequestJson(request)));
+      else if (request.method === "POST" && action === "preview") sendJson(response, 200, await desktopManager.preview(await readRequestJson(request)));
+      else if (request.method === "POST" && ["pause", "resume", "stop"].includes(action)) sendJson(response, 200, { run: await desktopManager.control(action) });
+      else sendJson(response, 404, { error: "Desktop route not found" });
+    } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
+    return;
+  }
 
   if (request.method === "GET" && requestUrl.pathname === "/api/runs") {
     sendJson(response, 200, { runs: await discoverCatAndDogSummaries(repoRoot) });
@@ -152,7 +176,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       sendJson(response, 400, { error: "Missing artifact path." });
       return;
     }
-    await sendFile(response, resolveArtifactPath(repoRoot, artifactPath));
+    const resolvedArtifact = resolveArtifactPath(repoRoot, artifactPath);
+    if (path.relative(path.join(repoRoot, "artifacts"), resolvedArtifact).split(path.sep)[0]?.startsWith("desktop-") && !isLocalDesktopRequest(request)) {
+      sendJson(response, 403, { error: "Desktop evidence requires localhost access." }); return;
+    }
+    await sendFile(response, resolvedArtifact);
     return;
   }
 
@@ -189,7 +217,10 @@ function parseRoute(pathname: string): { readonly area: string; readonly rest: r
 
 async function readRequestJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of request) {
+    size += Buffer.byteLength(chunk);
+    if (size > 262144) throw new Error("Request body exceeds 256 KiB");
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
   if (chunks.length === 0) {
