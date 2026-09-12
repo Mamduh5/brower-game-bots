@@ -6,6 +6,7 @@ import { DesktopActionSchema, type DesktopAction, type DesktopObservation, type 
 import { DesktopProfileSchema, type DesktopProfile } from "@game-bots/game-sdk";
 import type { ArtifactRef } from "@game-bots/contracts";
 import type { ArtifactStore } from "@game-bots/runtime-core";
+import { MacroReplay, primitiveTimeline } from "../macro/replay.js";
 
 export interface DesktopHistoryEntry {
   action: DesktopAction; before: string; after: string; screenChanged: boolean;
@@ -68,6 +69,7 @@ export class DesktopRunner {
   private lastEvidenceAt = 0;
   private lastEvidenceHash = "";
   private droppedEvents = 0;
+  private macroSamples = 0;
 
   constructor(private readonly session: DesktopSession, private readonly artifacts: ArtifactStore, target: DesktopWindow, profile: DesktopProfile, private readonly policy?: DesktopPolicy) {
     const validated = DesktopProfileSchema.parse(profile);
@@ -84,7 +86,7 @@ export class DesktopRunner {
     this.state.reason = message;
     this.boundEvents();
   }
-  private boundEvents() { if (!this.policy?.local) return; const limit = 500; if (this.events.length > limit) { this.droppedEvents += this.events.length - limit; this.events.splice(0, this.events.length - limit); } }
+  private boundEvents() { if (!this.policy?.local && !this.state.profile.macro) return; const limit = 500; if (this.events.length > limit) { this.droppedEvents += this.events.length - limit; this.events.splice(0, this.events.length - limit); } }
   private control(operation: () => Promise<void>): Promise<void> {
     const next = this.controlTask.then(operation); this.controlTask = next.catch(() => undefined); return next;
   }
@@ -129,7 +131,7 @@ export class DesktopRunner {
     } finally { clearTimeout(timer); combined.removeEventListener("abort", onAbort); if (this.policy?.telemetry) this.state.intelligence = this.policy.telemetry(); }
   }
   private async capture(): Promise<DesktopObservation> {
-    const observation = await this.session.observe();
+    const observation = this.state.profile.macro && this.session.observeMacro ? await this.session.observeMacro() : await this.session.observe();
     if (this.policy?.local && observation.png.length > 16 * 1024 * 1024) throw new Error("Local screenshot exceeds the 16 MiB evidence limit");
     if (this.policy?.local && this.state.latestScreenshot && (Date.now() - this.lastEvidenceAt < 5000 || observation.sha256 === this.lastEvidenceHash)) return observation;
     // Immutable evidence has both a count and byte budget; subsequent captures update a live image.
@@ -164,6 +166,9 @@ export class DesktopRunner {
   /** Recorded edges share the same controller; no screenshots between tightly timed input edges. */
   private async runConfiguredSequence(): Promise<void> {
     const p = this.state.profile;
+    const timeline = p.playback === "recorded" ? primitiveTimeline(p) : null;
+    if (timeline && this.session.executeTimeline) { await this.runNativeSequence(timeline); return; }
+    if (p.macro?.visualCorrection) throw new Error("Visual Macro replay requires an unedited primitive timeline and the current native helper");
     const totalLoops = p.loop?.mode === "once" ? 1 : p.loop?.mode === "count" ? p.loop.count : Infinity;
     const heldKeys = new Set<string>(); const heldButtons = new Set<"left" | "right" | "middle">();
     let point: { x: number; y: number } | undefined;
@@ -250,6 +255,35 @@ export class DesktopRunner {
     }
     this.state.status = "completed";
     this.log(this.state.actionCount >= p.maxActions ? "Action limit reached" : "Configured loops completed");
+  }
+  private async runNativeSequence(timeline: NonNullable<ReturnType<typeof primitiveTimeline>>): Promise<void> {
+    const p = this.state.profile;
+    const loops = p.loop?.mode === "count" ? p.loop.count : p.loop?.mode === "until-stopped" ? Infinity : 1;
+    for (let loop = 1; loop <= loops && this.state.actionCount < p.maxActions; loop++) {
+      this.state.loopIndex = loop;
+      await this.readyForSequence();
+      const replay = new MacroReplay(this.session, p, {
+        ready: () => this.readyForSequence(), signal: () => AbortSignal.any([this.abort.signal, this.step.signal]), paused: () => this.state.status === "paused",
+        capture: () => this.capture(), remaining: () => p.maxActions - this.state.actionCount,
+        attempted: (action, count) => { this.state.actionCount += count; this.state.latestAction = action; },
+        telemetry: value => {
+          const { samples, ...summary } = value as { samples?: unknown[] };
+          this.state.intelligence = summary;
+          const retained = samples?.slice(0, Math.max(0, 2048 - this.macroSamples)); this.macroSamples += retained?.length ?? 0;
+          this.events.push(retained?.length ? { ...summary, samples: retained } : summary); this.boundEvents();
+        }
+      });
+      const before = this.state.actionCount;
+      try { await replay.run(timeline); } finally { await this.session.releaseAll(); }
+      if (this.state.actionCount - before >= timeline.length) this.state.completedLoops++;
+      if (loop >= loops || this.state.actionCount >= p.maxActions) break;
+      let due = performance.now() + (p.loop?.delayMs ?? 0), paused = this.pausedMs;
+      while (performance.now() < due) {
+        await this.readyForSequence(); due += this.pausedMs - paused; paused = this.pausedMs;
+        await delay(Math.min(100, Math.max(0, due - performance.now())), undefined, { signal: this.abort.signal });
+      }
+    }
+    this.state.status = "completed"; this.log(this.state.actionCount >= p.maxActions ? "Action limit reached" : "Configured loops completed");
   }
   private async run(): Promise<void> {
     this.started = performance.now();

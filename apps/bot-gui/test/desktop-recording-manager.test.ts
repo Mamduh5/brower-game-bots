@@ -8,6 +8,7 @@ import { DesktopProfileSchema } from "@game-bots/game-sdk";
 import type { DesktopRunState } from "@game-bots/agent-player";
 import type { VisualModel } from "@game-bots/agent-player";
 import { DesktopTeachingManager } from "../src/desktop-teaching-manager.js";
+import { PNG } from "pngjs";
 
 const target = { handle: "123", pid: 12, processStartedAt: "1", title: "Owned fixture", processName: "fixture", dpi: 96, bounds: { x: -200, y: 0, width: 640, height: 480 } };
 const profile = DesktopProfileSchema.parse({ version: 1, name: "demo", startDelayMs: 500, actions: [{ kind: "key-down", key: "KeyW" }] });
@@ -59,6 +60,17 @@ async function captureTeaching(manager: DesktopRecordingManager, recorder: FakeR
   await manager.recordingControl("stop"); return manager.teaching.snapshot();
 }
 describe("teaching lifecycle and persistent demonstration memory", () => {
+  it("attaches bounded Macro frames and original input to the draft and avoids retransmitting a known draft", async () => {
+    const { manager, recorder } = await setup();
+    await manager.record({ target, startMethod: "button", delayMs: 0, maxDurationMs: 120000 });
+    const png = PNG.sync.write(new PNG({ width: 32, height: 24 }));
+    recorder.frames = [0, 800].map((atMs, i) => ({ png, sha256: String(i).repeat(64), capturedAt: new Date().toISOString(), geometry: "g", window: target, atMs, eventCount: i * 2, heldKeys: [], heldButtons: [] }));
+    const snapshot = await manager.recordingControl("stop");
+    const restored = DesktopProfileSchema.parse(JSON.parse(JSON.stringify(snapshot.draft)));
+    expect(restored.macro?.source).toEqual(recorder.state.events); expect(restored.macro?.frames).toHaveLength(2);
+    expect(restored.macro?.frames[0]?.image).toBe(png.toString("base64")); expect(restored.macro?.width).toBe(640);
+    expect(manager.snapshot(snapshot.draftId).draft).toBeNull(); expect(manager.snapshot().draft).not.toBeNull();
+  });
   it("finalizes three independent teaching sessions on one recorder, through button and polled stops", async () => {
     vi.useFakeTimers(); const { manager, recorder, root } = await setup();
     const ids: string[] = []; let behaviorId: string | undefined;

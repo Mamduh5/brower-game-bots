@@ -10,6 +10,7 @@ using System.Threading;
 class DesktopFixture : Form {
     [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint pid);
     [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
     readonly HashSet<Keys> held = new HashSet<Keys>();
@@ -33,10 +34,11 @@ class DesktopFixture : Form {
                     string value = command;
                     BeginInvoke((Action)delegate {
                         if (value == "activate") { WindowState = FormWindowState.Normal; Activate(); }
+                        else if (value.StartsWith("allow-focus ")) AllowSetForegroundWindow(uint.Parse(value.Substring(12)));
                         else if (value == "move-window") { Left += 25; Top += 15; }
                         else if (value == "resize") ClientSize = new Size(700, 500);
                         else if (value == "minimize") WindowState = FormWindowState.Minimized;
-                        else if (value == "state") Record("physical W=" + ((GetAsyncKeyState(87) & 0x8000) != 0) + " Left=" + ((GetAsyncKeyState(1) & 0x8000) != 0));
+                        else if (value == "state") Record("physical W=" + ((GetAsyncKeyState(87) & 0x8000) != 0) + " Left=" + ((GetAsyncKeyState(1) & 0x8000) != 0) + " Right=" + ((GetAsyncKeyState(2) & 0x8000) != 0));
                         else if (value == "release-test-input") { keybd_event(87, 0, 2, UIntPtr.Zero); mouse_event(4, 0, 0, 0, UIntPtr.Zero); }
                         else if (value == "emergency") { keybd_event(0x77, 0, 0, UIntPtr.Zero); var timer = new System.Windows.Forms.Timer { Interval = 150 }; timer.Tick += delegate { keybd_event(0x77, 0, 2, UIntPtr.Zero); timer.Stop(); timer.Dispose(); }; timer.Start(); }
                         else if (value == "close") Close();

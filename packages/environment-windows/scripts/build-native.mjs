@@ -10,7 +10,7 @@ const compiler = path.join(process.env.WINDIR ?? "C:\\Windows", "Microsoft.NET",
 const staging = mkdtempSync(path.join(root, "bin", ".native-build-"));
 try {
   for (const name of ["DesktopBridge", "DesktopFixture"]) {
-    execFileSync(compiler, ["/nologo", name === "DesktopFixture" ? "/target:winexe" : "/target:exe", "/platform:x64", "/optimize+", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll", "/r:System.Web.Extensions.dll", `/out:${path.join(staging, name + ".exe")}`, path.join(root, "native", name + ".cs"), ...(name === "DesktopBridge" ? [path.join(root, "native", "DesktopRecorder.cs")] : [])], { stdio: "inherit", windowsHide: true });
+    execFileSync(compiler, ["/nologo", name === "DesktopFixture" ? "/target:winexe" : "/target:exe", "/platform:x64", "/optimize+", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll", "/r:System.Web.Extensions.dll", `/out:${path.join(staging, name + ".exe")}`, path.join(root, "native", name + ".cs"), ...(name === "DesktopBridge" ? ["DesktopRecorder.cs", "DesktopTimeline.cs", "DesktopMacroCapture.cs"].map(file => path.join(root, "native", file)) : [])], { stdio: "inherit", windowsHide: true });
   }
   const destination = path.join(root, "bin", "DesktopBridge.exe");
   for (let attempt = 0; ; attempt++) {

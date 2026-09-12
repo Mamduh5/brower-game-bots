@@ -3,6 +3,7 @@ let windows = [], profiles = [], skills = [], steps = [], pageIndex = 0, selecte
 let previewMode = false, lastImage = '', active = false, recordingActive = false, loadedDraft = -1, beforeRecording = null;
 let behaviors = [], teachingState = null, teachingRevision = '';
 let localAnnotation = {}, localLastTransition = '', localBusy = false;
+let macroEvidence;
 const PAGE_SIZE = 25;
 const kinds = { click: 'Click', hold: 'Press / hold keys and buttons', move: 'Move mouse to point', 'relative-move': 'Relative mouse movement', 'key-down': 'Key down', 'key-up': 'Key up', 'button-down': 'Mouse button down', 'button-up': 'Mouse button up', drag: 'Drag', scroll: 'Scroll', wait: 'Wait', 'release-all': 'Release all held input' };
 const keyNames = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(k => 'Key' + k).concat([...'0123456789'].map(k => 'Digit' + k), ['Space', 'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Shift', 'Control', 'Alt', 'Home', 'End', 'PageUp', 'PageDown'], [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12].map(n => 'F' + n));
@@ -167,9 +168,13 @@ function renderActions() {
     $('next-page').disabled = (pageIndex + 1) * PAGE_SIZE >= steps.length;
     summary();
 }
-function profile() { return { version: 1, name: $('name').value, mode: 'automation', goal: $('goal').value, intervalMs: Number($('interval').value), startDelayMs: Number($('delay').value) * 1000, maxActions: Number($('count').value), maxDurationMs: Number($('duration').value) * 1000, maxUnchangedObservations: Number($('unchanged').value), maxHoldMs: Number($('hold-limit').value), actions: clone(steps), skills: clone(skills), playback: $('timing').value, loop: { mode: $('loop').value, count: Number($('loop-count').value), delayMs: Number($('loop-delay').value) * 1000 } }; }
+function profile() { return { version: 1, name: $('name').value, mode: 'automation', goal: $('goal').value, intervalMs: Number($('interval').value), startDelayMs: Number($('delay').value) * 1000, maxActions: Number($('count').value), maxDurationMs: Number($('duration').value) * 1000, maxUnchangedObservations: Number($('unchanged').value), maxHoldMs: Number($('hold-limit').value), actions: clone(steps), skills: clone(skills), playback: $('timing').value, ...(macroEvidence ? { macro: { ...clone(macroEvidence), visualCorrection: $('macro-visual').checked } } : {}), loop: { mode: $('loop').value, count: Number($('loop-count').value), delayMs: Number($('loop-delay').value) * 1000 } }; }
 function renderSkills() { $('skills').replaceChildren(); skills.forEach((s, i) => option($('skills'), String(i), s.id)); }
 function loadProfile(p) {
+    macroEvidence = p.macro ? clone(p.macro) : undefined;
+    $('macro-visual').checked = !!macroEvidence?.visualCorrection;
+    $('macro-visual').disabled = !macroEvidence;
+    $('macro-evidence').textContent = macroEvidence ? `${macroEvidence.source.length} original input events; ${macroEvidence.frames.length} visual samples. Editing actions requires disabling visual correction or recording again.` : 'This configuration has no recorded visual evidence. Input replay remains available.';
     $('run-kind').value = p.mode === 'local' ? 'local' : p.mode === 'feedback' ? 'learned' : 'macro';
     $('name').value = p.name;
     $('goal').value = p.goal ?? '';
@@ -207,7 +212,7 @@ handle('save', async () => { await api('profiles', profile()); await refreshProf
 handle('duplicate-profile', async () => { const p = profile(), base = p.name.slice(0, 65); let suffix = 1; do {
     p.name = `${base} copy ${suffix++}`;
 } while (profiles.some(saved => saved.name === p.name)); await api('profiles', p); loadProfile(p); await refreshProfiles(); $('message').textContent = 'Copy saved.'; });
-handle('record-start', async () => { beforeRecording = profile(); await api('recording/start', { target: target(), startMethod: $('record-method').value, delayMs: Number($('record-delay').value) * 1000, maxDurationMs: 120000 }); previewMode = false; await poll(); });
+handle('record-start', async () => { beforeRecording = profile(); await api('recording/start', { target: target(), startMethod: $('record-method').value, delayMs: Number($('record-delay').value) * 1000, maxDurationMs: 120000, pointerMode: $('macro-pointer').value }); previewMode = false; await poll(); });
 for (const action of ['pause', 'resume', 'stop', 'discard'])
     handle('record-' + action, async () => { await api('recording/' + action, {}); if (action === 'discard' && beforeRecording) {
         loadProfile(beforeRecording);
@@ -252,7 +257,7 @@ $('observation').onclick = event => { if (!previewMode || active || recordingAct
     return;
 } const b = event.currentTarget.getBoundingClientRect(); action.point = { x: Math.max(0, Math.min(1, (event.clientX - b.left) / b.width)), y: Math.max(0, Math.min(1, (event.clientY - b.top) / b.height)) }; renderActions(); };
 async function poll() {
-    const [{ run }, capture] = await Promise.all([api('state'), api('recording/state')]);
+    const [{ run }, capture] = await Promise.all([api('state'), api('recording/state?knownDraft=' + loadedDraft)]);
     const r = capture.recording;
     active = !!run && !['stopped', 'completed', 'failed'].includes(run.status);
     recordingActive = !!r && ['armed', 'countdown', 'recording', 'paused'].includes(r.status);
@@ -303,6 +308,7 @@ async function poll() {
         ? `Bot ${run.status}${countdown} · ${run.profile.name} · ${run.actionCount}/${run.profile.maxActions} inputs · ${run.intelligence?.calls ?? 0}/${run.intelligence?.maxCalls ?? '?'} model calls · ${run.reason}`
         : `Bot ${run.status}${countdown} · loop ${run.loopIndex ?? 1}/${total} · ${run.actionCount}/${run.profile.maxActions} actions · ${run.reason}`;
     $('latest-action').textContent = run.latestAction ? 'Latest action: ' + JSON.stringify(run.latestAction) : '';
+    if (run.intelligence?.type?.startsWith('macro-')) $('latest-action').textContent += ` | Macro ${(run.intelligence.timelineMs ?? 0).toFixed(1)} ms | lateness ${(run.intelligence.maxLatenessMs ?? 0).toFixed(2)} ms | ${run.intelligence.classification ?? run.intelligence.type}`;
     if (run.profile.mode === 'local') $('status').textContent = `Local Bot ${run.status}${countdown} · ${run.profile.name} · ${run.actionCount}/${run.profile.maxActions} inputs · API required: No · ${run.reason}`;
     $('logs').textContent = run.logs.map(e => `${e.at} ${e.message}`).join('\n');
     if (run.latestScreenshot && !previewMode && !recordingActive) {

@@ -2,10 +2,11 @@ import { z } from "zod";
 import { DesktopActionSchema, DesktopWindowSchema } from "@game-bots/environment-sdk";
 import { LearnedRunOptionsSchema } from "./teaching.js";
 import { LocalRunOptionsSchema } from "./local-learning.js";
+import { MacroEvidenceSchema } from "./macro.js";
 
 // Preserve the existing action objects; timing/editor metadata are optional additions.
 export const DesktopSequenceActionSchema = z.object({
-  delayBeforeMs: z.number().int().min(0).max(120000).optional(), enabled: z.boolean().optional()
+  delayBeforeMs: z.number().min(0).max(120000).optional(), enabled: z.boolean().optional()
 }).passthrough().transform((value, context) => {
   const { delayBeforeMs, enabled, ...raw } = value;
   const result = DesktopActionSchema.safeParse(raw);
@@ -34,7 +35,8 @@ export const DesktopProfileSchema = z.object({
   maxActions: z.number().int().min(1).max(1000000).default(100),
   maxDurationMs: z.number().int().min(1000).max(86400000).default(60000),
   maxUnchangedObservations: z.number().int().min(0).max(100).default(0),
-  actions: z.array(DesktopSequenceActionSchema).min(1).max(4096),
+  actions: z.array(DesktopSequenceActionSchema).min(1).max(10000),
+  macro: MacroEvidenceSchema.optional(),
   playback: z.enum(["interval", "recorded"]).default("interval"),
   loop: DesktopLoopSchema.optional(),
   maxHoldMs: z.number().int().min(5500).max(60000).default(5500),

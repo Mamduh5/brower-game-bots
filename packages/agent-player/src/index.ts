@@ -12,3 +12,4 @@ export * from "./vision/visual-model.js";
 export * from "./vision/demonstration-learning.js";
 export * from "./vision/learned-desktop-policy.js";
 export * from "./local/policy.js";
+export * from "./macro/vision.js";

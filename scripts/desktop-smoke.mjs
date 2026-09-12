@@ -56,7 +56,7 @@ try {
   await act({ kind: "key-down", key: "KeyW" });
   const other = spawn(path.join(root, "packages/environment-windows/bin/DesktopFixture.exe"), [], { windowsHide: false, stdio: "pipe" });
   try {
-    await wait(1000); other.stdin.write("activate\n"); await wait(300);
+    await wait(1000); await command(`allow-focus ${other.pid}`); other.stdin.write("activate\n"); await wait(300);
     assert.equal((await session.health()).armed, false);
     assert.match((await session.health()).reason, /focus/);
     await assertReleased("Unexpected foreground-window change releases input");

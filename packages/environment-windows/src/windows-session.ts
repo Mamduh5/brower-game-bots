@@ -6,9 +6,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { DesktopActionSchema, DesktopWindowSchema, type DesktopAction, type DesktopHealth, type DesktopObservation, type DesktopSession, type DesktopWindow } from "@game-bots/environment-sdk";
 import { DesktopHotkeysSchema, RecordingOptionsSchema, RecordingStateSchema, type DesktopHotkeys, type DesktopRecorder, type RecordingOptions, type RecordingState } from "@game-bots/environment-sdk";
+import type { TimelineEvent, TimelineTelemetry } from "@game-bots/environment-sdk";
 
 const HealthSchema = z.object({ armed: z.boolean(), reason: z.string().nullable(), heldKeys: z.array(z.string()), heldButtons: z.array(z.string()) });
 const CaptureSchema = z.object({ window: DesktopWindowSchema, geometry: z.string(), png: z.string(), capturedAt: z.string() });
+const TimelineSchema = z.object({ running: z.boolean(), completed: z.number().int().nonnegative(), positionMs: z.number(), maxLatenessMs: z.number(), meanLatenessMs: z.number(), error: z.string().nullable(), samples: z.array(z.object({ index: z.number(), recordedMs: z.number(), scheduledMs: z.number(), dispatchedMs: z.number(), latenessMs: z.number() })).max(512) });
 
 const sessions = new Set<WindowsDesktopSession>();
 /** Includes short-lived preview/list sessions as well as persistent controllers. */
@@ -93,7 +95,11 @@ export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
   async setBotControl(armed: boolean, active: boolean): Promise<void> { await this.request({ op: "recorder-bot", armed, active }); }
   async focus(): Promise<void> { await this.request({ op: "focus" }); }
   async observe(): Promise<DesktopObservation> {
-    const capture = CaptureSchema.parse(await this.request({ op: "observe" }));
+    return this.capture("observe");
+  }
+  async observeMacro(): Promise<DesktopObservation> { return this.capture("observe-macro"); }
+  private async capture(op: "observe" | "observe-macro"): Promise<DesktopObservation> {
+    const capture = CaptureSchema.parse(await this.request({ op }));
     const png = Buffer.from(capture.png, "base64");
     return { ...capture, png, sha256: createHash("sha256").update(png).digest("hex") };
   }
@@ -118,6 +124,28 @@ export class WindowsDesktopSession implements DesktopSession, DesktopRecorder {
       this.fail(new Error("Native session is closed"));
       await this.exited;
     }
+  }
+
+  async executeTimeline(events: readonly TimelineEvent[], geometry: string, signal: AbortSignal, progress?: (value: TimelineTelemetry) => void): Promise<TimelineTelemetry> {
+    if (this.actionActive) throw new Error("Concurrent desktop actions are not allowed");
+    signal.throwIfAborted();
+    const checked = z.array(z.object({ atMs: z.number().min(0).max(120000), action: DesktopActionSchema })).min(1).max(10000).parse(events);
+    this.actionActive = true;
+    const local = new AbortController(); this.currentAction = local;
+    const combined = AbortSignal.any([signal, local.signal]);
+    try {
+      let state = TimelineSchema.parse(await this.request({ op: "timeline-start", events: checked, geometry }));
+      while (state.running) {
+        if (combined.aborted) state = TimelineSchema.parse(await this.request({ op: "timeline-cancel" }));
+        else {
+          await delay(20, undefined, { signal: combined }).catch(() => undefined);
+          state = TimelineSchema.parse(await this.request({ op: combined.aborted ? "timeline-cancel" : "timeline-state" }));
+        }
+        progress?.(state);
+      }
+      return state;
+    } catch (error) { await this.request({ op: "timeline-cancel" }).catch(() => undefined); await this.releaseAll(); throw error; }
+    finally { this.actionActive = false; this.currentAction = undefined; }
   }
 
   async execute(raw: DesktopAction, geometry: string, signal: AbortSignal): Promise<void> {

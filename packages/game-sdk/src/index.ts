@@ -5,5 +5,6 @@ export * from "./game-snapshot.js";
 export * from "./test-scenario.js";
 export * from "./desktop-profile.js";
 export * from "./recording.js";
+export * from "./macro.js";
 export * from "./teaching.js";
 export * from "./local-learning.js";

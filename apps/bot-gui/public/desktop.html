@@ -16,11 +16,12 @@
         <div class="desktop-fields">
           <label>Recording start<select id="record-method"><option value="button">Button · start now</option><option value="delay" selected>Countdown</option><option value="hotkey">Arm recording hotkey</option></select></label>
           <label>Recording countdown (seconds)<input id="record-delay" type="number" min="0" max="60" value="3"></label>
+          <label>Mouse capture<select id="macro-pointer"><option value="auto">Automatic · right hold / hidden cursor uses relative motion</option><option value="absolute">Absolute pointer · UI and drags</option><option value="relative">Relative camera · captured mouse</option></select></label>
         </div>
         <div class="desktop-buttons"><button id="record-start" class="record-button">Start Recording</button><button id="record-pause">Pause Recording</button><button id="record-resume">Resume Recording</button><button id="record-stop">Stop Recording</button><button id="record-discard">Discard Recording</button></div>
         <p id="record-status" role="status" aria-live="polite">Recording is off</p>
         <p id="shortcut-help">F6 starts or pauses/resumes an armed recording. F9 stops recording. F8 stops everything.</p>
-        <p class="muted">Stop loads an editable sequence below. Recording never starts the bot. Maximum 2 minutes / about 2,000 captured events.</p>
+        <p class="muted">Stop loads an editable sequence below. Maximum 2 minutes / 9,900 input events; dense mouse recordings may reach the event limit sooner.</p>
       </section>
       <section class="detail-header">
         <h2>Review & save macro</h2>
@@ -28,6 +29,8 @@
         <label>Name<input id="name" value="My recording" maxlength="80"></label>
         <div class="desktop-buttons"><button id="save">Save configuration</button><button id="duplicate-profile">Save a copy</button></div>
         <p id="sequence-summary">One manually configured click. You can replace it by recording.</p>
+        <label><input id="macro-visual" type="checkbox" disabled> Visual replay correction · verify the demonstrated scene and correct small drift</label>
+        <p id="macro-evidence" class="muted">Record a Macro to capture visual evidence. Uncheck visual correction for exact input replay.</p>
         <details id="editor"><summary>Edit sequence / create manually</summary>
           <label>Timing<select id="timing"><option value="recorded">Recorded timing</option><option value="interval" selected>Fixed interval after actions</option></select></label>
           <label>Fixed interval (ms)<input id="interval" type="number" min="100" max="60000" value="1000"></label>

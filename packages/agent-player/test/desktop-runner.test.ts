@@ -48,6 +48,17 @@ function setup(overrides: object = {}, policy?: DesktopPolicy) {
 }
 afterEach(() => vi.useRealTimers());
 describe("desktop bounded runner", () => {
+  it("keeps later recorded deadlines after a slow dispatch instead of accumulating its lateness", async () => {
+    vi.useFakeTimers();
+    const { runner, session } = setup({ playback: "recorded", loop: { mode: "once" }, maxActions: 10, actions: [
+      { kind: "key-down", key: "KeyW", delayBeforeMs: 0 }, { kind: "key-down", key: "KeyD", delayBeforeMs: 20 },
+      { kind: "key-up", key: "KeyD", delayBeforeMs: 80 }, { kind: "key-up", key: "KeyW", delayBeforeMs: 100 }
+    ] });
+    const execute = session.execute.bind(session); let calls = 0;
+    session.execute = async (...args) => { await execute(...args); if (calls++ === 0) await new Promise(resolve => setTimeout(resolve, 35)); };
+    const task = runner.start(); await vi.runAllTimersAsync(); await task;
+    expect(session.dispatchTimes.map(t => t - session.dispatchTimes[0]!)).toEqual([0, 35, 100, 200]);
+  });
   it("pauses for local teaching with no dispatch and checkpoints after releasing input", async () => {
     vi.useFakeTimers(); const policy: DesktopPolicy = { local: true, boundedBatch: true, decide: vi.fn().mockResolvedValue({ type: "pause", reason: "Unknown state: teach" }), verify: vi.fn(), checkpoint: vi.fn(), close: vi.fn() };
     const { runner, session } = setup({ mode: "local" }, policy); const task = runner.start(); await vi.advanceTimersByTimeAsync(400);

@@ -2,8 +2,8 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DesktopHotkeysSchema, RecordingOptionsSchema, type DesktopHotkeys, type DesktopRecorder, type RecordingState } from "@game-bots/environment-sdk";
-import { DesktopRunRequestSchema, recordingToProfile, type DesktopProfile } from "@game-bots/game-sdk";
-import type { DesktopRunState } from "@game-bots/agent-player";
+import { DesktopRunRequestSchema, recordingToProfile, type DesktopProfile, type MacroFrame } from "@game-bots/game-sdk";
+import { macroFeatures, strengthenMacroFrames, type DesktopRunState } from "@game-bots/agent-player";
 import { WindowsDesktopSession } from "@game-bots/environment-windows";
 import { DesktopTeachingManager } from "./desktop-teaching-manager.js";
 import { DesktopLocalManager } from "./desktop-local-manager.js";
@@ -26,6 +26,8 @@ export class DesktopRecordingManager {
   private generation = 0;
   private convertedGeneration = -1;
   private teachingGeneration = -1;
+  private macroFrames: MacroFrame[] = [];
+  private macroBytes = 0;
   readonly teaching: DesktopTeachingManager;
   constructor(private readonly root: string, private readonly bots: BotControls, private readonly createRecorder: () => DesktopRecorder = () => new WindowsDesktopSession(), teaching?: DesktopTeachingManager) { this.teaching = teaching ?? new DesktopTeachingManager(root); }
   private serial<T>(operation: () => Promise<T>, recover = true): Promise<T> {
@@ -47,7 +49,10 @@ export class DesktopRecordingManager {
       return result;
     });
   }
-  snapshot() { return { recording: this.nativeState, draft: this.draft, draftId: this.convertedGeneration, error: this.error, botArmed: this.armedBot !== null, armedProfileName: this.armedBot?.profile.name ?? null, teaching: this.teaching.snapshot() }; }
+  snapshot(knownDraft?: number) {
+    const { events: _events, ...recording } = this.nativeState ?? {};
+    return { recording: this.nativeState ? recording : null, draft: knownDraft === this.convertedGeneration ? null : this.draft, draftId: this.convertedGeneration, error: this.error, botArmed: this.armedBot !== null, armedProfileName: this.armedBot?.profile.name ?? null, teaching: this.teaching.snapshot() };
+  }
   async localOperation(raw: unknown) {
     return this.serial(async () => {
       if (activeRecording(this.nativeState) || this.botActive() || this.armedBot || this.teaching.busy) throw new Error("Stop/disarm the bot and finish recording/analysis before editing local learning");
@@ -92,8 +97,10 @@ export class DesktopRecordingManager {
       if (!["button", "delay", "hotkey"].includes(String(startMethod))) throw new Error("Choose a recording start method");
       const options = RecordingOptionsSchema.parse(input);
       options.visualTeaching = teaching !== undefined;
+      options.macroVisual = teaching === undefined;
       if (startMethod === "button") options.delayMs = 0;
       const recorder = await this.service(); this.error = null; this.draft = null; this.generation++;
+      this.macroFrames = []; this.macroBytes = 0;
       if (teaching !== undefined) { await this.teaching.begin(teaching, options.target); this.teachingGeneration = this.generation; }
       try {
         this.nativeState = await recorder.recordingCommand("prepare", options);
@@ -108,8 +115,8 @@ export class DesktopRecordingManager {
       if (action === "stop" && !activeRecording(this.nativeState)) return this.snapshot();
       const recorder = await this.service(); this.nativeState = await recorder.recordingCommand(action);
       if (action === "discard") { this.teaching.discard(); this.draft = null; this.error = null; this.generation++; this.convertedGeneration = this.generation; }
-      else if (action === "stop") { await this.teaching.finish(recorder, this.nativeState); this.convert(this.nativeState); }
-      else await this.teaching.drain(recorder);
+      else if (action === "stop") { await this.drain(recorder); await this.teaching.finish(recorder, this.nativeState); this.convert(this.nativeState); }
+      else await this.drain(recorder);
       return this.snapshot();
     }, false);
   }
@@ -117,8 +124,29 @@ export class DesktopRecordingManager {
     if (!state.events || this.convertedGeneration === this.generation) return;
     this.convertedGeneration = this.generation;
     if (this.teachingGeneration === this.generation) { this.draft = null; return; }
-    try { this.draft = recordingToProfile(state.events); this.error = null; }
+    try {
+      this.draft = recordingToProfile(state.events);
+      if (state.target) {
+        this.macroFrames.sort((a, b) => a.atMs - b.atMs); strengthenMacroFrames(this.macroFrames);
+        this.draft.macro = { version: 1, source: state.events, frames: this.macroFrames,
+          visualCorrection: state.events.some(e => e.action.kind === "relative-move" || e.action.kind === "key-down" && /^(Key[WASD]|Arrow)/.test(e.action.key)),
+          width: state.target.bounds.width, height: state.target.bounds.height };
+      }
+      this.error = null;
+    }
     catch (error) { this.draft = null; this.error = error instanceof Error ? error.message : String(error); }
+  }
+  private async drain(recorder: DesktopRecorder): Promise<void> {
+    if (this.teachingGeneration === this.generation) { await this.teaching.drain(recorder); return; }
+    if (!recorder.recordingFrames) return;
+    for (const frame of await recorder.recordingFrames()) {
+      const previous = this.macroFrames.at(-1);
+      if (previous?.sha256 === frame.sha256 && previous.eventCount === frame.eventCount) continue;
+      if (this.macroFrames.length >= 160 || frame.png.length > 90000 || this.macroBytes + frame.png.length > 6 * 1024 * 1024) continue;
+      this.macroBytes += frame.png.length;
+      this.macroFrames.push({ atMs: frame.atMs, eventCount: frame.eventCount, neutral: !frame.heldKeys.length && !frame.heldButtons.length,
+        features: macroFeatures(frame.png), image: frame.png.toString("base64"), sha256: frame.sha256 });
+    }
   }
   private validateReserved(profile: DesktopProfile, keys: DesktopHotkeys): void {
     const reserved = new Set<string>(Object.values(keys));
@@ -162,10 +190,10 @@ export class DesktopRecordingManager {
     if (!this.recorder || this.closed) return;
     try {
       const state = await this.recorder.recordingState(); this.nativeState = state;
-      await this.teaching.drain(this.recorder);
+      await this.drain(this.recorder);
       if (this.generation > 0 && ["stopped", "failed"].includes(state.status) && this.convertedGeneration !== this.generation) {
         const completed = await this.recorder.recordingState(true);
-        state.commands.push(...completed.commands); await this.teaching.finish(this.recorder, completed); this.convert(completed);
+        state.commands.push(...completed.commands); await this.drain(this.recorder); await this.teaching.finish(this.recorder, completed); this.convert(completed);
       }
       if (state.commands.includes("emergency")) {
         void this.teaching.cancelAnalysis();

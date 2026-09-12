@@ -27,21 +27,21 @@ pnpm gui
 
 Moving focus to the GUI pauses capture, so its clicks are excluded. Focus changes, geometry changes and unsupported input pause recording with a reason. A disappeared, hidden, minimized or replaced target ends capture with an error; any captured prefix remains available for review. **Discard Recording** cancels capture and removes the draft, restoring the editor contents from before recording in the current tab. It does not delete an already saved configuration.
 
-Recordings are bounded to two minutes and approximately 2,000 events. The limit can end capture automatically. Empty recordings show an error instead of creating a playable profile. Drafts are in memory until saved; closing the server loses an unsaved draft.
+Macro recordings are bounded to two minutes and 9,900 input events plus cleanup. A high-rate mouse can reach the event budget sooner. Teaching retains its existing 2,000-event capture budget. Empty recordings show an error instead of creating a playable profile. Drafts are in memory until saved; closing the server loses an unsaved draft.
 
 ## What is captured
 
-The recorder captures supported keyboard down/up transitions, held keys, application chords, overlapping keys, mouse positions, left/right/middle button down/up, clicks, dragging, and whole vertical/horizontal wheel ticks. A click is represented by a position and button down/up; a drag is button down, sampled movement, then button up. This keeps mouse and keyboard holds independent.
+Macro captures supported keyboard down/up transitions, overlapping keys, pointer positions, relative camera deltas, left/right/middle button edges and holds, dragging, and vertical/horizontal wheel input including fractional ticks in Windows wheel units (1/120 tick). Clicks and drags retain their original input edges, independently of keyboard holds.
 
 Supported keyboard names match the existing controller: letters, digits, Space, Enter, Tab, Escape, Backspace, Delete, arrows, Home/End/PageUp/PageDown, Shift/Control/Alt, and function keys except reserved controls. Left/right modifier variants are combined. OS keyboard repeat is ignored: one physical hold produces one down/up pair. Injected events and the registered control keys are excluded. OS switching/closing shortcuts and unsupported keys pause capture instead of being saved as gameplay.
 
-Mouse movement is coalesced to roughly one sample every 50 ms, with the latest point flushed before keyboard/button/wheel transitions. Duplicate positions are omitted. Movement plus down/up edges preserves ordinary dragging without thousands of raw samples.
+Macro uses documented Windows Raw Input for mouse and keyboard on one message queue. Meaningful mouse packets are not coalesced. Absolute pointer events retain normalized cursor positions plus observed device deltas; relative events retain device dx/dy plus the observed pointer position. The original stream remains in `macro.source`, alongside editable actions. Teaching's existing low-level hook capture and coalescing remain unchanged.
 
-Capture uses Windows low-level input hooks on the helper's own message thread. They are installed only while recording, and only events whose foreground/point belongs to the selected target are retained. Nothing is injected into the target process. These are desktop hooks filtered to a window, not a private per-game input stream.
+Choose **Mouse capture** before recording. **Automatic** treats a hidden cursor or right-button hold as relative camera input; **Absolute pointer** preserves UI/right-button drags; **Relative camera** handles continuously captured motion. Automatic detection is a heuristic, not proof of a game's input mode. Captured input is filtered to the visible, focused target. Device-less injected packets and control shortcuts are excluded. No code runs inside the target process.
 
 ## Timing and coordinates
 
-The existing version-1 profile `actions` array now accepts `delayBeforeMs` and `enabled`. `playback: "recorded"` schedules these gaps on a monotonic timeline. For example:
+The existing version-1 profile `actions` array accepts fractional `delayBeforeMs` and `enabled`. New Macro recordings preserve fractional monotonic receipt timestamps; these are not hardware timestamps. Native primitive playback schedules `playbackStart + atMs`, without a per-event IPC round trip or a mandatory 10 ms delay. Modest lateness does not shift later deadlines; more than 100 ms lateness stops playback before an overdue burst. Native sleeps use a scoped 1 ms timer period without busy spinning. Edited blocking actions retain the existing controller path. For example:
 
 ```json
 [
@@ -63,7 +63,19 @@ Open **Edit sequence / create manually**. Events are paged in groups of 25. You 
 
 For down events with a matching enabled release, **Hold until matching release (ms)** adjusts the release event's preceding delay. It refuses to move the release across intervening events; edit those delays or reorder explicitly when needed. An inserted Wait adds its own duration. **Recorded timing** honors recorded gaps; **Fixed interval after actions** ignores recorded gaps and uses the manual interval setting.
 
-**Save configuration** replaces a configuration with the same name. **Save a copy** creates a distinct name. Load either through **Saved configuration**. Files remain in `data/desktop-profiles/`, and bundled examples remain in `profiles/desktop/`. Manual creation, screenshot point picking and reusable behaviors remain available. Behaviors keep their existing 32-action limit; recorded gaps become bounded waits when saving a behavior. Save longer recordings as configurations (up to 4,096 events after editing).
+**Save configuration** replaces a configuration with the same name. **Save a copy** creates a distinct name. Load either through **Saved configuration**. Files remain in `data/desktop-profiles/`, and bundled examples remain in `profiles/desktop/`. Manual creation, screenshot point picking and reusable behaviors remain available. Behaviors keep their existing 32-action limit; recorded gaps become bounded waits when saving a behavior. Configurations support up to 10,000 events. Existing version-1 configurations still load; lost historical mouse deltas cannot be reconstructed.
+
+## Visual replay correction inside Macro
+
+Normal recording also captures bounded visual evidence automatically. Movement keys or relative camera input enable **Visual replay correction** in the draft; simple UI recordings default to input replay. Uncheck it for exact input replay. No additional Macro mode or model/API is involved. If you edit the input timeline, disable correction or record again: old screenshots must not silently verify changed actions.
+
+For visual replay, begin from approximately the recorded view and finish the recording with all keys/buttons released and a brief quiet interval. Start-state verification runs before gameplay input. Playback compares persistent scene patches, image translation/scale, and human A-to-B versus bot A'-to-B' displacement. Missing or independently moving patches are excluded from scene consensus, so disappearance of a collectible or another player does not by itself mean a wrong location. Textureless scenes, repeated textures and large changes can still be ambiguous and stop the Macro.
+
+Visual processing and corrections occur only at recorded neutral boundaries. Held movement/camera segments keep their native master timeline. Inspection time extends neutral intervals; disable correction when wall-clock timing across those intervals is essential. Periodic active-input screenshots help estimate stable geometry and isolated demonstrated input responses, but do not trigger corrections while keys/buttons are held.
+
+Corrections require a reliable demonstrated response: camera changes are limited to 40 counts and 30% of an isolated example per attempt; movement additions to 120 ms and 25% of a demonstrated interval. Movement overshoot does not invent reverse navigation. At most two attempts per checkpoint and eight per loop are permitted; insufficient improvement or reversal stops correction. Start alignment uses camera evidence only. Every input retains native safety checks and cleanup. Visual resume requires nearby matching recorded evidence; otherwise restart from the demonstrated state. Exact replay retains overlapping held-state restoration on resume.
+
+Images are at most 320 pixels on their longest side, with up to 160 samples, 96 corner patches per sample and bounded report history. See [Macro upgrade implementation and validation](macro-upgrade.md) for storage limits, measurements, limitations and test artifacts.
 
 ## Start playback separately
 

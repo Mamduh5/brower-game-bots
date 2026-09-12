@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 
-class DesktopBridge {
+partial class DesktopBridge {
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct Mouse { public int dx, dy; public uint data, flags, time; public UIntPtr extra; }
@@ -54,6 +54,7 @@ class DesktopBridge {
     static bool Armed, Bound, Emergency;
     static volatile bool Closing;
     static Process Parent;
+    static Process TargetOwner;
     static Mutex Lease;
     static EventWaitHandle ShutdownRequested;
 
@@ -73,7 +74,7 @@ class DesktopBridge {
             while ((line = Console.ReadLine()) != null) {
                 int id = 0;
                 try {
-                    if (line.Length > 100000) throw new Exception("Command too large");
+                    if (line.Length > 2000000) throw new Exception("Command too large");
                     var cmd = Json.Deserialize<Dictionary<string, object>>(line);
                     id = Convert.ToInt32(cmd["id"]);
                     object result;
@@ -86,11 +87,14 @@ class DesktopBridge {
                 }
             }
         } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
-        finally { Closing = true; lock (Gate) { Disarm("Helper closed"); } DesktopRecorder.Shutdown(); if (Lease != null) { Lease.ReleaseMutex(); Lease.Dispose(); } }
+        finally { Closing = true; lock (Gate) { Disarm("Helper closed"); } DesktopRecorder.Shutdown(); if (Lease != null) { Lease.ReleaseMutex(); Lease.Dispose(); } if (TargetOwner != null) TargetOwner.Dispose(); }
     }
     static object Dispatch(Dictionary<string, object> c) {
         string op = (string)c["op"];
         if (op == "heartbeat") { Beat = Clock.ElapsedMilliseconds; return true; }
+        if (op == "timeline-start") return StartTimeline(c);
+        if (op == "timeline-state") return TimelineState();
+        if (op == "timeline-cancel") { CancelTimeline("Timeline cancelled"); Release(); return TimelineState(); }
         if (op.StartsWith("recorder-")) return DesktopRecorder.Command(c);
         if (op == "list") {
             var windows = new List<object>();
@@ -104,6 +108,9 @@ class DesktopBridge {
             if (Bound) throw new Exception("Session already bound");
             var t = (Dictionary<string, object>)c["target"];
             Target = new IntPtr(long.Parse((string)t["handle"])); TargetPid = Convert.ToInt32(t["pid"]); TargetStart = (string)t["processStartedAt"];
+            if (TargetOwner != null) TargetOwner.Dispose();
+            TargetOwner = Process.GetProcessById(TargetPid); var identityHandle = TargetOwner.Handle;
+            if (TargetOwner.StartTime.ToUniversalTime().Ticks.ToString() != TargetStart) throw new Exception("Target identity changed");
             int limit = Convert.ToInt32(c["maxDurationMs"]);
             if (limit < 1000 || limit > 86400000) throw new Exception("Invalid native deadline");
             MaxHoldMs = c.ContainsKey("maxHoldMs") ? Convert.ToInt32(c["maxHoldMs"]) : 5500;
@@ -117,7 +124,7 @@ class DesktopBridge {
             return true;
         }
         if (op == "health") return new { armed = Armed, reason = Reason, heldKeys = new List<string>(Keys), heldButtons = new List<string>(Buttons) };
-        if (op == "release") { Release(); return true; }
+        if (op == "release") { CancelTimeline("Input released"); Release(); return true; }
         if (op == "pause") { Disarm("Paused"); return true; }
         if (op == "close") { Disarm("Stopped"); Closing = true; return true; }
         CheckIdentity();
@@ -130,7 +137,7 @@ class DesktopBridge {
             for (int vk = 1; vk < 256; vk++) if ((GetAsyncKeyState(vk) & 0x8000) != 0) throw new Exception("Release physical keys/buttons before resuming");
             Geometry = GeometryOf(); Armed = true; Reason = null; Beat = Clock.ElapsedMilliseconds; return true;
         }
-        if (op == "observe") {
+        if (op == "observe" || op == "observe-macro") {
             CheckForeground();
             string geometry = GeometryOf();
             var w = Window(Target); var b = (Dictionary<string, object>)w["bounds"];
@@ -139,15 +146,22 @@ class DesktopBridge {
             byte[] bytes;
             using (var bitmap = new Bitmap(width, height)) {
                 using (var graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(x, y, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
-                using (var stream = new MemoryStream()) { bitmap.Save(stream, ImageFormat.Png); bytes = stream.ToArray(); }
+                using (var stream = new MemoryStream()) {
+                    if (op == "observe-macro") {
+                        double scale = Math.Min(1, 320.0 / Math.Max(width, height));
+                        using (var small = new Bitmap(bitmap, new Size(Math.Max(1, (int)(width * scale)), Math.Max(1, (int)(height * scale))))) small.Save(stream, ImageFormat.Png);
+                    } else bitmap.Save(stream, ImageFormat.Png);
+                    bytes = stream.ToArray();
+                }
             }
             CheckForeground(); if (geometry != GeometryOf()) throw new Exception("Window moved during capture");
             return new { window = w, geometry = geometry, png = Convert.ToBase64String(bytes), capturedAt = DateTime.UtcNow.ToString("o") };
         }
         if (op != "input") throw new Exception("Unknown operation");
+        if (TimelineRunning && Thread.CurrentThread != TimelineThread) throw new Exception("A timeline owns input");
         CheckActive();
         if ((string)c["geometry"] != GeometryOf()) throw new Exception("Stale observation geometry");
-        if (Clock.ElapsedMilliseconds - LastInput < 5) throw new Exception("Native input rate exceeded");
+        if (Thread.CurrentThread != TimelineThread && Clock.ElapsedMilliseconds - LastInput < 5) throw new Exception("Native input rate exceeded");
         LastInput = Clock.ElapsedMilliseconds;
         string kind = (string)c["kind"];
         if (kind == "move") {
@@ -155,10 +169,10 @@ class DesktopBridge {
         } else if (kind == "relative-move") {
             CheckPointer(); int dx = Convert.ToInt32(c["dx"]), dy = Convert.ToInt32(c["dy"]);
             if (Math.Abs(dx) > 1000 || Math.Abs(dy) > 1000) throw new Exception("Relative motion exceeds limit");
-            MouseInput(1, dx, dy, 0);
+            MouseInput(0x2001, dx, dy, 0);
         } else if (kind == "scroll") {
-            CheckPointer(); int ticks = Convert.ToInt32(c["ticks"]); if (Math.Abs(ticks) > 20) throw new Exception("Scroll exceeds limit");
-            MouseInput((string)c["axis"] == "horizontal" ? 0x1000u : 0x800u, 0, 0, unchecked((uint)(ticks * 120)));
+            CheckPointer(); double ticks = Convert.ToDouble(c["ticks"]); if (double.IsNaN(ticks) || Math.Abs(ticks) > 20 || Math.Abs(ticks * 120 - Math.Round(ticks * 120)) > 0.000001) throw new Exception("Scroll exceeds limit");
+            MouseInput((string)c["axis"] == "horizontal" ? 0x1000u : 0x800u, 0, 0, unchecked((uint)(int)Math.Round(ticks * 120)));
         } else if (kind == "key-down" || kind == "key-up") {
             string key = (string)c["key"]; KeyCode(key);
             if (kind == "key-down") {
@@ -185,13 +199,15 @@ class DesktopBridge {
         }
     }
     static string GeometryOf() {
-        var w = Window(Target); var b = (Dictionary<string, object>)w["bounds"];
-        return b["x"] + ":" + b["y"] + ":" + b["width"] + ":" + b["height"] + ":" + w["dpi"];
+        Rect r; Point p = new Point();
+        if (!GetClientRect(Target, out r) || !ClientToScreen(Target, ref p) || r.Right <= 0 || r.Bottom <= 0) throw new Exception("Target geometry unavailable");
+        return p.X + ":" + p.Y + ":" + r.Right + ":" + r.Bottom + ":" + GetDpiForWindow(Target);
     }
     static void CheckIdentity() {
         if (!IsWindow(Target) || !IsWindowVisible(Target) || IsIconic(Target)) throw new Exception("Target window lost, hidden, or minimized");
-        var w = Window(Target);
-        if ((int)w["pid"] != TargetPid || (string)w["processStartedAt"] != TargetStart) throw new Exception("Target identity changed");
+        uint pid; GetWindowThreadProcessId(Target, out pid);
+        // Retained process handle detects exit/PID reuse without repeatedly opening a process or reading StartTime.
+        if (pid != TargetPid || TargetOwner == null || TargetOwner.HasExited) throw new Exception("Target identity changed");
     }
     static void CheckForeground() {
         CheckIdentity();
@@ -211,13 +227,14 @@ class DesktopBridge {
     }
     static void CheckPointer() {
         Point p; if (!GetCursorPos(out p)) throw new Exception("Cursor unavailable");
-        var b = (Dictionary<string, object>)Window(Target)["bounds"];
-        if (p.X < (int)b["x"] || p.X >= (int)b["x"] + (int)b["width"] || p.Y < (int)b["y"] || p.Y >= (int)b["y"] + (int)b["height"] || GetAncestor(WindowFromPoint(p), 2) != Target) throw new Exception("Pointer is outside target or target point is occluded");
+        Rect r; Point origin = new Point();
+        if (!GetClientRect(Target, out r) || !ClientToScreen(Target, ref origin) || p.X < origin.X || p.X >= origin.X + r.Right || p.Y < origin.Y || p.Y >= origin.Y + r.Bottom || GetAncestor(WindowFromPoint(p), 2) != Target) throw new Exception("Pointer is outside target or target point is occluded");
     }
     static void Move(double x, double y) {
         if (double.IsNaN(x) || double.IsNaN(y) || x < 0 || x > 1 || y < 0 || y > 1) throw new Exception("Invalid client coordinate");
-        var b = (Dictionary<string, object>)Window(Target)["bounds"];
-        int sx = (int)b["x"] + (int)Math.Round(x * ((int)b["width"] - 1)), sy = (int)b["y"] + (int)Math.Round(y * ((int)b["height"] - 1));
+        Rect bounds; Point origin = new Point();
+        if (!GetClientRect(Target, out bounds) || !ClientToScreen(Target, ref origin)) throw new Exception("Target geometry unavailable");
+        int sx = origin.X + (int)Math.Round(x * (bounds.Right - 1)), sy = origin.Y + (int)Math.Round(y * (bounds.Bottom - 1));
         int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77), vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
         if (sx < vx || sy < vy || sx >= vx + vw || sy >= vy + vh) throw new Exception("Target coordinate is off screen");
         Point p = new Point { X = sx, Y = sy };
@@ -254,7 +271,7 @@ class DesktopBridge {
         foreach (string b in new List<string>(Buttons)) try { MouseInput(ButtonFlag(b, true), 0, 0, 0); Buttons.Remove(b); } catch (Exception e) { errors.Add(e.Message); }
         if (errors.Count > 0) Reason = "Input release failed; will retry: " + string.Join("; ", errors);
     }
-    static void Disarm(string reason) { Armed = false; Reason = reason; Release(); }
+    static void Disarm(string reason) { CancelTimeline(reason); Armed = false; Reason = reason; Release(); }
     static void Watch() {
         while (!Closing) {
             Thread.Sleep(20);

@@ -11,7 +11,7 @@ export const DesktopActionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("button-down"), button: DesktopButtonSchema }).strict(),
   z.object({ kind: z.literal("button-up"), button: DesktopButtonSchema }).strict(),
   z.object({ kind: z.literal("drag"), from: DesktopPointSchema, to: DesktopPointSchema, button: DesktopButtonSchema, durationMs: duration.default(300) }).strict(),
-  z.object({ kind: z.literal("scroll"), ticks: z.number().int().min(-20).max(20), axis: z.enum(["vertical", "horizontal"]).default("vertical") }).strict(),
+  z.object({ kind: z.literal("scroll"), ticks: z.number().min(-20).max(20).refine(v => Math.abs(v * 120 - Math.round(v * 120)) < 1e-6, "Wheel ticks must represent whole Windows wheel units"), axis: z.enum(["vertical", "horizontal"]).default("vertical") }).strict(),
   z.object({ kind: z.literal("key-down"), key: DesktopKeySchema }).strict(),
   z.object({ kind: z.literal("key-up"), key: DesktopKeySchema }).strict(),
   z.object({ kind: z.literal("hold"), keys: z.array(DesktopKeySchema).max(8).default([]), buttons: z.array(DesktopButtonSchema).max(3).default([]), durationMs: duration }).strict(),
@@ -36,12 +36,21 @@ export interface DesktopObservation {
   sha256: string;
 }
 export interface DesktopHealth { armed: boolean; reason: string | null; heldKeys: string[]; heldButtons: string[] }
+export interface TimelineEvent { atMs: number; action: DesktopAction }
+export interface TimelineTelemetry {
+  completed: number; positionMs: number; maxLatenessMs: number; meanLatenessMs: number; error: string | null;
+  samples: { index: number; recordedMs: number; scheduledMs: number; dispatchedMs: number; latenessMs: number }[];
+}
 export interface DesktopSession {
   listWindows(): Promise<DesktopWindow[]>;
   bind(target: DesktopWindow, maxDurationMs: number, maxHoldMs?: number): Promise<void>;
   focus(): Promise<void>;
   observe(): Promise<DesktopObservation>;
+  /** Same bounded raster pipeline as recorded Macro evidence. */
+  observeMacro?(): Promise<DesktopObservation>;
   execute(action: DesktopAction, geometry: string, signal: AbortSignal): Promise<void>;
+  /** Native monotonic replay. Returns the dispatched prefix even after interruption. */
+  executeTimeline?(events: readonly TimelineEvent[], geometry: string, signal: AbortSignal, progress?: (value: TimelineTelemetry) => void): Promise<TimelineTelemetry>;
   health(): Promise<DesktopHealth>;
   pause(): Promise<void>;
   resume(): Promise<void>;

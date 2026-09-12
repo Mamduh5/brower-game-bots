@@ -134,7 +134,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     try {
       const action = requestUrl.pathname.slice("/api/desktop/".length);
       if (request.method === "GET" && action === "windows") sendJson(response, 200, { windows: await desktopManager.windows() });
-      else if (request.method === "GET" && action === "state") sendJson(response, 200, { run: desktopManager.state() });
+      else if (request.method === "GET" && action === "state") {
+        const run = desktopManager.state();
+        if (run?.profile.macro) { const { macro: _evidence, ...profile } = run.profile; sendJson(response, 200, { run: { ...run, profile } }); }
+        else sendJson(response, 200, { run });
+      }
       else if (request.method === "GET" && action === "profiles") sendJson(response, 200, { profiles: await desktopManager.profiles() });
       else if (request.method === "GET" && action === "teaching/behaviors") sendJson(response, 200, await recordingManager.behaviors());
       else if (request.method === "POST" && action === "local") sendJson(response, 200, await recordingManager.localOperation(await readRequestJson(request)));
@@ -152,7 +156,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       }
       else if (request.method === "POST" && action === "preview") sendJson(response, 200, await desktopManager.preview(await readRequestJson(request)));
       else if (request.method === "POST" && (action === "pause" || action === "resume" || action === "stop")) sendJson(response, 200, await recordingManager.botControl(action));
-      else if (request.method === "GET" && action === "recording/state") sendJson(response, 200, recordingManager.snapshot());
+      else if (request.method === "GET" && action === "recording/state") sendJson(response, 200, recordingManager.snapshot(requestUrl.searchParams.has("knownDraft") ? Number(requestUrl.searchParams.get("knownDraft")) : undefined));
       else if (request.method === "GET" && action === "recording/settings") sendJson(response, 200, await recordingManager.settings());
       else if (request.method === "POST" && action === "recording/settings") sendJson(response, 200, await recordingManager.saveSettings(await readRequestJson(request)));
       else if (request.method === "POST" && action === "recording/start") sendJson(response, 201, await recordingManager.record(await readRequestJson(request)));
@@ -325,7 +329,7 @@ async function readRequestJson(request: IncomingMessage): Promise<Record<string,
   let size = 0;
   for await (const chunk of request) {
     size += Buffer.byteLength(chunk);
-    if (size > (request.url?.startsWith("/api/desktop/") ? 2097152 : 262144)) throw new Error("Request body exceeds the allowed size");
+    if (size > (request.url?.startsWith("/api/desktop/") ? 24 * 1024 * 1024 : 262144)) throw new Error("Request body exceeds the allowed size");
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
   if (chunks.length === 0) {
